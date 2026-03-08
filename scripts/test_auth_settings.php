@@ -192,6 +192,34 @@ function assert_settings_forms_bound(string $html): void
     assert_true($xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " js-panel-feedback ")]')->length === 0, 'Settings page should not render panel-level feedback alerts.');
 }
 
+function assert_settings_ajax_script_valid(string $html): void
+{
+    assert_true(
+        str_contains($html, "document.addEventListener('submit'"),
+        'Settings page should render the AJAX submit interceptor.'
+    );
+    assert_true(
+        str_contains($html, "split(String.fromCharCode(92)).pop().split('/').pop();"),
+        'Settings page should render a valid custom-file label script.'
+    );
+    assert_true(
+        !str_contains($html, "split('\\').pop();"),
+        'Settings page must not render broken custom-file JavaScript.'
+    );
+    assert_true(
+        str_contains($html, "applyPlayerSnapshot(response.player)"),
+        'Settings page should restore the canonical player snapshot after AJAX saves.'
+    );
+    assert_true(
+        str_contains($html, "id=\"apiKeyModal\""),
+        'Settings page should render the API key regeneration modal.'
+    );
+    assert_true(
+        str_contains($html, "#confirmRegenerateApiKey"),
+        'Settings page should render the managed API key rotation flow.'
+    );
+}
+
 function assert_json_content_type(array $response, string $message): void
 {
     $contentType = strtolower((string) ($response['headers']['content-type'] ?? ''));
@@ -275,6 +303,19 @@ function find_listening_pid(int $port): ?int
     return null;
 }
 
+function set_test_user_plan(string $dbPath, string $username, string $planCode, ?string $premiumUntil): void
+{
+    $pdo = new PDO('sqlite:' . str_replace('\\', '/', $dbPath));
+    $stmt = $pdo->prepare('UPDATE users SET plan_code = :plan_code, premium_until = :premium_until, updated_at = :updated_at WHERE username = :username');
+    $stmt->execute([
+        ':plan_code' => $planCode,
+        ':premium_until' => $premiumUntil,
+        ':updated_at' => gmdate('Y-m-d H:i:s'),
+        ':username' => $username,
+    ]);
+    assert_true($stmt->rowCount() === 1, 'Unable to update the test user plan state.');
+}
+
 $root = dirname(__DIR__);
 $php = 'C:\\xampp\\php\\php.exe';
 $dbPath = getenv('VE_TEST_DB_PATH') ?: ($root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'test-suite.sqlite');
@@ -298,6 +339,7 @@ $env = array_merge($_ENV, [
     'VE_DB_DSN' => 'sqlite:' . str_replace('\\', '/', $dbPath),
     'VE_APP_KEY' => 'test-suite-app-key',
     'VE_CUSTOM_DOMAIN_TARGET' => '127.0.0.1',
+    'VE_DNS_STATIC_MAP' => 'active.example.test=127.0.0.1;wrong.example.test=203.0.113.10',
 ]);
 $expectedDomainTarget = $managedServer
     ? (string) ($env['VE_CUSTOM_DOMAIN_TARGET'] ?? '')
@@ -312,7 +354,7 @@ try {
 
             foreach ($env as $key => $value) {
                 if (str_starts_with((string) $key, 'VE_')) {
-                    $envPrefix .= 'set ' . $key . '=' . str_replace('"', '\"', (string) $value) . ' && ';
+                    $envPrefix .= 'set "' . $key . '=' . str_replace('"', '""', (string) $value) . '" && ';
                 }
             }
 
@@ -410,8 +452,10 @@ try {
     assert_true(!str_contains($settingsPage['body'], 'href="/premium"'), 'Settings page should not use the guest premium route.');
     assert_true(str_contains($settingsPage['body'], '/account/api-settings'), 'Settings page should expose the API policy form.');
     assert_true(str_contains($settingsPage['body'], 'data-api-status'), 'Settings page should render the API usage summary.');
+    assert_true(str_contains($settingsPage['body'], 'id="apiKeyModal"'), 'Settings page should render the API key rotation modal.');
     assert_settings_panel_structure($settingsPage['body']);
     assert_settings_forms_bound($settingsPage['body']);
+    assert_settings_ajax_script_valid($settingsPage['body']);
     $runtimeCsrf = extract_runtime_token($settingsPage['body']);
     $hiddenTokens = extract_hidden_tokens($settingsPage['body']);
     assert_true(count($hiddenTokens) >= 6, 'Every settings form should render a hidden CSRF token.');
@@ -422,6 +466,10 @@ try {
         preg_match('/name="op" value="(?:my_account|my_password|my_email|premium_settings|api_settings)">\s*[A-Fa-f0-9]{32}">/i', $settingsPage['body']) !== 1,
         'CSRF tokens must never leak as visible plaintext in the settings DOM.'
     );
+    $premiumPlansPage = $client->request('GET', '/premium-plans');
+    assert_true($premiumPlansPage['status'] === 200, 'Premium plans page should load.');
+    assert_true(str_contains($premiumPlansPage['body'], 'Choose the <strong>right</strong> plan for your account'), 'Premium plans page should render the premium hero content.');
+    assert_true(str_contains($premiumPlansPage['body'], 'Premium account includes'), 'Premium plans page should render the included feature list.');
     $csrf = extract_hidden_token($settingsPage['body']);
     $oldApiKey = extract_api_key($settingsPage['body']);
 
@@ -445,6 +493,19 @@ try {
     echo "account settings ok\n";
 
     create_test_png($logoPath);
+    $playerColourOnlyResponse = $client->request('POST', '/account/player', [
+        'form' => [
+            'token' => $csrf,
+            'logo_mode' => 'image',
+            'usr_player_colour' => '00aa11',
+        ],
+    ]);
+    assert_json_content_type($playerColourOnlyResponse, 'Saving gated player colour should still return JSON.');
+    $playerColourOnly = json_response($playerColourOnlyResponse);
+    assert_true(($playerColourOnly['status'] ?? null) === 'fail', 'Free accounts should not be able to save only the premium player colour.');
+    assert_true(str_contains(strtolower((string) ($playerColourOnly['message'] ?? '')), 'premium'), 'Premium-only colour rejection should explain the entitlement requirement.');
+    assert_true(($playerColourOnly['player']['player_colour'] ?? null) === 'ff9900', 'Rejected player colour saves should return the canonical persisted colour.');
+
     $playerSaveResponse = $client->request('POST', '/account/player', [
         'form' => [
             'token' => $csrf,
@@ -460,7 +521,29 @@ try {
     ]);
     assert_json_content_type($playerSaveResponse, 'Saving player settings should return JSON.');
     $playerSave = json_response($playerSaveResponse);
-    assert_true(($playerSave['status'] ?? null) === 'ok', 'Saving player settings should return success JSON.');
+    assert_true(($playerSave['status'] ?? null) === 'warning', 'Free accounts should receive a warning when gated player colour is bundled with allowed player changes.');
+    assert_true(($playerSave['player']['player_colour'] ?? null) === 'ff9900', 'Partial player updates must keep the previous premium-gated colour.');
+    assert_true(($playerSave['player']['embed_width'] ?? null) === 720, 'Allowed player settings should still persist during partial saves.');
+
+    $settingsAfterPartialPlayerSave = $client->request('GET', '/dashboard/settings');
+    assert_true(str_contains($settingsAfterPartialPlayerSave['body'], 'value="720"'), 'Partial player saves should keep the updated embed width.');
+    assert_true(str_contains($settingsAfterPartialPlayerSave['body'], 'value="405"'), 'Partial player saves should keep the updated embed height.');
+    assert_true(str_contains($settingsAfterPartialPlayerSave['body'], 'value="ff9900"'), 'Partial player saves should restore the persisted player colour in the rendered settings page.');
+
+    set_test_user_plan($dbPath, 'alice_case', 'premium', gmdate('Y-m-d H:i:s', time() + 86400 * 30));
+    $csrf = extract_hidden_token($settingsAfterPartialPlayerSave['body']);
+
+    $premiumPlayerSaveResponse = $client->request('POST', '/account/player', [
+        'form' => [
+            'token' => $csrf,
+            'logo_mode' => 'image',
+            'usr_player_colour' => '00aa11',
+        ],
+    ]);
+    assert_json_content_type($premiumPlayerSaveResponse, 'Premium player colour saves should return JSON.');
+    $premiumPlayerSave = json_response($premiumPlayerSaveResponse);
+    assert_true(($premiumPlayerSave['status'] ?? null) === 'ok', 'Premium accounts should be able to save the player colour.');
+    assert_true(($premiumPlayerSave['player']['player_colour'] ?? null) === '00aa11', 'Premium player colour saves should persist the chosen colour.');
     echo "player settings ok\n";
 
     $adsSaveResponse = $client->request('POST', '/account/advertising', [
@@ -508,10 +591,12 @@ try {
     assert_true(str_contains($settingsPage['body'], 'value="Bitcoin" selected="selected"'), 'Updated payment method should remain selected.');
     assert_true(str_contains($settingsPage['body'], 'value="720"'), 'Updated embed width should render.');
     assert_true(str_contains($settingsPage['body'], 'value="405"'), 'Updated embed height should render.');
+    assert_true(str_contains($settingsPage['body'], 'value="00aa11"'), 'Premium player colour should render after a successful premium save.');
     assert_true(str_contains($settingsPage['body'], 'https://ads.example.com/vast.xml'), 'Updated VAST URL should render.');
     assert_true(str_contains($settingsPage['body'], 'https://ads.example.com/popup.js'), 'Updated popup URL should render.');
     assert_settings_panel_structure($settingsPage['body']);
     assert_settings_forms_bound($settingsPage['body']);
+    assert_settings_ajax_script_valid($settingsPage['body']);
     $csrf = extract_hidden_token($settingsPage['body']);
 
     $apiRotateResponse = $client->request('POST', '/account/api-key/regenerate', [
@@ -663,16 +748,27 @@ try {
     assert_true($newKeyAllowed['status'] === 200, 'The regenerated API key should remain usable after policy updates.');
     echo "api usage ok\n";
 
+    $wrongDomainAdd = $client->request('POST', '/api/domains', [
+        'form' => [
+            'token' => $csrf,
+            'domain' => 'wrong.example.test',
+        ],
+    ]);
+    assert_json_content_type($wrongDomainAdd, 'Custom domain validation failures should return JSON.');
+    $wrongDomainPayload = json_response($wrongDomainAdd);
+    assert_true(($wrongDomainPayload['status'] ?? null) === 'fail', 'Domains that point to the wrong IP should be rejected.');
+    assert_true(str_contains(strtolower((string) ($wrongDomainPayload['message'] ?? '')), '203.0.113.10'), 'Wrong-IP domain errors should mention the currently resolved A record.');
+
     $domainAdd = json_response($client->request('POST', '/api/domains', [
         'form' => [
             'token' => $csrf,
-            'domain' => 'example.org',
+            'domain' => 'active.example.test',
         ],
     ]));
-    assert_true(($domainAdd['status'] ?? null) === 'ok', 'Custom domain add should succeed.');
+    assert_true(($domainAdd['status'] ?? null) === 'ok', 'Custom domain add should succeed once DNS points to the required target.');
     assert_true(count($domainAdd['domains'] ?? []) === 1, 'Custom domain list should contain the added domain.');
 
-    $domainDelete = json_response($client->request('DELETE', '/api/domains/example.org', [
+    $domainDelete = json_response($client->request('DELETE', '/api/domains/active.example.test', [
         'headers' => [
             'X-CSRF-Token' => $csrf,
         ],

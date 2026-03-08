@@ -1158,6 +1158,11 @@ function ve_dispatch(): void
         ve_video_stream_segment($matches[1], rawurldecode($matches[2]));
     }
 
+    if ($path === '/premium-plans' || $path === '/premium-plans.html') {
+        ve_require_auth();
+        ve_render_dashboard_file(VE_DASHBOARD_PAGES['premium-plans']);
+    }
+
     foreach (VE_LEGACY_DASHBOARD_ROUTES as $legacy => $target) {
         if ($path === '/' . $legacy || $path === '/' . $legacy . '.html') {
             ve_redirect('/dashboard/' . $target);

@@ -71,7 +71,7 @@ function ve_config(): array
 
     $config = [
         'db_dsn' => getenv('VE_DB_DSN') ?: 'sqlite:' . str_replace('\\', '/', ve_storage_path('video-engine.sqlite')),
-        'custom_domain_target' => getenv('VE_CUSTOM_DOMAIN_TARGET') ?: '208.73.202.233',
+        'custom_domain_target' => trim((string) (getenv('VE_CUSTOM_DOMAIN_TARGET') ?: '208.73.202.233')),
         'app_key_path' => ve_storage_path('app.key'),
     ];
 
@@ -1836,11 +1836,23 @@ function ve_save_player_settings(int $userId): void
         ve_fail_form_submission('Unable to load the current account.', '/dashboard/settings#player_settings', 404);
     }
 
-    $playerImageMode = trim((string) ($_POST['usr_player_image'] ?? ''));
-    $playerColour = ltrim(trim((string) ($_POST['usr_player_colour'] ?? 'ff9900')), '#');
-    $embedWidth = max(200, min(4000, (int) ($_POST['embedcode_width'] ?? 600)));
-    $embedHeight = max(200, min(4000, (int) ($_POST['embedcode_height'] ?? 480)));
     $settings = ve_get_user_settings($userId);
+    $currentPlayerImageMode = (string) ($settings['player_image_mode'] ?? '');
+    $currentPlayerColour = strtolower((string) ($settings['player_colour'] ?? 'ff9900'));
+    $currentEmbedWidth = (int) ($settings['embed_width'] ?? 600);
+    $currentEmbedHeight = (int) ($settings['embed_height'] ?? 480);
+    $playerImageMode = array_key_exists('usr_player_image', $_POST)
+        ? trim((string) $_POST['usr_player_image'])
+        : $currentPlayerImageMode;
+    $playerColour = array_key_exists('usr_player_colour', $_POST)
+        ? ltrim(trim((string) $_POST['usr_player_colour']), '#')
+        : $currentPlayerColour;
+    $embedWidth = array_key_exists('embedcode_width', $_POST)
+        ? max(200, min(4000, (int) $_POST['embedcode_width']))
+        : $currentEmbedWidth;
+    $embedHeight = array_key_exists('embedcode_height', $_POST)
+        ? max(200, min(4000, (int) $_POST['embedcode_height']))
+        : $currentEmbedHeight;
     $logoPath = (string) ($settings['logo_path'] ?? '');
     $splashImagePath = (string) ($settings['splash_image_path'] ?? '');
 
@@ -1860,9 +1872,12 @@ function ve_save_player_settings(int $userId): void
         $splashImagePath = ve_store_player_splash_upload($_FILES['splash_image'], $userId, $splashImagePath);
     }
 
-    $currentPlayerColour = strtolower((string) ($settings['player_colour'] ?? 'ff9900'));
-    $submittedShowEmbedTitle = isset($_POST['usr_embed_title']) ? 1 : 0;
-    $submittedAutoSubtitleStart = isset($_POST['usr_sub_auto_start']) ? 1 : 0;
+    $submittedShowEmbedTitle = array_key_exists('usr_embed_title', $_POST)
+        ? (isset($_POST['usr_embed_title']) ? 1 : 0)
+        : (int) ($settings['show_embed_title'] ?? 0);
+    $submittedAutoSubtitleStart = array_key_exists('usr_sub_auto_start', $_POST)
+        ? (isset($_POST['usr_sub_auto_start']) ? 1 : 0)
+        : (int) ($settings['auto_subtitle_start'] ?? 0);
     $playerColourChanged = strtolower($playerColour) !== $currentPlayerColour;
     $playerColourAllowed = ve_user_is_premium($user);
     $otherChangesDetected = $submittedShowEmbedTitle !== (int) ($settings['show_embed_title'] ?? 0)
