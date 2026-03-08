@@ -507,6 +507,7 @@ function ve_request_expects_json(): bool
 
     return $requestedWith === 'xmlhttprequest'
         || str_contains($accept, 'application/json')
+        || str_starts_with($path, '/account/')
         || str_starts_with($path, '/api/');
 }
 
@@ -2253,6 +2254,27 @@ function ve_html_set_select_value(string $html, string $name, string $value): st
     }, $html, 1);
 }
 
+function ve_html_append_class_attribute(string $attributes, string $className): string
+{
+    if (preg_match('/\bclass="([^"]*)"/i', $attributes, $matches) === 1) {
+        $classes = preg_split('/\s+/', trim((string) $matches[1])) ?: [];
+        $classes = array_values(array_filter($classes, static fn ($item): bool => is_string($item) && $item !== ''));
+
+        if (!in_array($className, $classes, true)) {
+            $classes[] = $className;
+        }
+
+        return (string) preg_replace(
+            '/\bclass="[^"]*"/i',
+            'class="' . ve_h(implode(' ', $classes)) . '"',
+            $attributes,
+            1
+        );
+    }
+
+    return rtrim($attributes) . ' class="' . ve_h($className) . '"';
+}
+
 function ve_settings_bind_form(string $html, string $op, string $action): string
 {
     $quotedOp = preg_quote($op, '/');
@@ -2261,10 +2283,12 @@ function ve_settings_bind_form(string $html, string $op, string $action): string
 
     return (string) preg_replace_callback($pattern, static function (array $matches) use ($action, $op, $token): string {
         $attributes = preg_replace('/\saction="[^"]*"/i', '', $matches[1]) ?? $matches[1];
+        $attributes = ve_html_append_class_attribute($attributes, 'js-settings-form');
 
         return '<form' . $attributes . ' action="' . ve_h($action) . '">' . "\n                        "
+            . '<input type="hidden" name="token" value="' . $token . '">' . "\n                        "
             . '<input type="hidden" name="op" value="' . ve_h($op) . '">' . "\n                        "
-            . '<input type="hidden" name="token" value="' . $token . '">' . "\n                        ";
+            . '<div class="settings-inline-feedback alert d-none js-form-feedback" role="alert"></div>' . "\n                        ";
     }, $html, 1);
 }
 
@@ -2277,8 +2301,9 @@ function ve_settings_bind_delete_account_form(string $html): string
         $attributes = $matches[1];
         $attributes = preg_replace('/\saction="[^"]*"/i', '', $attributes) ?? $attributes;
 
-        return '<form class="delete-account-form"' . $attributes . ' action="/account/delete">' . "\n                        "
-            . '<input type="hidden" name="token" value="' . $token . '">' . "\n                        ";
+        return '<form class="delete-account-form js-settings-form"' . $attributes . ' action="/account/delete">' . "\n                        "
+            . '<input type="hidden" name="token" value="' . $token . '">' . "\n                        "
+            . '<div class="settings-inline-feedback alert d-none js-form-feedback" role="alert"></div>' . "\n                        ";
     }, $html, 1);
 }
 

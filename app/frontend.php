@@ -266,6 +266,7 @@ function ve_not_found(): void
 
 require __DIR__ . '/backend.php';
 require __DIR__ . '/video.php';
+require __DIR__ . '/remote_upload.php';
 
 function ve_dashboard_stats(): array
 {
@@ -764,13 +765,7 @@ function ve_handle_op(string $op, string $path): bool
             ]);
 
         case 'remote_upload_json':
-            ve_json([
-                'list' => [],
-                'bli' => 0,
-                'folders_tree' => [],
-                'slo' => 0,
-                'max' => 0,
-            ]);
+            ve_handle_remote_upload_json();
 
         case 'upload_get_srv':
             ve_json([
