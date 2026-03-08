@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'active',
+    plan_code TEXT NOT NULL DEFAULT 'free',
+    premium_until TEXT DEFAULT NULL,
     api_key_encrypted TEXT NOT NULL,
     api_key_hash TEXT NOT NULL,
     api_key_last_rotated_at TEXT DEFAULT NULL,
@@ -128,13 +130,27 @@ CREATE TABLE IF NOT EXISTS ftp_servers (
     status TEXT NOT NULL DEFAULT 'online'
 );
 
+CREATE TABLE IF NOT EXISTS video_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    parent_id INTEGER NOT NULL DEFAULT 0,
+    public_code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT DEFAULT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS videos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
+    folder_id INTEGER NOT NULL DEFAULT 0,
     public_id TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
     original_filename TEXT NOT NULL,
     source_extension TEXT NOT NULL,
+    is_public INTEGER NOT NULL DEFAULT 1,
     status TEXT NOT NULL DEFAULT 'queued',
     status_message TEXT NOT NULL DEFAULT '',
     duration_seconds REAL DEFAULT NULL,
@@ -184,7 +200,10 @@ CREATE TABLE IF NOT EXISTS remote_uploads (
     FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE SET NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_video_folders_user_parent_name ON video_folders(user_id, parent_id, name);
+CREATE INDEX IF NOT EXISTS idx_video_folders_user_parent_created ON video_folders(user_id, parent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_videos_user_created ON videos(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_videos_user_folder_created ON videos(user_id, folder_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_videos_status_created ON videos(status, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_remote_uploads_user_created ON remote_uploads(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_remote_uploads_status_created ON remote_uploads(status, created_at ASC);

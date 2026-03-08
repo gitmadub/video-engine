@@ -79,12 +79,163 @@
             margin-bottom: 0;
             white-space: pre-wrap;
         }
+
+        .api-key-modal .modal-dialog {
+            max-width: 560px;
+        }
+
+        .api-key-modal .modal-content {
+            background: linear-gradient(180deg, #1f1f1f 0%, #171717 100%);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            box-shadow: 0 24px 55px rgba(0, 0, 0, 0.34);
+        }
+
+        .api-key-modal .close {
+            color: #fff;
+            opacity: .7;
+            text-shadow: none;
+        }
+
+        .api-key-modal__icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, rgba(255, 153, 0, 0.24) 0%, rgba(255, 153, 0, 0.08) 100%);
+            color: #ff9900;
+            font-size: 1.6rem;
+            margin-bottom: 18px;
+        }
+
+        .api-key-modal__eyebrow {
+            display: inline-block;
+            color: #ff9900;
+            font-size: 12px;
+            letter-spacing: .18em;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .api-key-modal__subtitle {
+            color: #8f8f8f;
+            margin-bottom: 22px;
+        }
+
+        .api-key-modal__field {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .api-key-modal__field .form-control {
+            flex: 1 1 260px;
+        }
+
+        .api-key-modal__meta {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 18px;
+        }
+
+        .api-key-modal__meta-item {
+            padding: 14px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .api-key-modal__meta-item span {
+            display: block;
+            color: #7f7f7f;
+            font-size: .7857142857rem;
+            margin-bottom: 6px;
+        }
+
+        .api-key-modal__meta-item strong {
+            color: #fff;
+        }
+
+        .api-key-modal__actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 24px;
+        }
+
+        @media (max-width: 575.98px) {
+            .api-key-modal__meta {
+                grid-template-columns: 1fr;
+            }
+
+            .api-key-modal__actions .btn {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="modal fade" id="notifications" tabindex="-1" role="dialog" aria-labelledby="notificationsLabel" aria-hidden="true">
         <div class="modal-dialog" role="document">
             <div class="modal-content"></div>
+        </div>
+    </div>
+
+    <div class="modal fade api-key-modal" id="apiKeyModal" tabindex="-1" role="dialog" aria-labelledby="apiKeyModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content">
+                <div class="modal-body p-4 p-sm-5">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                    <div class="api-key-modal__icon">
+                        <i class="fad fa-key"></i>
+                    </div>
+                    <span class="api-key-modal__eyebrow">API access</span>
+                    <h4 id="apiKeyModalLabel" class="mb-3">Generate a new API key</h4>
+                    <p class="api-key-modal__subtitle">Rotating the key immediately revokes the previous secret for all integrations. Copy the new key and update every client before closing this modal.</p>
+
+                    <div class="alert alert-warning mb-3">
+                        The previous API key stops working as soon as the new one is generated.
+                    </div>
+
+                    <div class="settings-inline-feedback alert d-none js-api-key-modal-feedback" role="alert"></div>
+
+                    <div class="js-api-key-modal-result d-none">
+                        <label class="d-block">New API key</label>
+                        <div class="api-key-modal__field">
+                            <input type="text" id="apiKeyModalValue" class="form-control" readonly>
+                            <button type="button" class="btn btn-secondary" id="copyApiKey">Copy</button>
+                        </div>
+                        <small class="text-muted d-block mt-2">Store this secret securely. It will not be shown again inside this confirmation state after the modal closes.</small>
+                    </div>
+
+                    <div class="api-key-modal__meta">
+                        <div class="api-key-modal__meta-item">
+                            <span>Status</span>
+                            <strong data-api-modal-status>Active</strong>
+                        </div>
+                        <div class="api-key-modal__meta-item">
+                            <span>Last rotated</span>
+                            <strong data-api-modal-last-rotated>Not available</strong>
+                        </div>
+                        <div class="api-key-modal__meta-item">
+                            <span>Last used</span>
+                            <strong data-api-modal-last-used>Never used</strong>
+                        </div>
+                    </div>
+
+                    <div class="api-key-modal__actions">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="confirmRegenerateApiKey">Generate new key <i class="fad fa-arrow-right ml-2"></i></button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -199,7 +350,7 @@
                 <div class="info">
                     <span class="money d-block">Unlimited</span>
                     <span class="d-block">Availabe Storage</span>
-                    <a href="/premium">Get more <i class="fad fa-arrow-to-right"></i></a>
+                    <a href="/premium-plans">Get more <i class="fad fa-arrow-to-right"></i></a>
                 </div>
                 <div class="icon">
                     <i class="fad fa-server"></i>
@@ -235,7 +386,7 @@
                     <i class="fad fa-frown-open"></i>
                     <div class="info ml-3">
                         <h4 class="m-0">Free account</h4>
-                        <a href="/premium">Upgrade <i class="fad fa-arrow-to-right"></i></a>
+                        <a href="/premium-plans">Upgrade <i class="fad fa-arrow-to-right"></i></a>
                     </div>
                 </div>
 
@@ -746,7 +897,7 @@
                     <div class="settings-panel-title">Custom Domain Redirect</div>
                     <p class="settings-panel-subtitle" id="info-domain">Just purchase a domain and point the DNS as shown below. This frontend preview stores domains in the current browser only.</p>
 
-                    <p id="response" class="settings-inline-feedback"></p>
+                    <div id="response" class="settings-inline-feedback alert d-none" role="alert"></div>
 
                     <div class="mt-3 mb-3">
                         <input type="text" id="domainInput" class="form-control mb-2" placeholder="example.com">

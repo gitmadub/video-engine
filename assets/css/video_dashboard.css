@@ -1,0 +1,329 @@
+.ve-videos-page .ve-dashboard-box {
+    background: #1c1c1c;
+    border: 1px solid rgba(67, 70, 69, 0.9);
+    padding: 24px;
+    height: 100%;
+}
+
+.ve-videos-page .ve-dashboard-box h4 {
+    margin: 0 0 12px;
+    font-size: 1.1428571429rem;
+    font-weight: 700;
+}
+
+.ve-videos-page .ve-stat-box {
+    height: 100%;
+}
+
+.ve-videos-page .ve-drop-zone {
+    width: 100%;
+    display: block;
+    text-align: left;
+    border: 2px dashed rgba(255, 153, 0, 0.35);
+    border-radius: 3px;
+    background: rgba(67, 70, 69, 0.2);
+    color: #fff;
+    padding: 18px;
+    margin: 0 0 18px;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.ve-videos-page .ve-drop-zone strong {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.ve-videos-page .ve-drop-zone span {
+    display: block;
+    color: #8f9392;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.ve-videos-page .ve-drop-zone:hover,
+.ve-videos-page .ve-drop-zone.is-dragover {
+    background: rgba(255, 153, 0, 0.08);
+    border-color: #ff9900;
+}
+
+.ve-videos-page .file_manager .files ul.file_list li {
+    align-items: center;
+}
+
+.ve-videos-page .ve-list-placeholder {
+    padding: 28px 22px;
+}
+
+.ve-videos-page .ve-list-placeholder .name {
+    width: 100% !important;
+}
+
+.ve-videos-page .ve-list-placeholder .name h4 {
+    margin-bottom: 6px;
+}
+
+.ve-videos-page .ve-video-thumb {
+    width: 96px;
+    height: 54px;
+    flex: 0 0 96px;
+    margin-right: 15px;
+    position: relative;
+    overflow: hidden;
+    border-radius: 3px;
+    background: #434645;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ve-videos-page .ve-video-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.ve-videos-page .ve-video-thumb i {
+    position: absolute;
+    font-size: 1.5rem;
+    color: rgba(255, 255, 255, 0.42);
+    pointer-events: none;
+}
+
+.ve-videos-page .file_manager .files ul.file_list li .name h4 {
+    width: 100%;
+}
+
+.ve-videos-page .file_manager .files ul.file_list li .name h4 a {
+    display: block;
+}
+
+.ve-videos-page .file_manager .files ul.file_list li .name h4 span {
+    display: block;
+    white-space: normal;
+    line-height: 1.45;
+}
+
+.ve-videos-page .file_manager .files ul.file_list li .name h4 span.encoded {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.ve-videos-page .file_manager .files ul.file_list li .size strong,
+.ve-videos-page .file_manager .files ul.file_list li .date strong {
+    display: block;
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.ve-videos-page .file_manager .files ul.file_list li .size small,
+.ve-videos-page .file_manager .files ul.file_list li .date small {
+    display: block;
+    color: #8a8d8c;
+    line-height: 1.35;
+}
+
+.ve-videos-page .ve-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 76px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ve-videos-page .ve-status-badge.is-ready {
+    background: rgba(40, 167, 69, 0.16);
+    color: #9df1aa;
+}
+
+.ve-videos-page .ve-status-badge.is-processing {
+    background: rgba(255, 153, 0, 0.18);
+    color: #ffc566;
+}
+
+.ve-videos-page .ve-status-badge.is-queued {
+    background: rgba(255, 255, 255, 0.08);
+    color: #cfd3d2;
+}
+
+.ve-videos-page .ve-status-badge.is-failed {
+    background: rgba(220, 53, 69, 0.18);
+    color: #ffb0bb;
+}
+
+.ve-videos-page .ve-video-row-actions {
+    width: 220px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.ve-videos-page .ve-video-row-actions .btn {
+    min-width: 88px;
+}
+
+.ve-videos-page .ve-btn-delete {
+    background: rgba(220, 53, 69, 0.14);
+    color: #ffb7bf;
+    border-color: rgba(220, 53, 69, 0.18);
+}
+
+.ve-videos-page .ve-btn-delete:hover,
+.ve-videos-page .ve-btn-delete:focus {
+    background: #dc3545;
+    border-color: #dc3545;
+    color: #fff;
+}
+
+.ve-videos-page .ve-video-note {
+    width: 100%;
+    padding-left: 111px;
+    margin-top: 8px;
+    font-size: 0.8571428571rem;
+    color: #8a8d8c;
+    line-height: 1.5;
+}
+
+.ve-videos-page .ve-video-note.is-error {
+    color: #ff9ea8;
+}
+
+.ve-videos-page .buttonInside {
+    position: relative;
+    margin-bottom: 10px;
+}
+
+.ve-videos-page .copy-in {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+    border: none;
+    outline: 0;
+    text-align: center;
+    font-weight: 700;
+    padding: 2px 10px;
+}
+
+.ve-videos-page .copy-in:hover {
+    cursor: pointer;
+}
+
+.ve-videos-page .export-txt {
+    min-height: 48px;
+    resize: none;
+    padding-right: 68px;
+}
+
+.ve-videos-page .nav-pills .nav-item {
+    margin-right: 15px;
+}
+
+.ve-videos-page .nav-pills .nav-item .nav-link.active {
+    background: #f90;
+    color: #fff;
+}
+
+.ve-videos-page .nav-pills .nav-item .nav-link {
+    font-weight: 600;
+    color: #fff;
+    background: #434645;
+    border-radius: 1px;
+    transition: color 0.3s ease, background 0.3s ease;
+}
+
+.ve-videos-page .ve-export-preview {
+    background: #111;
+    border: 1px solid rgba(67, 70, 69, 0.8);
+    padding: 8px;
+}
+
+.ve-videos-page .ve-export-preview img {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+}
+
+.uploading-files.is-hidden {
+    display: none !important;
+}
+
+.uploading-files.is-collapsed .uploading-list {
+    display: none;
+}
+
+.uploading-files .header strong {
+    font-size: 0.95rem;
+}
+
+.uploading-files [data-action="toggle-upload-panel"] {
+    padding: 5px;
+    border: 0;
+    background: transparent;
+    color: #fff;
+    outline: none;
+    box-shadow: none;
+}
+
+.uploading-files .uploading-list .file .name .status {
+    display: block;
+    color: #8a8d8c;
+    font-size: 0.8571428571rem;
+}
+
+.uploading-files .uploading-list .file.is-error .name .status,
+.uploading-files .uploading-list .file.is-error .circle .percent {
+    color: #ff9ea8;
+}
+
+.uploading-files .uploading-list .file.is-done .name .status,
+.uploading-files .uploading-list .file.is-done .circle .percent {
+    color: #a9f2b1;
+}
+
+@media all and (max-width: 991px) {
+    .ve-videos-page .ve-video-row-actions {
+        width: 100%;
+        justify-content: flex-start;
+        margin-top: 12px;
+    }
+
+    .ve-videos-page .ve-video-note {
+        padding-left: 0;
+    }
+}
+
+@media all and (max-width: 768px) {
+    .ve-videos-page .ve-dashboard-box {
+        padding: 18px;
+    }
+
+    .ve-videos-page .ve-video-thumb {
+        width: 84px;
+        height: 48px;
+        flex-basis: 84px;
+    }
+
+    .ve-videos-page .copy-in {
+        position: static;
+        width: 100%;
+        margin-top: 8px;
+    }
+
+    .ve-videos-page .export-txt {
+        padding-right: 12px;
+        min-height: 64px;
+    }
+}

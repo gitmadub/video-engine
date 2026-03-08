@@ -649,7 +649,7 @@ HTML;
 
 function ve_payment_page(string $title): string
 {
-    $backUrl = ve_url('/dashboard/premium-plans');
+    $backUrl = ve_url('/premium-plans');
     $bootstrapUrl = ve_url('/assets/css/bootstrap.min.css');
 
     return <<<HTML
@@ -750,38 +750,31 @@ function ve_handle_op(string $op, string $path): bool
             return false;
 
         case 'videos_json':
-            ve_json([
-                'draw' => (int) ($_GET['draw'] ?? 1),
-                'recordsTotal' => 0,
-                'recordsFiltered' => 0,
-                'data' => [],
-                'list' => [],
-                'folders' => [],
-                'folders_tree' => [],
-                'folder_id' => 0,
-                'bli' => 0,
-                'max' => 0,
-                'slo' => 0,
-            ]);
+            ve_handle_legacy_videos_json();
 
         case 'remote_upload_json':
             ve_handle_remote_upload_json();
 
         case 'upload_get_srv':
-            ve_json([
-                'status' => 'ok',
-                'server' => 'local',
-                'upload_url' => ve_url('/dashboard/remote-upload'),
-            ]);
+            ve_handle_legacy_upload_get_server();
 
         case 'pass_file':
+            ve_handle_legacy_pass_file();
+
+        case 'upload_results_json':
+            ve_handle_legacy_upload_results();
+
+        case 'add_srt':
+            ve_handle_legacy_add_srt();
+
         case 'change_thumbnail':
+            ve_handle_legacy_change_thumbnail();
+
         case 'folder_sharing':
+            ve_handle_legacy_folder_sharing();
+
         case 'marker':
-            ve_json([
-                'status' => 'ok',
-                'message' => 'Stubbed endpoint response.',
-            ]);
+            ve_handle_legacy_marker();
 
         case 'payments':
             if (isset($_GET['amount'])) {
@@ -921,6 +914,26 @@ function ve_dispatch(): void
         }
 
         ve_handle_video_upload_api();
+    }
+
+    if (preg_match('#^/upload/([A-Za-z0-9_-]+)$#', $path, $matches) === 1) {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        if ($matches[1] !== 'local') {
+            ve_not_found();
+        }
+
+        ve_handle_legacy_upload_endpoint();
+    }
+
+    if (preg_match('#^/api/videos/([A-Za-z0-9_-]+)/poster\.jpg$#', $path, $matches) === 1) {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        ve_video_owner_stream_poster($matches[1]);
     }
 
     if (preg_match('#^/api/videos/([A-Za-z0-9_-]+)$#', $path, $matches) === 1) {
@@ -1091,7 +1104,7 @@ function ve_dispatch(): void
         $video = ve_video_get_by_public_id($matches[1]);
 
         if (is_array($video)) {
-            ve_render_secure_video_page($matches[1], false);
+            ve_render_secure_watch_page($matches[1]);
         }
 
         ve_render_player_page($matches[1]);
@@ -1123,6 +1136,14 @@ function ve_dispatch(): void
 
     if (preg_match('#^/stream/([A-Za-z0-9_-]+)/poster\.jpg$#', $path, $matches) === 1) {
         ve_video_stream_poster($matches[1]);
+    }
+
+    if (preg_match('#^/thumbs/([A-Za-z0-9_-]+)/(single|splash)\.jpg$#', $path, $matches) === 1) {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        ve_video_stream_public_thumbnail($matches[1], $matches[2] === 'splash' ? 'splash' : 'single');
     }
 
     if (preg_match('#^/stream/([A-Za-z0-9_-]+)/preview\.vtt$#', $path, $matches) === 1) {

@@ -262,6 +262,8 @@ function ve_add_column_if_missing(PDO $pdo, string $table, string $column, strin
 
 function ve_run_database_migrations(PDO $pdo): void
 {
+    ve_add_column_if_missing($pdo, 'users', 'plan_code', "TEXT NOT NULL DEFAULT 'free'");
+    ve_add_column_if_missing($pdo, 'users', 'premium_until', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'users', 'api_key_hash', "TEXT NOT NULL DEFAULT ''");
     ve_add_column_if_missing($pdo, 'users', 'api_key_last_rotated_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'users', 'api_key_last_used_at', 'TEXT DEFAULT NULL');
@@ -289,6 +291,76 @@ function ve_run_database_migrations(PDO $pdo): void
             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )'
     );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS remote_uploads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            source_url TEXT NOT NULL,
+            normalized_url TEXT NOT NULL DEFAULT "",
+            resolved_url TEXT NOT NULL DEFAULT "",
+            host_key TEXT NOT NULL DEFAULT "",
+            folder_id INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT "pending",
+            status_message TEXT NOT NULL DEFAULT "",
+            error_message TEXT NOT NULL DEFAULT "",
+            original_filename TEXT NOT NULL DEFAULT "",
+            content_type TEXT NOT NULL DEFAULT "",
+            bytes_downloaded INTEGER NOT NULL DEFAULT 0,
+            bytes_total INTEGER NOT NULL DEFAULT 0,
+            speed_bytes_per_second INTEGER NOT NULL DEFAULT 0,
+            progress_percent REAL NOT NULL DEFAULT 0,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            video_id INTEGER DEFAULT NULL,
+            video_public_id TEXT NOT NULL DEFAULT "",
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            started_at TEXT DEFAULT NULL,
+            completed_at TEXT DEFAULT NULL,
+            deleted_at TEXT DEFAULT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+            FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE SET NULL
+        )'
+    );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS video_folders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            parent_id INTEGER NOT NULL DEFAULT 0,
+            public_code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT DEFAULT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )'
+    );
+
+    ve_add_column_if_missing($pdo, 'videos', 'folder_id', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'videos', 'is_public', 'INTEGER NOT NULL DEFAULT 1');
+
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'normalized_url', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'resolved_url', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'host_key', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'folder_id', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'status', 'TEXT NOT NULL DEFAULT "pending"');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'status_message', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'error_message', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'original_filename', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'content_type', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'bytes_downloaded', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'bytes_total', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'speed_bytes_per_second', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'progress_percent', 'REAL NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'attempt_count', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'video_id', 'INTEGER DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'video_public_id', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'created_at', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'updated_at', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'started_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'completed_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'remote_uploads', 'deleted_at', 'TEXT DEFAULT NULL');
 
     $users = $pdo->query('SELECT id, api_key_encrypted, created_at, updated_at, api_key_hash, api_key_last_rotated_at FROM users')->fetchAll();
 
@@ -330,6 +402,11 @@ function ve_run_database_migrations(PDO $pdo): void
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_created ON api_request_logs(user_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_kind_created ON api_request_logs(user_id, request_kind, created_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_folders_user_parent_name ON video_folders(user_id, parent_id, name)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_folders_user_parent_created ON video_folders(user_id, parent_id, created_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_videos_user_folder_created ON videos(user_id, folder_id, created_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_remote_uploads_user_created ON remote_uploads(user_id, created_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_remote_uploads_status_created ON remote_uploads(status, created_at ASC)');
 }
 
 function ve_seed_ftp_servers(PDO $pdo): void
@@ -690,6 +767,61 @@ function ve_get_user_settings(int $userId): array
     $settings['api_uploads_per_day'] = (int) ($settings['api_uploads_per_day'] ?? 25);
 
     return $settings;
+}
+
+function ve_user_plan_code(array $user): string
+{
+    $planCode = strtolower(trim((string) ($user['plan_code'] ?? 'free')));
+
+    return $planCode !== '' ? $planCode : 'free';
+}
+
+function ve_user_is_premium(array $user): bool
+{
+    $planCode = ve_user_plan_code($user);
+    $premiumUntil = trim((string) ($user['premium_until'] ?? ''));
+
+    if ($premiumUntil !== '') {
+        $premiumUntilDate = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $premiumUntil, new DateTimeZone('UTC'));
+
+        if ($premiumUntilDate instanceof DateTimeImmutable && $premiumUntilDate >= new DateTimeImmutable('now', new DateTimeZone('UTC'))) {
+            return true;
+        }
+    }
+
+    return in_array($planCode, ['premium', 'enterprise', 'lifetime'], true);
+}
+
+function ve_player_splash_preview_html(array $settings): string
+{
+    $path = ve_storage_relative_path_to_absolute((string) ($settings['splash_image_path'] ?? ''));
+
+    if ($path === '' || !is_file($path)) {
+        return '<div class="text-muted small">No splash image uploaded yet.</div>';
+    }
+
+    $updatedAt = (string) ($settings['updated_at'] ?? ve_timestamp());
+    $splashPreviewUrl = ve_h(ve_url('/account/player/splash-preview?ts=' . rawurlencode($updatedAt)));
+
+    return '<div class="small text-muted mb-2">Current protected splash image</div>'
+        . '<img src="' . $splashPreviewUrl . '" alt="Splash preview" style="display:block;width:100%;max-width:100%;border-radius:12px;border:1px solid rgba(255,255,255,0.08);background:#0c0c0c;">';
+}
+
+function ve_player_settings_payload(int $userId, ?array $settings = null): array
+{
+    $settings = is_array($settings) ? $settings : ve_get_user_settings($userId);
+
+    return [
+        'show_embed_title' => ((int) ($settings['show_embed_title'] ?? 0)) === 1,
+        'auto_subtitle_start' => ((int) ($settings['auto_subtitle_start'] ?? 0)) === 1,
+        'player_image_mode' => (string) ($settings['player_image_mode'] ?? ''),
+        'player_colour' => strtolower((string) ($settings['player_colour'] ?? 'ff9900')),
+        'embed_width' => (int) ($settings['embed_width'] ?? 600),
+        'embed_height' => (int) ($settings['embed_height'] ?? 480),
+        'logo_path' => (string) ($settings['logo_path'] ?? ''),
+        'splash_image_path' => (string) ($settings['splash_image_path'] ?? ''),
+        'splash_preview_html' => ve_player_splash_preview_html($settings),
+    ];
 }
 
 function ve_find_user_by_login(string $login): ?array
@@ -1698,6 +1830,12 @@ function ve_save_player_settings(int $userId): void
 {
     ve_require_csrf(ve_request_csrf_token());
 
+    $user = ve_get_user_by_id($userId);
+
+    if (!is_array($user)) {
+        ve_fail_form_submission('Unable to load the current account.', '/dashboard/settings#player_settings', 404);
+    }
+
     $playerImageMode = trim((string) ($_POST['usr_player_image'] ?? ''));
     $playerColour = ltrim(trim((string) ($_POST['usr_player_colour'] ?? 'ff9900')), '#');
     $embedWidth = max(200, min(4000, (int) ($_POST['embedcode_width'] ?? 600)));
@@ -1722,6 +1860,37 @@ function ve_save_player_settings(int $userId): void
         $splashImagePath = ve_store_player_splash_upload($_FILES['splash_image'], $userId, $splashImagePath);
     }
 
+    $currentPlayerColour = strtolower((string) ($settings['player_colour'] ?? 'ff9900'));
+    $submittedShowEmbedTitle = isset($_POST['usr_embed_title']) ? 1 : 0;
+    $submittedAutoSubtitleStart = isset($_POST['usr_sub_auto_start']) ? 1 : 0;
+    $playerColourChanged = strtolower($playerColour) !== $currentPlayerColour;
+    $playerColourAllowed = ve_user_is_premium($user);
+    $otherChangesDetected = $submittedShowEmbedTitle !== (int) ($settings['show_embed_title'] ?? 0)
+        || $submittedAutoSubtitleStart !== (int) ($settings['auto_subtitle_start'] ?? 0)
+        || $playerImageMode !== (string) ($settings['player_image_mode'] ?? '')
+        || $embedWidth !== (int) ($settings['embed_width'] ?? 600)
+        || $embedHeight !== (int) ($settings['embed_height'] ?? 480)
+        || $logoPath !== (string) ($settings['logo_path'] ?? '')
+        || $splashImagePath !== (string) ($settings['splash_image_path'] ?? '');
+
+    if (!$playerColourAllowed && $playerColourChanged && !$otherChangesDetected) {
+        $message = 'Custom player colour requires an active premium subscription. Upgrade on Premium Plans to unlock this setting.';
+
+        if (ve_request_expects_json()) {
+            ve_json([
+                'status' => 'fail',
+                'message' => $message,
+                'player' => ve_player_settings_payload($userId, $settings),
+                'premium_required_fields' => ['usr_player_colour'],
+            ], 403);
+        }
+
+        ve_flash('danger', $message);
+        ve_redirect('/dashboard/settings#player_settings');
+    }
+
+    $savedPlayerColour = !$playerColourAllowed && $playerColourChanged ? $currentPlayerColour : strtolower($playerColour);
+
     $stmt = ve_db()->prepare(
         'UPDATE user_settings SET
             show_embed_title = :show_embed_title,
@@ -1736,10 +1905,10 @@ function ve_save_player_settings(int $userId): void
          WHERE user_id = :user_id'
     );
     $stmt->execute([
-        ':show_embed_title' => isset($_POST['usr_embed_title']) ? 1 : 0,
-        ':auto_subtitle_start' => isset($_POST['usr_sub_auto_start']) ? 1 : 0,
+        ':show_embed_title' => $submittedShowEmbedTitle,
+        ':auto_subtitle_start' => $submittedAutoSubtitleStart,
         ':player_image_mode' => $playerImageMode,
-        ':player_colour' => strtolower($playerColour),
+        ':player_colour' => $savedPlayerColour,
         ':logo_path' => $logoPath,
         ':splash_image_path' => $splashImagePath,
         ':embed_width' => $embedWidth,
@@ -1748,16 +1917,28 @@ function ve_save_player_settings(int $userId): void
         ':user_id' => $userId,
     ]);
 
+    $savedSettings = ve_get_user_settings($userId);
+
+    if (!$playerColourAllowed && $playerColourChanged && $otherChangesDetected) {
+        $message = 'Other player settings were saved, but the custom player colour was skipped because it requires an active premium subscription.';
+        ve_add_notification($userId, 'Player settings partially updated', 'Player settings were saved, but the custom player colour still requires a premium subscription.');
+
+        if (ve_request_expects_json()) {
+            ve_json([
+                'status' => 'warning',
+                'message' => $message,
+                'player' => ve_player_settings_payload($userId, $savedSettings),
+                'premium_required_fields' => ['usr_player_colour'],
+            ]);
+        }
+
+        ve_flash('warning', $message);
+        ve_redirect('/dashboard/settings#player_settings');
+    }
+
     ve_add_notification($userId, 'Player settings updated', 'Your player appearance defaults were saved.');
     ve_success_form_submission('Player settings saved successfully.', '/dashboard/settings#player_settings', [
-        'player' => [
-            'player_image_mode' => $playerImageMode,
-            'player_colour' => strtolower($playerColour),
-            'embed_width' => $embedWidth,
-            'embed_height' => $embedHeight,
-            'logo_path' => $logoPath,
-            'splash_image_path' => $splashImagePath,
-        ],
+        'player' => ve_player_settings_payload($userId, $savedSettings),
     ]);
 }
 
@@ -1949,33 +2130,120 @@ function ve_is_valid_domain(string $domain): bool
     return preg_match('/^(?!:\/\/)([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$/', $domain) === 1;
 }
 
+function ve_domain_override_a_records(string $domain): ?array
+{
+    $rawMap = trim((string) (getenv('VE_DNS_STATIC_MAP') ?: ''));
+
+    if ($rawMap === '') {
+        return null;
+    }
+
+    $decoded = json_decode($rawMap, true);
+
+    if (!is_array($decoded)) {
+        $decoded = [];
+
+        foreach (preg_split('/\s*;\s*/', $rawMap, -1, PREG_SPLIT_NO_EMPTY) as $entry) {
+            if (!is_string($entry) || !str_contains($entry, '=')) {
+                continue;
+            }
+
+            [$mapDomain, $ipsRaw] = explode('=', $entry, 2);
+            $mapDomain = strtolower(trim($mapDomain));
+
+            if ($mapDomain === '') {
+                continue;
+            }
+
+            $decoded[$mapDomain] = preg_split('/\s*,\s*/', trim($ipsRaw), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        }
+    }
+
+    if (!is_array($decoded) || $decoded === []) {
+        return null;
+    }
+
+    foreach ($decoded as $mapDomain => $ips) {
+        if (!is_string($mapDomain) || strcasecmp($mapDomain, $domain) !== 0) {
+            continue;
+        }
+
+        if (is_string($ips)) {
+            $ips = [$ips];
+        }
+
+        if (!is_array($ips)) {
+            return [];
+        }
+
+        return array_values(array_filter($ips, static fn ($ip): bool => is_string($ip) && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false));
+    }
+
+    return null;
+}
+
 function ve_check_domain_status(string $domain): array
 {
     $target = ve_config()['custom_domain_target'];
-    $status = 'pending_dns';
-    $error = '';
+    $status = 'lookup_failed';
+    $error = 'DNS lookup could not be completed right now. Try again in a few minutes.';
+    $userMessage = 'DNS lookup could not be completed right now. Try again in a few minutes.';
+    $resolvedIps = ve_domain_override_a_records($domain);
 
-    if (function_exists('dns_get_record')) {
-        try {
-            $records = @dns_get_record($domain, DNS_A);
+    if ($resolvedIps === null) {
+        $resolvedIps = [];
 
-            if (is_array($records) && $records !== []) {
-                $ips = array_map(static fn(array $record): string => (string) ($record['ip'] ?? ''), $records);
-                $status = in_array($target, $ips, true) ? 'active' : 'pending_dns';
-                $error = $status === 'active' ? '' : 'A record does not point to the required target.';
-            } else {
-                $error = 'No A record found yet.';
+        if (function_exists('dns_get_record')) {
+            try {
+                $records = @dns_get_record($domain, DNS_A);
+
+                if (is_array($records)) {
+                    foreach ($records as $record) {
+                        if (is_array($record) && isset($record['ip']) && is_string($record['ip'])) {
+                            $resolvedIps[] = $record['ip'];
+                        }
+                    }
+                }
+            } catch (Throwable $throwable) {
+                $error = 'DNS lookup failed: ' . $throwable->getMessage();
             }
-        } catch (Throwable $throwable) {
-            $error = $throwable->getMessage();
         }
+
+        if ($resolvedIps === [] && function_exists('gethostbynamel')) {
+            $fallbackIps = @gethostbynamel($domain);
+
+            if (is_array($fallbackIps)) {
+                $resolvedIps = $fallbackIps;
+            }
+        }
+    }
+
+    $resolvedIps = array_values(array_unique(array_filter($resolvedIps, static fn ($ip): bool => is_string($ip) && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false)));
+
+    if ($resolvedIps === []) {
+        $status = $error !== '' ? 'lookup_failed' : 'pending_dns';
+        $error = $error !== '' ? $error : 'No A record found yet.';
+        $userMessage = $status === 'lookup_failed'
+            ? 'DNS lookup could not be completed right now. Try again in a few minutes.'
+            : 'No A record was found for ' . $domain . '. Point it to ' . $target . ' and try again after DNS propagation.';
+    } elseif (in_array($target, $resolvedIps, true)) {
+        $status = 'active';
+        $error = '';
+        $userMessage = 'Domain connected successfully.';
+    } else {
+        $status = 'pending_dns';
+        $resolvedLabel = implode(', ', $resolvedIps);
+        $error = 'A record points to ' . $resolvedLabel . ' instead of ' . $target . '.';
+        $userMessage = 'This domain currently points to ' . $resolvedLabel . '. Update the A record to ' . $target . ' before adding it.';
     }
 
     return [
         'status' => $status,
         'dns_target' => $target,
         'dns_check_error' => $error,
+        'user_message' => $userMessage,
         'dns_last_checked_at' => ve_now(),
+        'resolved_ips' => $resolvedIps,
     ];
 }
 
@@ -2033,6 +2301,17 @@ function ve_handle_custom_domain_add(): void
     }
 
     $check = ve_check_domain_status($domain);
+
+    if (($check['status'] ?? '') !== 'active') {
+        ve_json([
+            'status' => 'fail',
+            'message' => (string) ($check['user_message'] ?? ('Point the domain to ' . $check['dns_target'] . ' before adding it.')),
+            'dns_target' => $check['dns_target'],
+            'dns_status' => $check['status'],
+            'resolved_ips' => $check['resolved_ips'] ?? [],
+        ], 422);
+    }
+
     $stmt = ve_db()->prepare(
         'INSERT INTO custom_domains (user_id, domain, status, dns_target, dns_last_checked_at, dns_check_error, created_at, updated_at)
          VALUES (:user_id, :domain, :status, :dns_target, :dns_last_checked_at, :dns_check_error, :created_at, :updated_at)'
@@ -2051,7 +2330,7 @@ function ve_handle_custom_domain_add(): void
     ve_add_notification((int) $user['id'], 'Custom domain added', 'The custom domain ' . $domain . ' was added to your account.');
     ve_json([
         'status' => 'ok',
-        'message' => $check['status'] === 'active' ? 'Domain connected successfully.' : 'Domain saved. Point its A record to ' . $check['dns_target'] . '.',
+        'message' => 'Domain connected successfully.',
         'domains' => ve_list_custom_domains((int) $user['id']),
         'dns_target' => ve_config()['custom_domain_target'],
     ]);
@@ -2433,6 +2712,16 @@ function ve_settings_script(): string
             $('.details.settings_data > .alert').remove();
         }
 
+        function clearFeedbackElement(\$feedback) {
+            clearFeedbackTimer(\$feedback);
+            \$feedback
+                .stop(true, true)
+                .addClass('d-none')
+                .removeClass('alert-success alert-danger alert-warning')
+                .removeAttr('style aria-live')
+                .text('');
+        }
+
         function ensureFormFeedback(\$form) {
             var \$feedback = \$form.children('.js-form-feedback').first();
 
@@ -2450,13 +2739,57 @@ function ve_settings_script(): string
             return \$feedback;
         }
 
+        function clearFeedbackTimer(\$feedback) {
+            var timerId = \$feedback.data('dismissTimer');
+
+            if (timerId) {
+                window.clearTimeout(timerId);
+                \$feedback.removeData('dismissTimer');
+            }
+        }
+
+        function updateFeedback(\$feedback, type, message, autoDismiss) {
+            clearFeedbackTimer(\$feedback);
+            if (!message) {
+                clearFeedbackElement(\$feedback);
+                return;
+            }
+
+            var alertClass = 'alert-danger';
+
+            if (type === 'success') {
+                alertClass = 'alert-success';
+            } else if (type === 'warning') {
+                alertClass = 'alert-warning';
+            }
+
+            \$feedback.stop(true, true);
+            \$feedback
+                .removeClass('d-none alert-success alert-danger alert-warning')
+                .addClass(alertClass)
+                .attr('aria-live', type === 'success' ? 'polite' : 'assertive')
+                .text(message || '')
+                .hide()
+                .slideDown(160);
+
+            if (!autoDismiss) {
+                return;
+            }
+
+            \$feedback.data('dismissTimer', window.setTimeout(function () {
+                \$feedback.stop(true, true).slideUp(180, function () {
+                    clearFeedbackElement(\$feedback);
+                });
+            }, 4500));
+        }
+
         function showFormFeedback(\$form, type, message) {
             var \$feedback = ensureFormFeedback(\$form);
-            \$feedback.removeClass('d-none alert-success alert-danger').addClass(type === 'success' ? 'alert-success' : 'alert-danger').text(message || '');
+            updateFeedback(\$feedback, type, message, type === 'success' && !!message);
         }
 
         function ensureSidebarFeedback() {
-            var \$container = $('.settings-page .form-group').first();
+            var \$container = $('.settings_menu_wrap .form-group').first();
             var \$feedback = \$container.children('.js-sidebar-feedback').first();
 
             if (!\$feedback.length) {
@@ -2469,18 +2802,46 @@ function ve_settings_script(): string
 
         function showSidebarFeedback(type, message) {
             var \$feedback = ensureSidebarFeedback();
-            \$feedback.removeClass('d-none alert-success alert-danger').addClass(type === 'success' ? 'alert-success' : 'alert-danger').text(message || '');
+            updateFeedback(\$feedback, type, message, type === 'success' && !!message);
+        }
+
+        function ensureDomainFeedback() {
+            var \$feedback = $('#response');
+
+            if (!\$feedback.length) {
+                \$feedback = $('<div id="response" class="settings-inline-feedback alert d-none" role="alert"></div>');
+                $('#custom_domain .settings-panel-subtitle').after(\$feedback);
+            }
+
+            return \$feedback;
+        }
+
+        function showDomainMessage(type, message) {
+            updateFeedback(ensureDomainFeedback(), type, message, type === 'success' && !!message);
+        }
+
+        function ensureApiKeyModalFeedback() {
+            return $('#apiKeyModal').find('.js-api-key-modal-feedback').first();
+        }
+
+        function showApiKeyModalFeedback(type, message) {
+            updateFeedback(ensureApiKeyModalFeedback(), type, message, type === 'success' && !!message);
         }
 
         function clearPanelFeedback(\$scope) {
-            \$scope.find('.js-form-feedback, .js-sidebar-feedback').addClass('d-none').removeClass('alert-success alert-danger').text('');
-            \$scope.find('#response, #delete-account-feedback').text('').removeAttr('style');
+            \$scope.find('.js-form-feedback, .js-sidebar-feedback, .js-api-key-modal-feedback').each(function () {
+                clearFeedbackElement($(this));
+            });
+            \$scope.find('#response, #delete-account-feedback').each(function () {
+                clearFeedbackElement($(this));
+            });
         }
 
         function clearAllPanelFeedback() {
             clearLegacyFlash();
             clearPanelFeedback($('.settings_data'));
             clearPanelFeedback($('.settings-page'));
+            clearPanelFeedback($('#apiKeyModal'));
         }
 
         function isManagedSettingsAction(action) {
@@ -2533,8 +2894,13 @@ function ve_settings_script(): string
             $('.pop_text').text('Popup direct url');
         }
 
-        function showDomainMessage(message, color) {
-            $('#response').text(message).css('color', color || '');
+        function resetCustomFileInput(\$input) {
+            \$input.val('');
+
+            if (\$input.length) {
+                var fallbackLabel = \$input.attr('id') === 'splash_image' ? 'Choose splash image' : 'Choose logo';
+                \$input.next('.custom-file-label').text(fallbackLabel);
+            }
         }
 
         function renderCustomDomains(domains) {
@@ -2555,11 +2921,11 @@ function ve_settings_script(): string
                 return [
                     '<tr>',
                     '<td>',
-                    '<span class="' + (domain.status === 'active' ? 'text-success' : 'text-warning') + '"><i class="fad fa-globe mr-2"></i></span>' + domain.domain,
-                    '<p>Status: ' + statusText + '. ' + helpText + '</p>',
+                    '<span class="' + (domain.status === 'active' ? 'text-success' : 'text-warning') + '"><i class="fad fa-globe mr-2"></i></span>' + escapeHtml(domain.domain),
+                    '<p>Status: ' + escapeHtml(statusText) + '. ' + escapeHtml(helpText) + '</p>',
                     '</td>',
                     '<td class="text-center">',
-                    '<button class="btn btn-sm btn-danger deleteBtn" data-domain="' + domain.domain + '" type="button">',
+                    '<button class="btn btn-sm btn-danger deleteBtn" data-domain="' + escapeHtml(domain.domain) + '" type="button">',
                     '<i class="fad fa-trash-alt"></i>',
                     '</button>',
                     '</td>',
@@ -2603,6 +2969,15 @@ function ve_settings_script(): string
             $('#api-activity-rows').html(html);
         }
 
+        function syncApiModalMeta(snapshot) {
+            var apiSnapshot = snapshot || {};
+            var usage = apiSnapshot.usage || {};
+
+            $('[data-api-modal-status]').text(apiSnapshot.status_label || $('[data-api-status]').text() || 'Active');
+            $('[data-api-modal-last-used]').text(usage.last_used_at || $('[data-api-last-used]').text() || 'Never used');
+            $('[data-api-modal-last-rotated]').text(usage.last_rotated_at || $('[data-api-last-rotated]').text() || 'Not available');
+        }
+
         function applyApiSnapshot(snapshot) {
             if (!snapshot) {
                 return;
@@ -2626,20 +3001,56 @@ function ve_settings_script(): string
             $('input[name="api_uploads_per_day"]').val(limits.uploads_per_day != null ? limits.uploads_per_day : 0);
 
             renderApiActivity(snapshot.recent_activity || []);
+            syncApiModalMeta(snapshot);
         }
 
-        function loadDomains(successMessage) {
+        function applyPlayerSnapshot(snapshot) {
+            if (!snapshot) {
+                return;
+            }
+
+            var \$playerForm = $('#player_settings form').first();
+
+            if (!\$playerForm.length) {
+                return;
+            }
+
+            \$playerForm.find('input[name="usr_embed_title"]').prop('checked', !!snapshot.show_embed_title);
+            \$playerForm.find('input[name="usr_sub_auto_start"]').prop('checked', !!snapshot.auto_subtitle_start);
+            \$playerForm.find('select[name="usr_player_image"]').val(snapshot.player_image_mode || '');
+            \$playerForm.find('input[name="embedcode_width"]').val(snapshot.embed_width != null ? snapshot.embed_width : 600);
+            \$playerForm.find('input[name="embedcode_height"]').val(snapshot.embed_height != null ? snapshot.embed_height : 480);
+
+            var \$colourInput = \$playerForm.find('input[name="usr_player_colour"]').first();
+            var colourValue = snapshot.player_colour || 'ff9900';
+
+            if (\$colourInput.length) {
+                \$colourInput.val(colourValue);
+
+                var colourField = \$colourInput.get(0);
+
+                if (colourField && colourField.jscolor && typeof colourField.jscolor.fromString === 'function') {
+                    colourField.jscolor.fromString(colourValue);
+                }
+            }
+
+            if (typeof snapshot.splash_preview_html === 'string') {
+                $('#player-splash-preview').html(snapshot.splash_preview_html);
+            }
+        }
+
+        function loadDomains(successMessage, successType) {
             $.getJSON(appUrl('/api/domains'))
                 .done(function (response) {
                     dnsTarget = response.dns_target || dnsTarget;
                     renderCustomDomains(response.domains || []);
 
                     if (successMessage) {
-                        showDomainMessage(successMessage, '#42b983');
+                        showDomainMessage(successType || 'success', successMessage);
                     }
                 })
                 .fail(function () {
-                    showDomainMessage('Unable to load custom domains right now.', '#dc3545');
+                    showDomainMessage('danger', 'Unable to load custom domains right now.');
                 });
         }
 
@@ -2667,17 +3078,57 @@ function ve_settings_script(): string
             });
         }
 
+        function resetApiKeyModalState() {
+            var \$modal = $('#apiKeyModal');
+            clearPanelFeedback(\$modal);
+            \$modal.find('.js-api-key-modal-result').addClass('d-none');
+            \$modal.find('#apiKeyModalValue').val('');
+            \$modal.find('#copyApiKey').removeClass('copied').text('Copy');
+            \$modal.find('#confirmRegenerateApiKey').removeData('submitting').prop('disabled', false).html('Generate new key <i class="fad fa-arrow-right ml-2"></i>');
+            syncApiModalMeta();
+        }
+
+        function copyTextValue(value, onSuccess, onError) {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(value).then(onSuccess).catch(onError);
+                return;
+            }
+
+            var \$temporary = $('<input type="text" class="sr-only" aria-hidden="true">').val(value).appendTo('body');
+            var field = \$temporary.get(0);
+
+            if (field) {
+                field.focus();
+                field.select();
+            }
+
+            try {
+                if (document.execCommand('copy')) {
+                    onSuccess();
+                } else {
+                    onError();
+                }
+            } catch (error) {
+                onError();
+            } finally {
+                \$temporary.remove();
+            }
+        }
+
         $('.pop_type').on('change', syncPopupMode);
         syncPopupMode();
         loadDomains();
         loadApiUsage();
+        syncApiModalMeta();
 
         $('.custom-file-input').on('change', function () {
-            var fileName = $(this).val().split('\\\\').pop();
-            $(this).next('.custom-file-label').text(fileName || 'Choose logo');
+            var fileName = $(this).val().split(String.fromCharCode(92)).pop().split('/').pop();
+            var fallbackLabel = $(this).attr('id') === 'splash_image' ? 'Choose splash image' : 'Choose logo';
+            $(this).next('.custom-file-label').text(fileName || fallbackLabel);
         });
 
         $(document).on('click', '#listDomain', function () {
+            clearPanelFeedback($('#custom_domain'));
             loadDomains('Domain list refreshed.');
         });
 
@@ -2685,7 +3136,7 @@ function ve_settings_script(): string
             var domain = $('#domainInput').val().trim().toLowerCase();
 
             if (!domain) {
-                showDomainMessage('Please enter a domain.', '#dc3545');
+                showDomainMessage('danger', 'Please enter a domain.');
                 return;
             }
 
@@ -2700,15 +3151,18 @@ function ve_settings_script(): string
                 }
             }).done(function (response) {
                 if (response.status !== 'ok') {
-                    showDomainMessage(response.message || 'Unable to add domain.', '#dc3545');
+                    var messageType = response.dns_status === 'pending_dns' || response.dns_status === 'lookup_failed' ? 'warning' : 'danger';
+                    showDomainMessage(messageType, response.message || 'Unable to add domain.');
                     return;
                 }
 
                 $('#domainInput').val('');
                 renderCustomDomains(response.domains || []);
-                showDomainMessage(response.message || ('Domain added. Point the A record to ' + dnsTarget + '.'), '#42b983');
-            }).fail(function () {
-                showDomainMessage('Unable to add domain right now.', '#dc3545');
+                showDomainMessage('success', response.message || ('Domain added. Point the A record to ' + dnsTarget + '.'));
+            }).fail(function (xhr) {
+                var response = xhr && xhr.responseJSON;
+                var messageType = response && (response.dns_status === 'pending_dns' || response.dns_status === 'lookup_failed') ? 'warning' : 'danger';
+                showDomainMessage(messageType, handleAjaxError(xhr, 'Unable to add domain right now.'));
             });
         });
 
@@ -2725,14 +3179,14 @@ function ve_settings_script(): string
                 }
             }).done(function (response) {
                 if (response.status !== 'ok') {
-                    showDomainMessage(response.message || 'Unable to remove domain.', '#dc3545');
+                    showDomainMessage('danger', response.message || 'Unable to remove domain.');
                     return;
                 }
 
                 renderCustomDomains(response.domains || []);
-                showDomainMessage(response.message || 'Domain removed successfully.', '#42b983');
-            }).fail(function () {
-                showDomainMessage('Unable to remove domain right now.', '#dc3545');
+                showDomainMessage('success', response.message || 'Domain removed successfully.');
+            }).fail(function (xhr) {
+                showDomainMessage('danger', handleAjaxError(xhr, 'Unable to remove domain right now.'));
             });
         });
 
@@ -2779,12 +3233,22 @@ function ve_settings_script(): string
                 contentType: false,
                 headers: csrfAjaxHeaders()
             }).done(function (response) {
-                if (response.status !== 'ok') {
+                var messageType = response.status === 'warning' ? 'warning' : 'success';
+
+                if (action === '/account/player' && response.player) {
+                    applyPlayerSnapshot(response.player);
+                }
+
+                if (action === '/account/api-settings' && response.api) {
+                    applyApiSnapshot(response.api);
+                }
+
+                if (response.status !== 'ok' && response.status !== 'warning') {
                     showFormFeedback(\$form, 'danger', response.message || 'Unable to save settings.');
                     return;
                 }
 
-                showFormFeedback(\$form, 'success', response.message || 'Saved successfully.');
+                showFormFeedback(\$form, messageType, response.message || 'Saved successfully.');
 
                 if (action === '/account/password') {
                     \$form.trigger('reset');
@@ -2796,14 +3260,16 @@ function ve_settings_script(): string
                 }
 
                 if (action === '/account/player') {
-                    \$form.find('input[type="file"]').val('');
-                    \$form.find('.custom-file-label').text('Choose logo');
-                }
-
-                if (action === '/account/api-settings' && response.api) {
-                    applyApiSnapshot(response.api);
+                    resetCustomFileInput(\$form.find('#logo_image'));
+                    resetCustomFileInput(\$form.find('#splash_image'));
                 }
             }).fail(function (xhr) {
+                if (action === '/account/player' && xhr && xhr.responseJSON && xhr.responseJSON.player) {
+                    applyPlayerSnapshot(xhr.responseJSON.player);
+                    resetCustomFileInput(\$form.find('#logo_image'));
+                    resetCustomFileInput(\$form.find('#splash_image'));
+                }
+
                 showFormFeedback(\$form, 'danger', handleAjaxError(xhr, 'Unable to save settings right now.'));
             }).always(function () {
                 \$submit.prop('disabled', false).html(originalLabel);
@@ -2881,12 +3347,28 @@ function ve_settings_script(): string
 
         $(document).on('click', '.regenerate-key', function (event) {
             event.preventDefault();
+            clearAllPanelFeedback();
+            resetApiKeyModalState();
+            $('#apiKeyModal').modal('show');
+        });
 
-            if (!confirm('Are you sure you want to regenerate the API key?')) {
+        $('#apiKeyModal').on('show.bs.modal', function () {
+            resetApiKeyModalState();
+        }).on('hidden.bs.modal', function () {
+            resetApiKeyModalState();
+        });
+
+        $(document).on('click', '#confirmRegenerateApiKey', function (event) {
+            event.preventDefault();
+
+            var \$button = $(this);
+
+            if (\$button.data('submitting')) {
                 return;
             }
 
-            clearAllPanelFeedback();
+            \$button.data('submitting', true).prop('disabled', true).html('<span class="spinner-border spinner-border-sm mr-2" role="status" aria-hidden="true"></span>Generating');
+            clearPanelFeedback($('#apiKeyModal'));
 
             $.ajax({
                 type: 'POST',
@@ -2898,17 +3380,43 @@ function ve_settings_script(): string
                 }
             }).done(function (response) {
                 if (response.status !== 'ok' || !response.api_key) {
-                    showSidebarFeedback('danger', response.message || 'Unable to regenerate the API key.');
+                    showApiKeyModalFeedback('danger', response.message || 'Unable to regenerate the API key.');
                     return;
                 }
 
                 $('.add-key input').val(response.api_key);
+
                 if (response.api) {
                     applyApiSnapshot(response.api);
                 }
-                showSidebarFeedback('success', response.message || 'API key regenerated successfully.');
+
+                $('#apiKeyModalValue').val(response.api_key);
+                $('#apiKeyModal').find('.js-api-key-modal-result').removeClass('d-none');
+                showApiKeyModalFeedback('success', response.message || 'API key regenerated successfully.');
+                showSidebarFeedback('success', 'API key regenerated successfully.');
             }).fail(function (xhr) {
-                showSidebarFeedback('danger', handleAjaxError(xhr, 'Unable to regenerate the API key right now.'));
+                var message = handleAjaxError(xhr, 'Unable to regenerate the API key right now.');
+                showApiKeyModalFeedback('danger', message);
+                showSidebarFeedback('danger', message);
+            }).always(function () {
+                \$button.removeData('submitting').prop('disabled', false).html('Generate new key <i class="fad fa-arrow-right ml-2"></i>');
+            });
+        });
+
+        $(document).on('click', '#copyApiKey', function (event) {
+            event.preventDefault();
+
+            var \$button = $(this);
+            var apiKey = $('#apiKeyModalValue').val();
+
+            if (!apiKey) {
+                return;
+            }
+
+            copyTextValue(String(apiKey), function () {
+                \$button.addClass('copied').text('Copied');
+            }, function () {
+                showApiKeyModalFeedback('warning', 'Unable to copy automatically. Select the key and copy it manually.');
             });
         });
 
@@ -2916,6 +3424,20 @@ function ve_settings_script(): string
             event.preventDefault();
             clearAllPanelFeedback();
             loadApiUsage('API usage refreshed.');
+        });
+
+        $(document).on('input', '#domainInput', function () {
+            clearPanelFeedback($('#custom_domain'));
+        });
+
+        $(document).on('input change', 'form.js-settings-form :input, form.delete-account-form :input', function () {
+            var \$form = $(this).closest('form');
+
+            if (!\$form.length) {
+                return;
+            }
+
+            clearPanelFeedback(\$form);
         });
     });
 </script>
@@ -2928,14 +3450,7 @@ function ve_render_settings_page(): void
     $settings = $user['settings'];
     $api = ve_api_usage_snapshot((int) $user['id']);
     ve_pull_flash();
-    $splashPreviewHtml = '<div class="text-muted small">No splash image uploaded yet.</div>';
-    $splashPath = ve_storage_relative_path_to_absolute((string) ($settings['splash_image_path'] ?? ''));
-
-    if ($splashPath !== '' && is_file($splashPath)) {
-        $splashPreviewUrl = ve_h(ve_url('/account/player/splash-preview?ts=' . rawurlencode((string) ($settings['updated_at'] ?? ve_timestamp()))));
-        $splashPreviewHtml = '<div class="small text-muted mb-2">Current protected splash image</div>' .
-            '<img src="' . $splashPreviewUrl . '" alt="Splash preview" style="display:block;width:100%;max-width:100%;border-radius:12px;border:1px solid rgba(255,255,255,0.08);background:#0c0c0c;">';
-    }
+    $splashPreviewHtml = ve_player_splash_preview_html($settings);
 
     $html = (string) file_get_contents(ve_root_path('dashboard', 'settings.html'));
 
@@ -3012,8 +3527,367 @@ function ve_render_settings_page(): void
     ve_html(ve_rewrite_html_paths($html));
 }
 
+function ve_dashboard_premium_plans_content(array $user): string
+{
+    $currentPlan = ve_user_is_premium($user) ? 'Premium active' : 'Free account';
+    $currentPlanTone = ve_user_is_premium($user) ? 'text-success' : 'text-warning';
+    $planCode = ucfirst(ve_user_plan_code($user));
+    $premiumUntil = trim((string) ($user['premium_until'] ?? ''));
+    $renewalLabel = $premiumUntil !== '' ? ve_format_datetime_label($premiumUntil, 'Active') : (ve_user_is_premium($user) ? 'Active' : 'Upgrade any time');
+    $monthlyCheckoutUrl = ve_h(ve_url('/?op=payments&amount=7.99'));
+    $halfYearCheckoutUrl = ve_h(ve_url('/?op=payments&amount=37.99'));
+    $yearlyCheckoutUrl = ve_h(ve_url('/?op=payments&amount=77.99'));
+    $bandwidth500Url = ve_h(ve_url('/?op=payments&amount=9.99'));
+    $bandwidth2000Url = ve_h(ve_url('/?op=payments&amount=24.99'));
+    $bandwidth5000Url = ve_h(ve_url('/?op=payments&amount=54.99'));
+
+    return <<<HTML
+<style type="text/css">
+    .premium-shell .hero-card,
+    .premium-shell .pricing-card,
+    .premium-shell .feature-card,
+    .premium-shell .usage-card {
+        background: linear-gradient(180deg, rgba(34,34,34,0.98) 0%, rgba(24,24,24,0.98) 100%);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 8px;
+        box-shadow: 0 20px 35px rgba(0,0,0,0.18);
+    }
+
+    .premium-shell .hero-card {
+        overflow: hidden;
+        position: relative;
+        padding: 34px;
+        margin-bottom: 26px;
+        background:
+            radial-gradient(circle at top right, rgba(255,153,0,0.22), transparent 34%),
+            linear-gradient(180deg, rgba(34,34,34,0.98) 0%, rgba(22,22,22,0.98) 100%);
+    }
+
+    .premium-shell .hero-kicker,
+    .premium-shell .section-kicker {
+        display: inline-block;
+        color: #ff9900;
+        font-size: 12px;
+        letter-spacing: .18em;
+        text-transform: uppercase;
+        font-weight: 700;
+        margin-bottom: 12px;
+    }
+
+    .premium-shell .hero-title {
+        font-size: 2.4rem;
+        line-height: 1.08;
+        margin-bottom: 12px;
+    }
+
+    .premium-shell .hero-copy,
+    .premium-shell .section-copy,
+    .premium-shell .plan-description {
+        color: #989898;
+    }
+
+    .premium-shell .usage-card {
+        padding: 22px;
+        height: 100%;
+    }
+
+    .premium-shell .usage-card .label {
+        display: block;
+        color: #7f7f7f;
+        font-size: .8571428571rem;
+        margin-bottom: 10px;
+    }
+
+    .premium-shell .usage-card .value {
+        color: #fff;
+        font-size: 1.7rem;
+        font-weight: 700;
+    }
+
+    .premium-shell .pricing-card,
+    .premium-shell .feature-card {
+        height: 100%;
+        padding: 28px 26px;
+    }
+
+    .premium-shell .pricing-card.popular {
+        border-color: rgba(255,153,0,0.36);
+        box-shadow: 0 24px 42px rgba(255,153,0,0.12);
+        transform: translateY(-8px);
+    }
+
+    .premium-shell .plan-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 28px;
+        padding: 0 12px;
+        border-radius: 999px;
+        background: rgba(255,153,0,0.16);
+        color: #ffb347;
+        font-size: .75rem;
+        font-weight: 700;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+
+    .premium-shell .plan-price {
+        display: flex;
+        align-items: flex-start;
+        color: #fff;
+        margin: 18px 0 10px;
+    }
+
+    .premium-shell .plan-price .currency {
+        font-size: 1.1rem;
+        margin-top: 9px;
+        margin-right: 6px;
+        color: #ff9900;
+    }
+
+    .premium-shell .plan-price .amount {
+        font-size: 3rem;
+        line-height: 1;
+        font-weight: 700;
+    }
+
+    .premium-shell .plan-price .period {
+        margin-top: 18px;
+        margin-left: 8px;
+        color: #8b8b8b;
+    }
+
+    .premium-shell .plan-list,
+    .premium-shell .feature-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .premium-shell .plan-list li,
+    .premium-shell .feature-list li {
+        display: flex;
+        align-items: flex-start;
+        color: #d8d8d8;
+        margin-bottom: 12px;
+        line-height: 1.5;
+    }
+
+    .premium-shell .plan-list li i,
+    .premium-shell .feature-list li i {
+        color: #42b983;
+        margin-right: 10px;
+        margin-top: 3px;
+    }
+
+    .premium-shell .pricing-actions {
+        margin-top: 24px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    .premium-shell .btn-outline-premium {
+        border: 1px solid rgba(255,255,255,0.14);
+        color: #fff;
+        background: transparent;
+    }
+
+    .premium-shell .btn-outline-premium:hover {
+        border-color: rgba(255,153,0,0.45);
+        color: #ffb347;
+    }
+
+    .premium-shell .feature-card {
+        background: linear-gradient(180deg, rgba(33,33,33,0.98) 0%, rgba(20,20,20,0.98) 100%);
+    }
+
+    .premium-shell .feature-note {
+        color: #a8a8a8;
+        margin-top: 20px;
+        padding: 14px 16px;
+        border-radius: 6px;
+        background: rgba(255,153,0,0.08);
+        border: 1px solid rgba(255,153,0,0.16);
+    }
+
+    .premium-shell .bandwidth-row {
+        margin-top: 30px;
+    }
+
+    @media (max-width: 991.98px) {
+        .premium-shell .hero-card {
+            padding: 28px 22px;
+        }
+
+        .premium-shell .hero-title {
+            font-size: 2rem;
+        }
+
+        .premium-shell .pricing-card.popular {
+            transform: none;
+        }
+    }
+</style>
+
+<div class="premium-shell container-fluid">
+    <div class="hero-card">
+        <span class="hero-kicker">Premium Plans</span>
+        <h1 class="hero-title">Choose the <strong>right</strong> plan for your account</h1>
+        <p class="hero-copy mb-4">Unlock premium-only player customization, higher limits, priority support, and extra bandwidth without relying on the broken legacy dashboard bundle.</p>
+        <div class="row">
+            <div class="col-md-4 mb-3">
+                <div class="usage-card">
+                    <span class="label">Current plan</span>
+                    <div class="value {$currentPlanTone}">{$currentPlan}</div>
+                    <small class="text-muted d-block mt-2">Tier: {$planCode}</small>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="usage-card">
+                    <span class="label">Renewal / expiry</span>
+                    <div class="value">{$renewalLabel}</div>
+                    <small class="text-muted d-block mt-2">Premium access is evaluated server-side for gated features.</small>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="usage-card">
+                    <span class="label">Included with premium</span>
+                    <div class="value">Custom player colour</div>
+                    <small class="text-muted d-block mt-2">Also unlocks ad-free dashboard usage and priority queues.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row align-items-stretch">
+        <div class="col-lg-8">
+            <div class="mb-3">
+                <span class="section-kicker">Premium account</span>
+                <h2 class="title mb-2">Upgrade the uploader experience</h2>
+                <p class="section-copy mb-0">All premium plans include unlimited working storage, stable throughput, and immediate access to premium-gated player settings.</p>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-4">
+                    <div class="pricing-card">
+                        <span class="plan-badge">Monthly</span>
+                        <div class="plan-price"><span class="currency">$</span><span class="amount">7.99</span><span class="period">/ month</span></div>
+                        <p class="plan-description">Best if you want premium gating removed immediately without a long-term commitment.</p>
+                        <ul class="plan-list">
+                            <li><i class="fad fa-badge-check"></i><span>Custom player colour and branding controls</span></li>
+                            <li><i class="fad fa-badge-check"></i><span>Priority encoding and higher upload comfort</span></li>
+                            <li><i class="fad fa-badge-check"></i><span>Faster support turnaround</span></li>
+                        </ul>
+                        <div class="pricing-actions"><a class="btn btn-primary" href="{$monthlyCheckoutUrl}">Upgrade monthly</a></div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-4">
+                    <div class="pricing-card popular">
+                        <span class="plan-badge">Most popular</span>
+                        <div class="plan-price"><span class="currency">$</span><span class="amount">37.99</span><span class="period">/ 6 months</span></div>
+                        <p class="plan-description">The better-value plan for active uploaders who want a stable premium baseline.</p>
+                        <ul class="plan-list">
+                            <li><i class="fad fa-badge-check"></i><span>Everything in monthly, with lower effective cost</span></li>
+                            <li><i class="fad fa-badge-check"></i><span>Longer premium access for branding consistency</span></li>
+                            <li><i class="fad fa-badge-check"></i><span>Ideal for teams managing recurring embeds</span></li>
+                        </ul>
+                        <div class="pricing-actions">
+                            <a class="btn btn-primary" href="{$halfYearCheckoutUrl}">Upgrade half yearly</a>
+                            <a class="btn btn-outline-premium" href="{$monthlyCheckoutUrl}">Compare</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-4">
+                    <div class="pricing-card">
+                        <span class="plan-badge">Yearly</span>
+                        <div class="plan-price"><span class="currency">$</span><span class="amount">77.99</span><span class="period">/ year</span></div>
+                        <p class="plan-description">For accounts that want the lowest relative cost and the least billing churn.</p>
+                        <ul class="plan-list">
+                            <li><i class="fad fa-badge-check"></i><span>Best value for long-running premium accounts</span></li>
+                            <li><i class="fad fa-badge-check"></i><span>Stable access to premium player customization</span></li>
+                            <li><i class="fad fa-badge-check"></i><span>Predictable annual billing</span></li>
+                        </ul>
+                        <div class="pricing-actions"><a class="btn btn-primary" href="{$yearlyCheckoutUrl}">Upgrade yearly</a></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4 mb-4">
+            <div class="feature-card">
+                <span class="section-kicker">Included</span>
+                <h3 class="title mb-3">Premium account includes</h3>
+                <ul class="feature-list">
+                    <li><i class="fad fa-badge-check"></i><span>Ad-free dashboard experience for the account owner</span></li>
+                    <li><i class="fad fa-badge-check"></i><span>Upload up to 20 GB per file</span></li>
+                    <li><i class="fad fa-badge-check"></i><span>Priority encoding and queue handling</span></li>
+                    <li><i class="fad fa-badge-check"></i><span>Custom player colour and branding flexibility</span></li>
+                    <li><i class="fad fa-badge-check"></i><span>Files never expire while premium remains active</span></li>
+                    <li><i class="fad fa-badge-check"></i><span>Priority remote upload and support handling</span></li>
+                    <li><i class="fad fa-badge-check"></i><span>Maximum playback and download speed</span></li>
+                </ul>
+                <div class="feature-note">Local checkout routes are still stubbed in this environment, but the premium entitlement used by the settings backend is fully enforced server-side.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bandwidth-row">
+        <span class="section-kicker">Bandwidth add-ons</span>
+        <h2 class="title mb-2">Scale traffic without changing the plan tier</h2>
+        <p class="section-copy mb-4">Use bandwidth boosters if you need more traffic headroom for embeds, campaigns, or short-term spikes.</p>
+        <div class="row">
+            <div class="col-md-4 mb-4">
+                <div class="pricing-card">
+                    <span class="plan-badge">Booster</span>
+                    <div class="plan-price"><span class="currency">$</span><span class="amount">9.99</span><span class="period">/ 500 GB</span></div>
+                    <p class="plan-description">A lightweight add-on for short campaigns or small traffic bursts.</p>
+                    <div class="pricing-actions"><a class="btn btn-primary" href="{$bandwidth500Url}">Buy 500 GB</a></div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="pricing-card">
+                    <span class="plan-badge">Growth</span>
+                    <div class="plan-price"><span class="currency">$</span><span class="amount">24.99</span><span class="period">/ 2 TB</span></div>
+                    <p class="plan-description">Balanced for accounts with sustained embed traffic and regular uploads.</p>
+                    <div class="pricing-actions"><a class="btn btn-primary" href="{$bandwidth2000Url}">Buy 2 TB</a></div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="pricing-card">
+                    <span class="plan-badge">High volume</span>
+                    <div class="plan-price"><span class="currency">$</span><span class="amount">54.99</span><span class="period">/ 5 TB</span></div>
+                    <p class="plan-description">Built for higher-volume accounts that need predictable traffic expansion.</p>
+                    <div class="pricing-actions"><a class="btn btn-primary" href="{$bandwidth5000Url}">Buy 5 TB</a></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+HTML;
+}
+
+function ve_render_premium_plans_page(): void
+{
+    $user = ve_require_auth();
+    $html = (string) file_get_contents(ve_root_path('dashboard', 'referrals.html'));
+    $html = ve_runtime_html_transform($html, 'dashboard/referrals.html');
+    $html = preg_replace('/<title>.*?<\/title>/i', '<title>Premium Plans - DoodStream</title>', $html, 1) ?? $html;
+    $html = str_replace('href="/premium-plans" class="nav-link">', 'href="/premium-plans" class="nav-link active">', $html);
+    $html = preg_replace(
+        '/<div class="container-fluid pt-3 pt-sm-5 mt-sm-5">[\s\S]*?(?=<footer class="footer mt-4">)/',
+        '<div class="container-fluid pt-3 pt-sm-5 mt-sm-5">' . "\n" . ve_dashboard_premium_plans_content($user) . "\n",
+        $html,
+        1
+    ) ?? $html;
+
+    ve_html(ve_rewrite_html_paths($html));
+}
+
 function ve_render_dashboard_file(string $relativePath): void
 {
+    if ($relativePath === 'dashboard/premium-plans.html') {
+        ve_render_premium_plans_page();
+    }
+
     $html = (string) file_get_contents(ve_root_path($relativePath));
     $html = ve_runtime_html_transform($html, $relativePath);
     ve_html(ve_rewrite_html_paths($html));

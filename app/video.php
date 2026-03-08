@@ -461,6 +461,389 @@ function ve_video_list_for_user(int $userId): array
     return is_array($rows) ? $rows : [];
 }
 
+function ve_video_legacy_normalize_id_list(array $values): array
+{
+    $ids = [];
+
+    foreach ($values as $value) {
+        $id = (int) $value;
+
+        if ($id > 0) {
+            $ids[$id] = $id;
+        }
+    }
+
+    return array_values($ids);
+}
+
+function ve_video_folder_generate_public_code(): string
+{
+    do {
+        $code = substr(preg_replace('/[^A-Za-z0-9]/', '', ve_random_token(10)) ?? '', 0, 10);
+        $exists = false;
+
+        if ($code !== '') {
+            $stmt = ve_db()->prepare('SELECT id FROM video_folders WHERE public_code = :code LIMIT 1');
+            $stmt->execute([':code' => $code]);
+            $exists = $stmt->fetch() !== false;
+        }
+    } while ($code === '' || $exists);
+
+    return $code;
+}
+
+function ve_video_folder_get_for_user(int $userId, int $folderId): ?array
+{
+    if ($folderId <= 0) {
+        return null;
+    }
+
+    $stmt = ve_db()->prepare(
+        'SELECT * FROM video_folders
+         WHERE id = :id AND user_id = :user_id AND deleted_at IS NULL
+         LIMIT 1'
+    );
+    $stmt->execute([
+        ':id' => $folderId,
+        ':user_id' => $userId,
+    ]);
+    $folder = $stmt->fetch();
+
+    return is_array($folder) ? $folder : null;
+}
+
+function ve_video_normalize_folder_id(int $userId, int $folderId): int
+{
+    $folder = ve_video_folder_get_for_user($userId, $folderId);
+
+    return is_array($folder) ? (int) $folder['id'] : 0;
+}
+
+function ve_video_folder_name_exists(int $userId, int $parentId, string $name, ?int $ignoreId = null): bool
+{
+    $sql = 'SELECT id FROM video_folders
+            WHERE user_id = :user_id
+              AND parent_id = :parent_id
+              AND deleted_at IS NULL
+              AND lower(name) = lower(:name)';
+    $params = [
+        ':user_id' => $userId,
+        ':parent_id' => $parentId,
+        ':name' => $name,
+    ];
+
+    if ($ignoreId !== null && $ignoreId > 0) {
+        $sql .= ' AND id <> :ignore_id';
+        $params[':ignore_id'] = $ignoreId;
+    }
+
+    $sql .= ' LIMIT 1';
+
+    $stmt = ve_db()->prepare($sql);
+    $stmt->execute($params);
+
+    return $stmt->fetch() !== false;
+}
+
+function ve_video_folder_list_children(int $userId, int $parentId): array
+{
+    $stmt = ve_db()->prepare(
+        'SELECT * FROM video_folders
+         WHERE user_id = :user_id
+           AND parent_id = :parent_id
+           AND deleted_at IS NULL
+         ORDER BY name COLLATE NOCASE ASC, id ASC'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':parent_id' => $parentId,
+    ]);
+    $rows = $stmt->fetchAll();
+
+    return is_array($rows) ? $rows : [];
+}
+
+function ve_video_folder_create(int $userId, int $parentId, string $name): array
+{
+    $name = trim(preg_replace('/\s+/', ' ', $name) ?? '');
+
+    if ($name === '') {
+        throw new RuntimeException('Folder name is required.');
+    }
+
+    if (mb_strlen($name) > 120) {
+        throw new RuntimeException('Folder names must be 120 characters or fewer.');
+    }
+
+    $parentId = ve_video_normalize_folder_id($userId, $parentId);
+
+    if (ve_video_folder_name_exists($userId, $parentId, $name)) {
+        throw new RuntimeException('A folder with that name already exists here.');
+    }
+
+    $now = ve_now();
+    $stmt = ve_db()->prepare(
+        'INSERT INTO video_folders (user_id, parent_id, public_code, name, created_at, updated_at, deleted_at)
+         VALUES (:user_id, :parent_id, :public_code, :name, :created_at, :updated_at, NULL)'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':parent_id' => $parentId,
+        ':public_code' => ve_video_folder_generate_public_code(),
+        ':name' => $name,
+        ':created_at' => $now,
+        ':updated_at' => $now,
+    ]);
+
+    $folder = ve_video_folder_get_for_user($userId, (int) ve_db()->lastInsertId());
+
+    if (!is_array($folder)) {
+        throw new RuntimeException('The folder could not be created.');
+    }
+
+    return $folder;
+}
+
+function ve_video_folder_collect_descendant_ids(int $userId, int $folderId): array
+{
+    $descendants = [];
+    $queue = [$folderId];
+
+    while ($queue !== []) {
+        $currentId = array_shift($queue);
+
+        foreach (ve_video_folder_list_children($userId, $currentId) as $folder) {
+            $childId = (int) ($folder['id'] ?? 0);
+
+            if ($childId <= 0 || isset($descendants[$childId])) {
+                continue;
+            }
+
+            $descendants[$childId] = $childId;
+            $queue[] = $childId;
+        }
+    }
+
+    return array_values($descendants);
+}
+
+function ve_video_folder_tree_for_user(int $userId, array $excludedFolderIds = []): array
+{
+    $excluded = [];
+
+    foreach (ve_video_legacy_normalize_id_list($excludedFolderIds) as $folderId) {
+        $excluded[$folderId] = true;
+
+        foreach (ve_video_folder_collect_descendant_ids($userId, $folderId) as $descendantId) {
+            $excluded[$descendantId] = true;
+        }
+    }
+
+    $stmt = ve_db()->prepare(
+        'SELECT * FROM video_folders
+         WHERE user_id = :user_id AND deleted_at IS NULL
+         ORDER BY name COLLATE NOCASE ASC, id ASC'
+    );
+    $stmt->execute([':user_id' => $userId]);
+    $rows = $stmt->fetchAll();
+    $byParent = [];
+
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $folderId = (int) ($row['id'] ?? 0);
+
+        if ($folderId <= 0 || isset($excluded[$folderId])) {
+            continue;
+        }
+
+        $parentId = (int) ($row['parent_id'] ?? 0);
+        $byParent[$parentId][] = $row;
+    }
+
+    $buildTree = static function (int $parentId) use (&$buildTree, $byParent): array {
+        $items = [];
+
+        foreach ($byParent[$parentId] ?? [] as $row) {
+            $folderId = (int) ($row['id'] ?? 0);
+            $items[] = [
+                'id' => $folderId,
+                'name' => (string) ($row['name'] ?? ''),
+                'sub_folders' => $buildTree($folderId),
+            ];
+        }
+
+        return $items;
+    };
+
+    return $buildTree(0);
+}
+
+function ve_video_legacy_sort_column(string $sortField): string
+{
+    return match ($sortField) {
+        'file_size' => 'CASE WHEN processed_size_bytes > 0 THEN processed_size_bytes ELSE original_size_bytes END',
+        'file_title' => 'title COLLATE NOCASE',
+        'file_views_full' => 'id',
+        default => 'created_at',
+    };
+}
+
+function ve_video_legacy_sort_direction(string $sortOrder): string
+{
+    return strtolower($sortOrder) === 'up' ? 'ASC' : 'DESC';
+}
+
+function ve_video_legacy_per_page(): int
+{
+    $allowed = [25, 50, 100, 500, 1000];
+    $requested = (int) ($_COOKIE['per_page'] ?? 25);
+
+    return in_array($requested, $allowed, true) ? $requested : 25;
+}
+
+function ve_video_legacy_total_for_folder(int $userId, int $folderId, string $search = ''): int
+{
+    $params = [
+        ':user_id' => $userId,
+        ':folder_id' => $folderId,
+    ];
+    $sql = 'SELECT COUNT(*) FROM videos
+            WHERE user_id = :user_id
+              AND folder_id = :folder_id
+              AND deleted_at IS NULL';
+
+    $search = trim($search);
+
+    if ($search !== '') {
+        $sql .= ' AND (title LIKE :search OR original_filename LIKE :search)';
+        $params[':search'] = '%' . $search . '%';
+    }
+
+    $stmt = ve_db()->prepare($sql);
+    $stmt->execute($params);
+
+    return (int) $stmt->fetchColumn();
+}
+
+function ve_video_legacy_list_for_folder(
+    int $userId,
+    int $folderId,
+    string $search,
+    string $sortField,
+    string $sortOrder,
+    int $limit,
+    int $offset
+): array {
+    $params = [
+        ':user_id' => $userId,
+        ':folder_id' => $folderId,
+        ':limit' => max(1, $limit),
+        ':offset' => max(0, $offset),
+    ];
+    $sql = 'SELECT * FROM videos
+            WHERE user_id = :user_id
+              AND folder_id = :folder_id
+              AND deleted_at IS NULL';
+    $search = trim($search);
+
+    if ($search !== '') {
+        $sql .= ' AND (title LIKE :search OR original_filename LIKE :search)';
+        $params[':search'] = '%' . $search . '%';
+    }
+
+    $sql .= ' ORDER BY ' . ve_video_legacy_sort_column($sortField) . ' ' . ve_video_legacy_sort_direction($sortOrder) . ', id DESC';
+    $sql .= ' LIMIT :limit OFFSET :offset';
+
+    $stmt = ve_db()->prepare($sql);
+
+    foreach ($params as $key => $value) {
+        $stmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+    }
+
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+
+    return is_array($rows) ? $rows : [];
+}
+
+function ve_video_legacy_date_label(string $timestamp): string
+{
+    $timestamp = trim($timestamp);
+
+    if ($timestamp === '') {
+        return '-';
+    }
+
+    try {
+        $date = new DateTimeImmutable($timestamp, new DateTimeZone('UTC'));
+    } catch (Exception) {
+        return $timestamp;
+    }
+
+    return $date->format('M d, Y');
+}
+
+function ve_video_public_thumbnail_url(array $video, string $mode): string
+{
+    return ve_absolute_url('/thumbs/' . rawurlencode((string) ($video['public_id'] ?? '')) . '/' . ($mode === 'splash' ? 'splash.jpg' : 'single.jpg'));
+}
+
+function ve_video_folder_to_legacy_payload(array $folder): array
+{
+    return [
+        'fld_id' => (int) ($folder['id'] ?? 0),
+        'fld_code' => (string) ($folder['public_code'] ?? ''),
+        'fld_name' => (string) ($folder['name'] ?? ''),
+    ];
+}
+
+function ve_video_to_legacy_payload(array $video): array
+{
+    $status = (string) ($video['status'] ?? VE_VIDEO_STATUS_QUEUED);
+    $publicId = (string) ($video['public_id'] ?? '');
+    $sizeBytes = (int) (($video['processed_size_bytes'] ?? 0) > 0 ? $video['processed_size_bytes'] : $video['original_size_bytes']);
+
+    return [
+        'id' => (int) ($video['id'] ?? 0),
+        'fid' => $publicId,
+        'fn' => (string) ($video['title'] ?? 'Untitled video'),
+        'ft' => (string) ($video['title'] ?? 'Untitled video'),
+        'dl' => ve_absolute_url('/d/' . rawurlencode($publicId)),
+        'dl2' => '',
+        'ec' => ve_absolute_url('/e/' . rawurlencode($publicId)),
+        'img' => $publicId,
+        'single_img_url' => ve_video_public_thumbnail_url($video, 'single'),
+        'splash_img_url' => ve_video_public_thumbnail_url($video, 'splash'),
+        'new' => false,
+        'ins' => false,
+        'cc' => false,
+        'enc' => $status === VE_VIDEO_STATUS_READY,
+        'ise' => in_array($status, [VE_VIDEO_STATUS_QUEUED, VE_VIDEO_STATUS_PROCESSING], true),
+        'vid_container' => strtoupper((string) ($video['source_extension'] ?? 'mp4')),
+        'siz' => ve_video_format_bytes($sizeBytes),
+        'cre' => ve_video_legacy_date_label((string) ($video['created_at'] ?? '')),
+        'viw' => '0',
+        'pub' => (int) ($video['is_public'] ?? 1),
+        'status' => $status,
+        'status_message' => (string) ($video['status_message'] ?? ''),
+    ];
+}
+
+function ve_video_export_payload(array $video): array
+{
+    return [
+        'dl' => ve_absolute_url('/d/' . rawurlencode((string) ($video['public_id'] ?? ''))),
+        'ec' => ve_absolute_url('/e/' . rawurlencode((string) ($video['public_id'] ?? ''))),
+        'file_title' => (string) ($video['title'] ?? 'Untitled video'),
+        'img' => (string) ($video['public_id'] ?? ''),
+        'single_img_url' => ve_video_public_thumbnail_url($video, 'single'),
+        'splash_img_url' => ve_video_public_thumbnail_url($video, 'splash'),
+    ];
+}
+
 function ve_video_has_pending_jobs(): bool
 {
     $stmt = ve_db()->query(
@@ -607,7 +990,7 @@ function ve_video_store_input_file(string $incomingPath, string $destinationPath
     return false;
 }
 
-function ve_video_insert_queued_record(int $userId, array $validated, string $title): ?array
+function ve_video_insert_queued_record(int $userId, array $validated, string $title, int $folderId = 0): ?array
 {
     $title = trim($title);
 
@@ -618,15 +1001,16 @@ function ve_video_insert_queued_record(int $userId, array $validated, string $ti
     $title = mb_substr($title, 0, 180);
     $publicId = ve_video_generate_public_id();
     $now = ve_now();
+    $folderId = ve_video_normalize_folder_id($userId, $folderId);
 
     $stmt = ve_db()->prepare(
         'INSERT INTO videos (
-            user_id, public_id, title, original_filename, source_extension, status, status_message,
+            user_id, folder_id, public_id, title, original_filename, source_extension, is_public, status, status_message,
             duration_seconds, width, height, video_codec, audio_codec,
             original_size_bytes, processed_size_bytes, compression_ratio,
             processing_error, created_at, updated_at, queued_at, processing_started_at, ready_at, deleted_at
         ) VALUES (
-            :user_id, :public_id, :title, :original_filename, :source_extension, :status, :status_message,
+            :user_id, :folder_id, :public_id, :title, :original_filename, :source_extension, 1, :status, :status_message,
             NULL, NULL, NULL, "", "",
             :original_size_bytes, 0, NULL,
             "", :created_at, :updated_at, :queued_at, NULL, NULL, NULL
@@ -634,6 +1018,7 @@ function ve_video_insert_queued_record(int $userId, array $validated, string $ti
     );
     $stmt->execute([
         ':user_id' => $userId,
+        ':folder_id' => $folderId,
         ':public_id' => $publicId,
         ':title' => $title,
         ':original_filename' => (string) ($validated['filename'] ?? ''),
@@ -663,11 +1048,12 @@ function ve_video_queue_local_source(
     string $incomingPath,
     string $originalFilename,
     ?string $title = null,
-    bool $isUploadedFile = false
+    bool $isUploadedFile = false,
+    int $folderId = 0
 ): array {
     $validated = ve_video_detect_local_file($incomingPath, $originalFilename);
     $videoTitle = is_string($title) ? $title : '';
-    $video = ve_video_insert_queued_record($userId, $validated, $videoTitle);
+    $video = ve_video_insert_queued_record($userId, $validated, $videoTitle, $folderId);
 
     if (!is_array($video)) {
         throw new RuntimeException('The video record could not be created.');
@@ -721,6 +1107,11 @@ function ve_video_to_api_payload(array $video): array
         'watch_url' => ve_url('/d/' . rawurlencode((string) ($video['public_id'] ?? ''))),
         'embed_url' => ve_url('/e/' . rawurlencode((string) ($video['public_id'] ?? ''))),
         'delete_url' => ve_url('/api/videos/' . rawurlencode((string) ($video['public_id'] ?? ''))),
+        'poster_url' => ve_url('/api/videos/' . rawurlencode((string) ($video['public_id'] ?? '')) . '/poster.jpg'),
+        'single_image_url' => ve_url('/thumbs/' . rawurlencode((string) ($video['public_id'] ?? '')) . '/single.jpg'),
+        'splash_image_url' => ve_url('/thumbs/' . rawurlencode((string) ($video['public_id'] ?? '')) . '/splash.jpg'),
+        'folder_id' => (int) ($video['folder_id'] ?? 0),
+        'is_public' => (int) ($video['is_public'] ?? 1),
         'error' => $status === VE_VIDEO_STATUS_FAILED ? (string) ($video['processing_error'] ?? '') : '',
     ];
 }
@@ -836,6 +1227,639 @@ function ve_handle_video_delete_api(string $publicId): void
         'status' => 'ok',
         'message' => 'Video deleted successfully.',
     ]);
+}
+
+function ve_video_legacy_current_user(): array
+{
+    $user = ve_current_user();
+
+    if (!is_array($user)) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Please sign in again.',
+        ], 401);
+    }
+
+    return $user;
+}
+
+function ve_video_fetch_user_videos_by_ids(int $userId, array $videoIds): array
+{
+    $videoIds = ve_video_legacy_normalize_id_list($videoIds);
+
+    if ($videoIds === []) {
+        return [];
+    }
+
+    $placeholders = implode(', ', array_fill(0, count($videoIds), '?'));
+    $params = array_merge([$userId], $videoIds);
+    $stmt = ve_db()->prepare(
+        'SELECT * FROM videos
+         WHERE user_id = ? AND deleted_at IS NULL AND id IN (' . $placeholders . ')'
+    );
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+    $byId = [];
+
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $byId[(int) ($row['id'] ?? 0)] = $row;
+    }
+
+    $ordered = [];
+
+    foreach ($videoIds as $videoId) {
+        if (isset($byId[$videoId])) {
+            $ordered[] = $byId[$videoId];
+        }
+    }
+
+    return $ordered;
+}
+
+function ve_video_delete_video_rows(array $videos): int
+{
+    $videoIds = [];
+
+    foreach ($videos as $video) {
+        if (!is_array($video)) {
+            continue;
+        }
+
+        $videoIds[] = (int) ($video['id'] ?? 0);
+        ve_video_delete_directory(ve_video_library_directory((string) ($video['public_id'] ?? '')));
+    }
+
+    $videoIds = ve_video_legacy_normalize_id_list($videoIds);
+
+    if ($videoIds === []) {
+        return 0;
+    }
+
+    $placeholders = implode(', ', array_fill(0, count($videoIds), '?'));
+    $stmt = ve_db()->prepare('DELETE FROM videos WHERE id IN (' . $placeholders . ')');
+    $stmt->execute($videoIds);
+
+    return count($videoIds);
+}
+
+function ve_video_delete_user_folders(int $userId, array $folderIds): int
+{
+    $folderIds = ve_video_legacy_normalize_id_list($folderIds);
+
+    if ($folderIds === []) {
+        return 0;
+    }
+
+    $selected = [];
+
+    foreach ($folderIds as $folderId) {
+        if (ve_video_folder_get_for_user($userId, $folderId) !== null) {
+            $selected[$folderId] = $folderId;
+        }
+    }
+
+    if ($selected === []) {
+        return 0;
+    }
+
+    $allFolderIds = $selected;
+
+    foreach (array_values($selected) as $folderId) {
+        foreach (ve_video_folder_collect_descendant_ids($userId, $folderId) as $descendantId) {
+            $allFolderIds[$descendantId] = $descendantId;
+        }
+    }
+
+    $allFolderIds = array_values($allFolderIds);
+    $placeholders = implode(', ', array_fill(0, count($allFolderIds), '?'));
+    $videoParams = array_merge([$userId], $allFolderIds);
+    $videoStmt = ve_db()->prepare(
+        'SELECT * FROM videos
+         WHERE user_id = ? AND deleted_at IS NULL AND folder_id IN (' . $placeholders . ')'
+    );
+    $videoStmt->execute($videoParams);
+    $videos = $videoStmt->fetchAll();
+
+    if (is_array($videos) && $videos !== []) {
+        ve_video_delete_video_rows($videos);
+    }
+
+    $folderParams = array_merge([$userId], $allFolderIds);
+    $folderStmt = ve_db()->prepare(
+        'DELETE FROM video_folders
+         WHERE user_id = ? AND id IN (' . $placeholders . ')'
+    );
+    $folderStmt->execute($folderParams);
+
+    return count($selected);
+}
+
+function ve_video_move_user_folders(int $userId, array $folderIds, int $targetFolderId): int
+{
+    $folderIds = ve_video_legacy_normalize_id_list($folderIds);
+    $targetFolderId = ve_video_normalize_folder_id($userId, $targetFolderId);
+
+    if ($folderIds === []) {
+        return 0;
+    }
+
+    $stmt = ve_db()->prepare(
+        'UPDATE video_folders
+         SET parent_id = :parent_id, updated_at = :updated_at
+         WHERE id = :id AND user_id = :user_id AND deleted_at IS NULL'
+    );
+    $updated = 0;
+
+    foreach ($folderIds as $folderId) {
+        $folder = ve_video_folder_get_for_user($userId, $folderId);
+
+        if (!is_array($folder)) {
+            continue;
+        }
+
+        $blockedIds = [$folderId => true];
+
+        foreach (ve_video_folder_collect_descendant_ids($userId, $folderId) as $descendantId) {
+            $blockedIds[$descendantId] = true;
+        }
+
+        if (isset($blockedIds[$targetFolderId])) {
+            continue;
+        }
+
+        $stmt->execute([
+            ':parent_id' => $targetFolderId,
+            ':updated_at' => ve_now(),
+            ':id' => $folderId,
+            ':user_id' => $userId,
+        ]);
+
+        if ($stmt->rowCount() > 0) {
+            $updated++;
+        }
+    }
+
+    return $updated;
+}
+
+function ve_video_set_user_visibility(int $userId, array $videoIds, bool $isPublic): int
+{
+    $videoIds = ve_video_legacy_normalize_id_list($videoIds);
+
+    if ($videoIds === []) {
+        return 0;
+    }
+
+    $placeholders = implode(', ', array_fill(0, count($videoIds), '?'));
+    $params = array_merge([(int) $isPublic, ve_now(), $userId], $videoIds);
+    $stmt = ve_db()->prepare(
+        'UPDATE videos
+         SET is_public = ?, updated_at = ?
+         WHERE user_id = ? AND deleted_at IS NULL AND id IN (' . $placeholders . ')'
+    );
+    $stmt->execute($params);
+
+    return $stmt->rowCount();
+}
+
+function ve_handle_legacy_videos_json(): void
+{
+    $user = ve_video_legacy_current_user();
+    $userId = (int) ($user['id'] ?? 0);
+
+    if (ve_is_method('GET') && array_key_exists('content_type', $_GET)) {
+        ve_json([
+            'status' => 'ok',
+            'message' => 'Content type preference updated for this session.',
+        ]);
+    }
+
+    if (ve_is_method('POST') && array_key_exists('file_export', $_POST)) {
+        $videoIds = $_POST['file_id'] ?? [];
+        $videos = ve_video_fetch_user_videos_by_ids($userId, is_array($videoIds) ? $videoIds : [$videoIds]);
+        ve_json(array_map('ve_video_export_payload', $videos));
+    }
+
+    if (ve_is_method('POST') && array_key_exists('fld_select', $_POST)) {
+        $excludedFolderIds = $_POST['not_in'] ?? [];
+        ve_json(ve_video_folder_tree_for_user($userId, is_array($excludedFolderIds) ? $excludedFolderIds : [$excludedFolderIds]));
+    }
+
+    if (ve_is_method('POST') && array_key_exists('create_new_folder', $_POST)) {
+        ve_require_csrf(ve_request_csrf_token());
+
+        try {
+            $folder = ve_video_folder_create(
+                $userId,
+                (int) ($_POST['fld_id'] ?? 0),
+                (string) ($_POST['create_new_folder'] ?? '')
+            );
+        } catch (RuntimeException $exception) {
+            ve_json([
+                'status' => 'fail',
+                'message' => $exception->getMessage(),
+            ]);
+        }
+
+        ve_json([ve_video_folder_to_legacy_payload($folder)]);
+    }
+
+    if (ve_is_method('POST') && array_key_exists('del_selected_fld', $_POST)) {
+        ve_require_csrf(ve_request_csrf_token());
+        $folderIds = $_POST['fld_id1'] ?? [];
+        $deletedCount = ve_video_delete_user_folders($userId, is_array($folderIds) ? $folderIds : [$folderIds]);
+
+        ve_json([
+            'status' => $deletedCount > 0 ? 'ok' : 'fail',
+            'message' => $deletedCount > 0 ? 'Folder deleted successfully.' : 'Folder not found.',
+        ]);
+    }
+
+    if (ve_is_method('POST') && array_key_exists('del_selected', $_POST)) {
+        ve_require_csrf(ve_request_csrf_token());
+        $videoIds = $_POST['file_id'] ?? [];
+        $videos = ve_video_fetch_user_videos_by_ids($userId, is_array($videoIds) ? $videoIds : [$videoIds]);
+        $deletedCount = ve_video_delete_video_rows($videos);
+
+        ve_json([
+            'status' => $deletedCount > 0 ? 'ok' : 'fail',
+            'message' => $deletedCount > 0 ? 'Videos deleted successfully.' : 'No matching videos were found.',
+        ]);
+    }
+
+    if (ve_is_method('POST') && array_key_exists('del_code', $_POST)) {
+        ve_require_csrf(ve_request_csrf_token());
+        $video = ve_video_get_for_user($userId, trim((string) ($_POST['del_code'] ?? '')));
+        $deletedCount = is_array($video) ? ve_video_delete_video_rows([$video]) : 0;
+
+        ve_json([
+            'status' => $deletedCount > 0 ? 'ok' : 'fail',
+            'message' => $deletedCount > 0 ? 'Video deleted successfully.' : 'Video not found.',
+        ]);
+    }
+
+    if (ve_is_method('POST') && array_key_exists('rename', $_POST)) {
+        ve_require_csrf(ve_request_csrf_token());
+        $name = trim((string) ($_POST['rename'] ?? ''));
+
+        if ($name === '') {
+            ve_json([
+                'status' => 'fail',
+                'message' => 'A name is required.',
+            ]);
+        }
+
+        if (isset($_POST['fld_id'])) {
+            $folder = ve_video_folder_get_for_user($userId, (int) $_POST['fld_id']);
+
+            if (!is_array($folder)) {
+                ve_json([
+                    'status' => 'fail',
+                    'message' => 'Folder not found.',
+                ]);
+            }
+
+            if (ve_video_folder_name_exists($userId, (int) ($folder['parent_id'] ?? 0), $name, (int) $folder['id'])) {
+                ve_json([
+                    'status' => 'fail',
+                    'message' => 'A folder with that name already exists here.',
+                ]);
+            }
+
+            ve_db()->prepare(
+                'UPDATE video_folders
+                 SET name = :name, updated_at = :updated_at
+                 WHERE id = :id AND user_id = :user_id'
+            )->execute([
+                ':name' => mb_substr($name, 0, 120),
+                ':updated_at' => ve_now(),
+                ':id' => (int) $folder['id'],
+                ':user_id' => $userId,
+            ]);
+
+            ve_json([[
+                'fn' => mb_substr($name, 0, 120),
+            ]]);
+        }
+
+        $videoIds = isset($_POST['file_id']) ? [(int) $_POST['file_id']] : [];
+        $videos = ve_video_fetch_user_videos_by_ids($userId, $videoIds);
+
+        if ($videos === []) {
+            ve_json([
+                'status' => 'fail',
+                'message' => 'Video not found.',
+            ]);
+        }
+
+        $video = $videos[0];
+        $title = mb_substr($name, 0, 180);
+        ve_db()->prepare(
+            'UPDATE videos
+             SET title = :title, updated_at = :updated_at
+             WHERE id = :id AND user_id = :user_id'
+        )->execute([
+            ':title' => $title,
+            ':updated_at' => ve_now(),
+            ':id' => (int) $video['id'],
+            ':user_id' => $userId,
+        ]);
+
+        ve_json([[
+            'ft' => $title,
+        ]]);
+    }
+
+    if (ve_is_method('POST') && array_key_exists('file_move', $_POST)) {
+        ve_require_csrf(ve_request_csrf_token());
+        $videoIds = $_POST['file_id'] ?? [];
+        $targetFolderId = ve_video_normalize_folder_id($userId, (int) ($_POST['to_folder'] ?? 0));
+        $normalizedVideoIds = ve_video_legacy_normalize_id_list(is_array($videoIds) ? $videoIds : [$videoIds]);
+
+        if ($normalizedVideoIds === []) {
+            ve_json([
+                'status' => 'fail',
+                'message' => 'No videos were selected.',
+            ]);
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($normalizedVideoIds), '?'));
+        $params = array_merge([$targetFolderId, ve_now(), $userId], $normalizedVideoIds);
+        $stmt = ve_db()->prepare(
+            'UPDATE videos
+             SET folder_id = ?, updated_at = ?
+             WHERE user_id = ? AND deleted_at IS NULL AND id IN (' . $placeholders . ')'
+        );
+        $stmt->execute($params);
+
+        ve_json([
+            'status' => 'ok',
+            'message' => 'Videos moved successfully.',
+        ]);
+    }
+
+    if (ve_is_method('POST') && array_key_exists('folder_move', $_POST)) {
+        ve_require_csrf(ve_request_csrf_token());
+        $folderIds = $_POST['fld_id1'] ?? [];
+        $movedCount = ve_video_move_user_folders(
+            $userId,
+            is_array($folderIds) ? $folderIds : [$folderIds],
+            (int) ($_POST['to_folder_fld'] ?? 0)
+        );
+
+        ve_json([
+            'status' => $movedCount > 0 ? 'ok' : 'fail',
+            'message' => $movedCount > 0 ? 'Folders moved successfully.' : 'No folders could be moved.',
+        ]);
+    }
+
+    if (ve_is_method('POST') && array_key_exists('set_public', $_POST)) {
+        ve_require_csrf(ve_request_csrf_token());
+        $videoIds = $_POST['file_id'] ?? [];
+        $updatedCount = ve_video_set_user_visibility($userId, is_array($videoIds) ? $videoIds : [$videoIds], true);
+
+        ve_json([
+            'status' => $updatedCount > 0 ? 'ok' : 'fail',
+            'message' => $updatedCount > 0 ? 'Videos are now public.' : 'No videos were updated.',
+        ]);
+    }
+
+    if (ve_is_method('POST') && array_key_exists('set_private', $_POST)) {
+        ve_require_csrf(ve_request_csrf_token());
+        $videoIds = $_POST['file_id'] ?? [];
+        $updatedCount = ve_video_set_user_visibility($userId, is_array($videoIds) ? $videoIds : [$videoIds], false);
+
+        ve_json([
+            'status' => $updatedCount > 0 ? 'ok' : 'fail',
+            'message' => $updatedCount > 0 ? 'Videos are now private.' : 'No videos were updated.',
+        ]);
+    }
+
+    $folderId = ve_video_normalize_folder_id($userId, (int) ($_REQUEST['fld_id'] ?? 0));
+    $currentFolder = $folderId > 0 ? ve_video_folder_get_for_user($userId, $folderId) : null;
+    $page = max(1, (int) ($_REQUEST['page'] ?? 1));
+    $perPage = ve_video_legacy_per_page();
+    $search = trim((string) ($_REQUEST['key'] ?? ''));
+    $totalVideos = ve_video_legacy_total_for_folder($userId, $folderId, $search);
+    $totalPages = max(1, (int) ceil($totalVideos / $perPage));
+    $page = min($page, $totalPages);
+    $offset = ($page - 1) * $perPage;
+    $videos = ve_video_legacy_list_for_folder(
+        $userId,
+        $folderId,
+        $search,
+        (string) ($_REQUEST['sort_field'] ?? 'file_created'),
+        (string) ($_REQUEST['sort_order'] ?? 'down'),
+        $perPage,
+        $offset
+    );
+    $folders = array_map('ve_video_folder_to_legacy_payload', ve_video_folder_list_children($userId, $folderId));
+    $processingAvailable = ve_video_processing_available();
+
+    ve_json([
+        'status' => 'ok',
+        'draw' => (int) ($_REQUEST['draw'] ?? 1),
+        'per_page' => $perPage,
+        'total_videos' => $totalVideos,
+        'current_page' => $page,
+        'folder_id' => $folderId,
+        'fld_parent_id' => is_array($currentFolder) ? (int) ($currentFolder['parent_id'] ?? 0) : 0,
+        'folders' => $folders,
+        'videos' => array_map('ve_video_to_legacy_payload', $videos),
+        'list' => array_map('ve_video_to_legacy_payload', $videos),
+        'token' => ve_csrf_token(),
+        'upload' => [
+            'utype' => 'reg',
+            'sess_id' => session_id(),
+        ],
+        'maintenance_upload' => $processingAvailable ? 0 : 1,
+        'maintenance_upload_msg' => $processingAvailable
+            ? ''
+            : 'Video uploads are disabled until FFmpeg is configured on this server.',
+    ]);
+}
+
+function ve_handle_legacy_upload_get_server(): void
+{
+    ve_video_legacy_current_user();
+
+    ve_json([
+        'success' => true,
+        'server' => [
+            'srv_url' => rtrim(ve_origin() . ve_base_path(), '/'),
+            'disk_id' => 'local',
+        ],
+    ]);
+}
+
+function ve_handle_legacy_pass_file(): void
+{
+    ve_video_legacy_current_user();
+
+    ve_json([
+        'status' => 'fail',
+        'prem' => true,
+    ]);
+}
+
+function ve_handle_legacy_upload_endpoint(): void
+{
+    $user = ve_video_legacy_current_user();
+
+    if (!ve_video_processing_available()) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'FFmpeg is not configured on this server.',
+        ], 503);
+    }
+
+    if (!isset($_FILES['file']) || !is_array($_FILES['file'])) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Choose a video file to upload.',
+        ], 422);
+    }
+
+    $file = $_FILES['file'];
+    $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+
+    if ($error !== UPLOAD_ERR_OK) {
+        ve_json([
+            'status' => 'fail',
+            'message' => ve_video_upload_error_message($error),
+        ], 422);
+    }
+
+    try {
+        $video = ve_video_queue_local_source(
+            (int) $user['id'],
+            (string) ($file['tmp_name'] ?? ''),
+            (string) ($file['name'] ?? 'video.mp4'),
+            trim((string) ($_POST['file_title'] ?? '')),
+            true,
+            (int) ($_POST['fld_id'] ?? 0)
+        );
+    } catch (RuntimeException $exception) {
+        ve_json([
+            'status' => 'fail',
+            'message' => $exception->getMessage(),
+        ], 500);
+    }
+
+    ve_json([
+        'status' => 'ok',
+        'code' => (string) ($video['public_id'] ?? ''),
+    ]);
+}
+
+function ve_handle_legacy_upload_results(): void
+{
+    $user = ve_video_legacy_current_user();
+    $publicId = trim((string) ($_POST['fn'] ?? ''));
+    $video = ve_video_get_for_user((int) $user['id'], $publicId);
+
+    if (!is_array($video)) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Uploaded video not found.',
+        ], 404);
+    }
+
+    ve_json([
+        'status' => 'ok',
+        'links' => [ve_video_to_legacy_payload($video)],
+    ]);
+}
+
+function ve_handle_legacy_add_srt(): void
+{
+    ve_video_legacy_current_user();
+
+    if (isset($_FILES['srt']) || isset($_POST['del_srt'])) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Subtitle management is not enabled for secure videos yet.',
+            'srt_list' => [],
+        ]);
+    }
+
+    ve_json([
+        'status' => 'ok',
+        'srt_list' => [],
+    ]);
+}
+
+function ve_handle_legacy_change_thumbnail(): void
+{
+    $user = ve_video_legacy_current_user();
+    $videoIds = isset($_GET['file_id']) ? [(int) $_GET['file_id']] : [];
+    $videos = ve_video_fetch_user_videos_by_ids((int) $user['id'], $videoIds);
+    $video = $videos[0] ?? null;
+
+    if (!is_array($video)) {
+        ve_html('<p class="text-muted mb-0">Video not found.</p>');
+    }
+
+    $singleUrl = ve_h(ve_video_public_thumbnail_url($video, 'single'));
+    $splashUrl = ve_h(ve_video_public_thumbnail_url($video, 'splash'));
+    $settingsUrl = ve_h(ve_url('/dashboard/settings'));
+    $posterPreview = ve_h(ve_url('/api/videos/' . rawurlencode((string) ($video['public_id'] ?? '')) . '/poster.jpg'));
+    $status = (string) ($video['status'] ?? '');
+    $body = $status === VE_VIDEO_STATUS_READY
+        ? <<<HTML
+<div class="text-center mb-3">
+    <img src="{$posterPreview}" alt="Poster preview" style="max-width:100%;border-radius:8px;max-height:240px">
+</div>
+<p class="text-muted">Poster and splash images are generated automatically from the processed video and the player settings.</p>
+<div class="form-group">
+    <label>Single image URL</label>
+    <textarea class="form-control" rows="2" onclick="this.focus();this.select()">{$singleUrl}</textarea>
+</div>
+<div class="form-group mb-0">
+    <label>Splash image URL</label>
+    <textarea class="form-control" rows="2" onclick="this.focus();this.select()">{$splashUrl}</textarea>
+</div>
+<a class="btn btn-primary mt-3" href="{$settingsUrl}">Open Player Settings</a>
+HTML
+        : '<p class="text-muted mb-0">The poster becomes available after processing finishes.</p>';
+
+    ve_html($body);
+}
+
+function ve_handle_legacy_folder_sharing(): void
+{
+    $user = ve_video_legacy_current_user();
+    $folder = ve_video_folder_get_for_user((int) $user['id'], (int) ($_GET['folder_id'] ?? 0));
+
+    if (!is_array($folder)) {
+        ve_html('<p class="text-muted mb-0">Folder not found.</p>');
+    }
+
+    $folderName = ve_h((string) ($folder['name'] ?? 'Folder'));
+    ve_html('<p class="mb-2"><strong>' . $folderName . '</strong></p><p class="text-muted mb-0">Folder sharing is not enabled in this build. Share videos through their watch or embed links instead.</p>');
+}
+
+function ve_handle_legacy_marker(): void
+{
+    $user = ve_video_legacy_current_user();
+    $videos = ve_video_fetch_user_videos_by_ids((int) $user['id'], isset($_GET['file_id']) ? [(int) $_GET['file_id']] : []);
+    $video = $videos[0] ?? null;
+
+    if (!is_array($video)) {
+        ve_html('<p class="text-muted mb-0">Video not found.</p>');
+    }
+
+    $previewImage = ve_h(ve_video_public_thumbnail_url($video, 'single'));
+    $status = (string) ($video['status'] ?? '');
+    $content = $status === VE_VIDEO_STATUS_READY
+        ? '<div class="text-center mb-3"><img src="' . $previewImage . '" alt="Preview" style="max-width:100%;border-radius:8px;max-height:220px"></div><p class="text-muted mb-0">A 4x4 hover-preview sprite and WebVTT track are generated automatically during processing for the secure player.</p>'
+        : '<p class="text-muted mb-0">Preview markers are generated automatically once processing finishes.</p>';
+
+    ve_html($content);
 }
 
 function ve_video_delete_directory(string $directory): void
@@ -1384,6 +2408,44 @@ function ve_video_resolve_poster_asset(array $video): ?array
     return null;
 }
 
+function ve_video_resolve_public_image_asset(array $video, string $mode = 'single'): ?array
+{
+    $settings = ve_video_owner_settings($video);
+
+    if ($mode === 'splash') {
+        $splashPath = ve_storage_relative_path_to_absolute((string) ($settings['splash_image_path'] ?? ''));
+
+        if ($splashPath !== '' && is_file($splashPath)) {
+            return [
+                'path' => $splashPath,
+                'mime' => ve_detect_file_mime_type($splashPath),
+            ];
+        }
+    }
+
+    $posterPath = ve_video_poster_path($video);
+
+    if (is_file($posterPath)) {
+        return [
+            'path' => $posterPath,
+            'mime' => 'image/jpeg',
+        ];
+    }
+
+    return $mode === 'splash' ? ve_video_resolve_poster_asset($video) : null;
+}
+
+function ve_video_is_request_visible(array $video): bool
+{
+    if ((int) ($video['is_public'] ?? 1) === 1) {
+        return true;
+    }
+
+    $user = ve_current_user();
+
+    return is_array($user) && (int) ($user['id'] ?? 0) === (int) ($video['user_id'] ?? 0);
+}
+
 function ve_video_process_job(int $videoId): void
 {
     $video = ve_video_get_by_id($videoId);
@@ -1753,6 +2815,20 @@ function ve_video_stream_segment(string $publicId, string $filename): void
     exit;
 }
 
+function ve_video_emit_private_file(string $path, string $mime, int $maxAge = 300): void
+{
+    if (!is_file($path)) {
+        ve_not_found();
+    }
+
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . (string) filesize($path));
+    header('Cache-Control: private, max-age=' . $maxAge);
+    header('X-Content-Type-Options: nosniff');
+    readfile($path);
+    exit;
+}
+
 function ve_video_stream_poster(string $publicId): void
 {
     $video = ve_video_get_by_public_id($publicId);
@@ -1773,12 +2849,46 @@ function ve_video_stream_poster(string $publicId): void
         ve_not_found();
     }
 
-    header('Content-Type: ' . (string) ($asset['mime'] ?? 'image/jpeg'));
-    header('Content-Length: ' . (string) filesize((string) $asset['path']));
-    header('Cache-Control: private, max-age=300');
-    header('X-Content-Type-Options: nosniff');
-    readfile((string) $asset['path']);
-    exit;
+    ve_video_emit_private_file((string) $asset['path'], (string) ($asset['mime'] ?? 'image/jpeg'));
+}
+
+function ve_video_owner_stream_poster(string $publicId): void
+{
+    $user = ve_require_auth();
+    $video = ve_video_get_for_user((int) $user['id'], $publicId);
+
+    if (!is_array($video) || (string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        ve_not_found();
+    }
+
+    $asset = ve_video_resolve_poster_asset($video);
+
+    if (!is_array($asset) || !is_file((string) ($asset['path'] ?? ''))) {
+        ve_not_found();
+    }
+
+    ve_video_emit_private_file((string) $asset['path'], (string) ($asset['mime'] ?? 'image/jpeg'));
+}
+
+function ve_video_stream_public_thumbnail(string $publicId, string $mode): void
+{
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (
+        !is_array($video)
+        || (string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY
+        || !ve_video_is_request_visible($video)
+    ) {
+        ve_not_found();
+    }
+
+    $asset = ve_video_resolve_public_image_asset($video, $mode);
+
+    if (!is_array($asset) || !is_file((string) ($asset['path'] ?? ''))) {
+        ve_not_found();
+    }
+
+    ve_video_emit_private_file((string) $asset['path'], (string) ($asset['mime'] ?? 'image/jpeg'), 86400);
 }
 
 function ve_video_stream_preview_sprite(string $publicId): void
@@ -1801,12 +2911,7 @@ function ve_video_stream_preview_sprite(string $publicId): void
         ve_not_found();
     }
 
-    header('Content-Type: image/jpeg');
-    header('Content-Length: ' . (string) filesize($path));
-    header('Cache-Control: private, max-age=300');
-    header('X-Content-Type-Options: nosniff');
-    readfile($path);
-    exit;
+    ve_video_emit_private_file($path, 'image/jpeg');
 }
 
 function ve_video_stream_preview_vtt(string $publicId): void
@@ -1961,24 +3066,337 @@ function ve_video_secure_player_script(array $session, ?string $previewVttUrl = 
 HTML;
 }
 
-function ve_render_secure_video_page(string $publicId, bool $embed = false): void
+function ve_video_duration_label(?float $seconds): string
+{
+    $duration = (float) ($seconds ?? 0);
+
+    if ($duration <= 0) {
+        return '';
+    }
+
+    return gmdate($duration >= 3600 ? 'H:i:s' : 'i:s', (int) round($duration));
+}
+
+function ve_video_public_status_message(array $video): string
+{
+    return match ((string) ($video['status'] ?? VE_VIDEO_STATUS_QUEUED)) {
+        VE_VIDEO_STATUS_FAILED => (string) (($video['processing_error'] ?? '') !== '' ? $video['processing_error'] : 'This video could not be processed.'),
+        VE_VIDEO_STATUS_PROCESSING => 'This video is still being compressed and secured for streaming.',
+        VE_VIDEO_STATUS_READY => 'Direct file download is disabled. Playback uses token-protected HLS sessions and encrypted segments.',
+        default => 'This video is queued for processing.',
+    };
+}
+
+function ve_video_player_image_mode_label(string $mode): string
+{
+    return match ($mode) {
+        'splash' => 'Splash image',
+        'single' => 'Generated poster',
+        default => 'Default artwork',
+    };
+}
+
+function ve_video_player_image_mode_description(string $mode): string
+{
+    return match ($mode) {
+        'splash' => 'A protected splash image from Account Settings is shown before playback.',
+        'single' => 'A generated poster frame is used as the player preview image.',
+        default => 'The player uses its default preview behaviour until a poster is available.',
+    };
+}
+
+function ve_render_secure_watch_page(string $publicId): void
 {
     $video = ve_video_get_by_public_id($publicId);
 
-    if (!is_array($video)) {
+    if (!is_array($video) || !ve_video_is_request_visible($video)) {
         ve_not_found();
     }
 
-    $title = ve_h((string) $video['title']);
+    $ownerSettings = ve_video_owner_settings($video);
+    $title = trim((string) ($video['title'] ?? 'Untitled video'));
+    $status = (string) ($video['status'] ?? VE_VIDEO_STATUS_QUEUED);
+    $durationLabel = ve_video_duration_label(isset($video['duration_seconds']) ? (float) $video['duration_seconds'] : null);
+    $lengthLabel = $durationLabel !== '' ? $durationLabel : ucfirst($status);
+    $processedBytes = (int) ($video['processed_size_bytes'] ?? 0);
+    $originalBytes = (int) ($video['original_size_bytes'] ?? 0);
+    $displayBytes = $processedBytes > 0 ? $processedBytes : $originalBytes;
+    $sizeLabel = $displayBytes > 0 ? ve_video_format_bytes($displayBytes) : 'Protected stream';
+    $uploadDateLabel = trim((string) ($video['created_at'] ?? ''));
+    $statusCopy = ve_video_public_status_message($video);
+    $pageTitle = ve_h($title . ' - DoodStream');
+    $safeTitle = ve_h($title);
+    $safeLength = ve_h($lengthLabel);
+    $safeSize = ve_h($sizeLabel);
+    $safeUploadDate = ve_h($uploadDateLabel !== '' ? $uploadDateLabel : 'Pending');
+    $watchPageUrl = ve_h(ve_absolute_url('/d/' . rawurlencode($publicId)));
+    $localEmbedUrl = ve_h(ve_absolute_url('/e/' . rawurlencode($publicId)));
+    $embedWidth = max(240, (int) ($ownerSettings['embed_width'] ?? 600));
+    $embedHeight = max(240, (int) ($ownerSettings['embed_height'] ?? 480));
+    $iframeCode = ve_h('<iframe width="' . $embedWidth . '" height="' . $embedHeight . '" src="' . ve_absolute_url('/e/' . rawurlencode($publicId)) . '" scrolling="no" frameborder="0" allowfullscreen="true"></iframe>');
+    $jqueryUrl = ve_h('https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js');
+    $bootstrapCssUrl = ve_h(ve_url('/assets/css/bootstrap.min.css'));
+    $styleCssUrl = ve_h(ve_url('/assets/css/style.min.css'));
+    $bootstrapJsUrl = ve_h('https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js');
+    $posterMeta = ve_h(ve_absolute_url('/assets/img/logo-s.png'));
+    $streamHeading = $status === VE_VIDEO_STATUS_READY ? 'Encrypted HLS playback' : ucfirst($status) . ' queue';
+    $streamSummary = 'Playback runs through short-lived signed sessions. Raw MP4 file delivery is disabled.';
 
-    if ((string) $video['status'] !== VE_VIDEO_STATUS_READY) {
-        $message = match ((string) $video['status']) {
-            VE_VIDEO_STATUS_FAILED => ve_h((string) (($video['processing_error'] ?? '') !== '' ? $video['processing_error'] : 'This video could not be processed.')),
-            VE_VIDEO_STATUS_PROCESSING => 'This video is still being compressed and secured for streaming.',
-            default => 'This video is queued for processing.',
-        };
-        $refresh = (string) $video['status'] === VE_VIDEO_STATUS_FAILED ? '' : '<meta http-equiv="refresh" content="12">';
-        $bootstrapCss = ve_h(ve_url('/assets/css/bootstrap.min.css'));
+    if ($processedBytes > 0 && $originalBytes > 0) {
+        $savedPercent = max(0, (1 - ($processedBytes / $originalBytes)) * 100);
+        $streamSummary = 'Compressed from ' . ve_video_format_bytes($originalBytes) . ' to ' . ve_video_format_bytes($processedBytes) . ' (' . number_format($savedPercent, 1) . '% saved).';
+    } elseif ($originalBytes > 0) {
+        $streamSummary = 'Source size ' . ve_video_format_bytes($originalBytes) . '. Compression and packaging update this once processing finishes.';
+    }
+
+    $safeStatusCopy = ve_h($statusCopy);
+    $safeStreamHeading = ve_h($streamHeading);
+    $safeStreamSummary = ve_h($streamSummary);
+
+    ve_html(<<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>{$pageTitle}</title>
+    <meta name="og:title" content="{$safeTitle}">
+    <meta name="og:sitename" content="DoodStream.com">
+    <meta name="og:image" content="{$posterMeta}">
+    <meta name="twitter:image" content="{$posterMeta}">
+    <meta name="robots" content="nofollow, noindex">
+    <script src="{$jqueryUrl}"></script>
+    <link rel="stylesheet" href="{$bootstrapCssUrl}">
+    <link rel="stylesheet" href="{$styleCssUrl}">
+    <style>
+        [style*="--aspect-ratio"] > :first-child { width: 100%; }
+        [style*="--aspect-ratio"] > img { height: auto; }
+        @supports (--custom: property) {
+            [style*="--aspect-ratio"] { position: relative; }
+            [style*="--aspect-ratio"]::before {
+                content: "";
+                display: block;
+                padding-bottom: calc(100% / (var(--aspect-ratio)));
+            }
+            [style*="--aspect-ratio"] > :first-child {
+                position: absolute;
+                top: 0;
+                left: 0;
+                height: 100%;
+            }
+        }
+        .player-wrap iframe {
+            width: 100%;
+            height: 100%;
+            min-height: 260px;
+            border: 0;
+        }
+        .title-wrap { background: #1c1c1c; }
+        .nav-pills .nav-item { margin-right: 15px; }
+        .nav-pills .nav-item .nav-link.active { background: #f90; color: #fff; }
+        .nav-pills .nav-item .nav-link {
+            font-weight: 600;
+            color: #fff;
+            background: #434645;
+            border-radius: 1px;
+            transition: color .3s ease, background .3s ease;
+        }
+        .v-owner {
+            position: absolute;
+            right: 8px;
+            top: 5px;
+            font-size: 12px;
+            color: #6d6d6d;
+        }
+        .buttonInside {
+            position: relative;
+            margin-bottom: 10px;
+        }
+        .copy-in {
+            position: absolute;
+            right: 5px;
+            top: 5px;
+            border: none;
+            outline: 0;
+            text-align: center;
+            font-weight: 700;
+            padding: 2px 10px;
+        }
+        .copy-in:hover { cursor: pointer; }
+        .export-txt {
+            height: 42px !important;
+            resize: none;
+            padding-right: 68px;
+        }
+        .ve-stream-summary {
+            display: block;
+        }
+        .ve-stream-summary .btn {
+            cursor: default;
+            pointer-events: none;
+            gap: 12px;
+        }
+        .ve-stream-summary small {
+            opacity: 0.9;
+        }
+        @media (max-width: 767.98px) {
+            .copy-in {
+                position: static;
+                width: 100%;
+                margin-top: 8px;
+            }
+            .export-txt {
+                padding-right: 12px;
+                height: 60px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="player-wrap container">
+        <div style="--aspect-ratio: 16/9;" id="os_player">
+            <iframe src="{$localEmbedUrl}" scrolling="no" frameborder="0" allowfullscreen="true"></iframe>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="title-wrap">
+            <div class="d-flex flex-wrap align-items-center justify-content-between">
+                <div class="info">
+                    <h4>{$safeTitle}</h4>
+                    <div class="d-flex flex-wrap align-items-center text-muted font-weight-bold">
+                        <div class="length"><i class="fad fa-clock mr-1"></i>{$safeLength}</div>
+                        <span class="mx-2"></span>
+                        <div class="size"><i class="fad fa-save mr-1"></i>{$safeSize}</div>
+                        <span class="mx-2"></span>
+                        <div class="uploadate"><i class="fad fa-calendar-alt mr-1"></i>{$safeUploadDate}</div>
+                    </div>
+                </div>
+                <a href="#lights" class="btn btn-white player_lights off">
+                    <i class="fad fa-lightbulb-on"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container my-3">
+        <div class="video-content text-center">
+            <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+                <li class="nav-item">
+                    <a class="nav-link active" id="pills-wl-tab" data-toggle="pill" href="#pills-wl" role="tab" aria-controls="pills-wl" aria-selected="true">Watch link</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="pills-el-tab" data-toggle="pill" href="#pills-el" role="tab" aria-controls="pills-el" aria-selected="false">Embed link</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="pills-elc-tab" data-toggle="pill" href="#pills-elc" role="tab" aria-controls="pills-elc" aria-selected="false">Embed code</a>
+                </li>
+            </ul>
+            <div class="tab-content" id="pills-tabContent">
+                <div class="v-owner">Stream URLs stay session-bound and are never exposed here.</div>
+                <div class="tab-pane fade show active buttonInside" id="pills-wl" role="tabpanel" aria-labelledby="pills-wl-tab">
+                    <textarea id="code_txt" class="form-control export-txt">{$watchPageUrl}</textarea>
+                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt">copy</button>
+                </div>
+                <div class="tab-pane fade buttonInside" id="pills-el" role="tabpanel" aria-labelledby="pills-el-tab">
+                    <textarea id="code_txt_e" class="form-control export-txt">{$localEmbedUrl}</textarea>
+                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt_e">copy</button>
+                </div>
+                <div class="tab-pane fade buttonInside" id="pills-elc" role="tabpanel" aria-labelledby="pills-elc-tab">
+                    <textarea id="code_txt_ec" class="form-control export-txt">{$iframeCode}</textarea>
+                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt_ec">copy</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="video-content text-center">
+            <div class="countdown">{$safeStatusCopy}</div>
+            <div class="download-content ve-stream-summary">
+                <label class="label-playlist d-block">Streaming security</label>
+                <div class="btn btn-primary d-flex align-items-center justify-content-between" role="presentation">
+                    <span>{$safeStreamHeading}<small class="d-block">{$safeStreamSummary}</small></span>
+                    <i class="fad fa-shield-check"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{$bootstrapJsUrl}"></script>
+    <script>
+        (function () {
+            function copyText(targetId, button) {
+                var field = document.getElementById(targetId);
+                if (!field) {
+                    return;
+                }
+
+                field.focus();
+                field.select();
+                field.setSelectionRange(0, field.value.length);
+
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(field.value);
+                } else {
+                    document.execCommand('copy');
+                }
+
+                var original = button.textContent;
+                button.textContent = 'copied';
+                window.setTimeout(function () {
+                    button.textContent = original;
+                }, 1200);
+            }
+
+            document.querySelectorAll('[data-copy-target]').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    copyText(button.getAttribute('data-copy-target'), button);
+                });
+            });
+
+            $(document).on('click', '.player_lights', function (event) {
+                event.preventDefault();
+                var button = $(this);
+
+                if (button.hasClass('off')) {
+                    button.removeClass('off').addClass('on');
+                    button.html('<i class="fad fa-lightbulb"></i>');
+                    $('body').append('<div class="modal-backdrop fade" id="player-page-fade"></div>');
+                    $('#player-page-fade').fadeTo('slow', 0.8);
+                    return;
+                }
+
+                button.removeClass('on').addClass('off');
+                button.html('<i class="fad fa-lightbulb-on"></i>');
+                $('#player-page-fade').fadeTo('slow', 0, function () {
+                    $('#player-page-fade').remove();
+                });
+            });
+        }());
+    </script>
+</body>
+</html>
+HTML);
+}
+
+function ve_render_secure_video_page(string $publicId, bool $embed = false): void
+{
+    if (!$embed) {
+        ve_render_secure_watch_page($publicId);
+    }
+
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || !ve_video_is_request_visible($video)) {
+        ve_not_found();
+    }
+
+    $title = ve_h((string) ($video['title'] ?? 'Untitled video'));
+
+    if ((string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        $message = ve_h(ve_video_public_status_message($video));
+        $refresh = (string) ($video['status'] ?? '') === VE_VIDEO_STATUS_FAILED ? '' : '<meta http-equiv="refresh" content="12">';
 
         ve_html(<<<HTML
 <!doctype html>
@@ -1988,18 +3406,34 @@ function ve_render_secure_video_page(string $publicId, bool $embed = false): voi
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{$title}</title>
     {$refresh}
-    <link rel="stylesheet" href="{$bootstrapCss}">
     <style>
-        body { margin:0; background:#050505; color:#fff; font-family:Arial,sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
-        .ve-status-card { max-width:720px; width:100%; background:#111; border:1px solid rgba(255,255,255,0.08); border-radius:20px; padding:32px; box-shadow:0 25px 60px rgba(0,0,0,0.45); }
-        .ve-status-card h1 { font-size:1.6rem; margin:0 0 14px; }
-        .ve-status-card p { color:#c8c8c8; margin:0; line-height:1.6; }
+        html, body { margin:0; background:#000; color:#fff; font-family:Arial,sans-serif; }
+        .ve-status-shell {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            text-align: center;
+        }
+        .ve-status-card {
+            max-width: 720px;
+            width: 100%;
+            padding: 24px;
+            background: rgba(17,17,17,0.94);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+        }
+        .ve-status-card h1 { margin: 0 0 12px; font-size: 1.15rem; }
+        .ve-status-card p { margin: 0; color: rgba(255,255,255,0.78); line-height: 1.6; }
     </style>
 </head>
 <body>
-    <div class="ve-status-card">
-        <h1>{$title}</h1>
-        <p>{$message}</p>
+    <div class="ve-status-shell">
+        <div class="ve-status-card">
+            <h1>{$title}</h1>
+            <p>{$message}</p>
+        </div>
     </div>
 </body>
 </html>
@@ -2008,15 +3442,11 @@ HTML);
 
     $ownerSettings = ve_video_owner_settings($video);
     $session = ve_video_issue_playback_session($video);
-    $duration = (float) ($video['duration_seconds'] ?? 0);
-    $durationLabel = $duration > 0 ? gmdate($duration >= 3600 ? 'H:i:s' : 'i:s', (int) round($duration)) : 'Ready';
     $previewVttUrl = is_file(ve_video_preview_vtt_path($video))
         ? '/stream/' . rawurlencode($publicId) . '/preview.vtt?token=' . rawurlencode((string) $session['token'])
         : null;
     $script = ve_video_secure_player_script($session, $previewVttUrl);
-    $watchUrl = ve_h(ve_absolute_url('/d/' . rawurlencode($publicId)));
-    $embedUrl = ve_h(ve_absolute_url('/e/' . rawurlencode($publicId)));
-    $showEmbedTitle = !$embed || (bool) ($ownerSettings['show_embed_title'] ?? false);
+    $showEmbedTitle = (bool) ($ownerSettings['show_embed_title'] ?? false);
     $playerColour = strtolower(trim((string) ($ownerSettings['player_colour'] ?? 'ff9900')));
 
     if (!preg_match('/^[a-f0-9]{6}$/', $playerColour)) {
@@ -2039,29 +3469,7 @@ HTML);
         $logoBadge = '<img class="ve-logo-badge" src="' . $logoBadgeUrl . '" alt="Player logo">';
     }
 
-    $bodyPadding = $embed ? '0' : '32px 20px 48px';
-    $cardRadius = $embed ? '0' : '24px';
-    $boxShadow = $embed ? 'none' : '0 30px 80px rgba(0,0,0,0.45)';
-    $bodyPanelPadding = $embed ? ($showEmbedTitle ? '16px 18px 18px' : '0') : '24px';
-    $titleSize = $embed ? '1rem' : '1.8rem';
-
-    $playerMeta = '';
-    $sharePanel = '';
-
-    if (!$embed) {
-        $safeDurationLabel = ve_h($durationLabel);
-        $playerMeta = '<div class="ve-meta"><span>Secure HLS stream</span><span>' . $safeDurationLabel . '</span></div>';
-        $sharePanel = <<<HTML
-<div class="ve-links">
-    <label>Watch page</label>
-    <input type="text" readonly value="{$watchUrl}">
-    <label>Embed page</label>
-    <input type="text" readonly value="{$embedUrl}">
-</div>
-HTML;
-    }
-
-    $titleMarkup = $showEmbedTitle ? '<h1>' . $title . '</h1>' : '';
+    $titleMarkup = $showEmbedTitle ? '<div class="ve-embed-title">' . $title . '</div>' : '';
 
     ve_html(<<<HTML
 <!doctype html>
@@ -2074,38 +3482,21 @@ HTML;
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/plyr@3/dist/plyr.css">
     <style>
         :root {
-            --ve-bg: #040404;
-            --ve-panel: #101010;
-            --ve-border: rgba(255, 255, 255, 0.08);
-            --ve-text: #f5f5f5;
-            --ve-muted: #a8a8a8;
             --ve-accent: #{$playerColour};
             --plyr-color-main: #{$playerColour};
         }
-        * { box-sizing: border-box; }
-        body {
+        html, body {
             margin: 0;
-            background:
-                radial-gradient(circle at top, rgba(255, 153, 0, 0.16), transparent 32%),
-                linear-gradient(180deg, #090909 0%, #020202 100%);
-            color: var(--ve-text);
+            background: #000;
+            color: #fff;
             font-family: Arial, sans-serif;
-            min-height: 100vh;
         }
-        .ve-shell {
-            max-width: 1120px;
-            margin: 0 auto;
-            padding: {$bodyPadding};
-        }
-        .ve-card {
-            background: var(--ve-panel);
-            border: 1px solid var(--ve-border);
-            border-radius: {$cardRadius};
-            overflow: hidden;
-            box-shadow: {$boxShadow};
+        .ve-embed-shell {
+            background: #000;
         }
         .ve-stage {
             position: relative;
+            width: 100%;
             aspect-ratio: 16 / 9;
             background: #000;
         }
@@ -2130,38 +3521,12 @@ HTML;
             pointer-events: none;
             filter: drop-shadow(0 10px 22px rgba(0,0,0,0.45));
         }
-        .ve-body {
-            padding: {$bodyPanelPadding};
-        }
-        h1 {
-            margin: 0 0 8px;
-            font-size: {$titleSize};
-            line-height: 1.2;
-        }
-        .ve-meta {
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-            margin-bottom: 18px;
-            color: var(--ve-muted);
+        .ve-embed-title {
+            padding: 10px 14px;
             font-size: 0.95rem;
-        }
-        .ve-links {
-            display: grid;
-            gap: 10px;
-        }
-        .ve-links label {
-            color: var(--ve-muted);
-            font-size: 0.9rem;
-            margin: 0;
-        }
-        .ve-links input {
-            width: 100%;
-            border: 1px solid rgba(255,255,255,0.12);
-            background: #070707;
-            color: #ddd;
-            padding: 12px 14px;
-            border-radius: 12px;
+            font-weight: 600;
+            background: #111;
+            border-top: 1px solid rgba(255,255,255,0.08);
         }
         .ve-player-state {
             position: absolute;
@@ -2174,7 +3539,6 @@ HTML;
             border-radius: 12px;
             color: #f4f4f4;
             font-size: 0.92rem;
-            backdrop-filter: blur(10px);
         }
         .ve-player-state.is-error {
             border-color: rgba(255, 85, 85, 0.35);
@@ -2183,23 +3547,21 @@ HTML;
     </style>
 </head>
 <body>
-    <div class="ve-shell">
-        <div class="ve-card">
-            <div class="ve-stage">
-                {$logoBadge}
-                <video
-                    id="ve-secure-player"
-                    controls
-                    playsinline
-                    preload="metadata"
-                    controlsList="nodownload noplaybackrate"
-                    disablepictureinpicture
-                    crossorigin="use-credentials"{$posterAttribute}
-                ></video>
-                <div id="ve-player-state" class="ve-player-state"></div>
-            </div>
-            <div class="ve-body">{$titleMarkup}{$playerMeta}{$sharePanel}</div>
+    <div class="ve-embed-shell">
+        <div class="ve-stage">
+            {$logoBadge}
+            <video
+                id="ve-secure-player"
+                controls
+                playsinline
+                preload="metadata"
+                controlsList="nodownload noplaybackrate"
+                disablepictureinpicture
+                crossorigin="use-credentials"{$posterAttribute}
+            ></video>
+            <div id="ve-player-state" class="ve-player-state"></div>
         </div>
+        {$titleMarkup}
     </div>
     {$script}
 </body>
@@ -2211,6 +3573,15 @@ function ve_video_portal_assets(): string
 {
     $css = ve_url('/assets/css/video_portal.css');
     $js = ve_url('/assets/js/video_portal.js');
+
+    return '<link rel="stylesheet" href="' . ve_h($css) . '">' . "\n" .
+        '<script src="' . ve_h($js) . '" defer></script>';
+}
+
+function ve_video_dashboard_assets(): string
+{
+    $css = ve_url('/assets/css/video_dashboard.css');
+    $js = ve_url('/assets/js/video_dashboard.js');
 
     return '<link rel="stylesheet" href="' . ve_h($css) . '">' . "\n" .
         '<script src="' . ve_h($js) . '" defer></script>';
@@ -2239,10 +3610,190 @@ HTML;
 
 function ve_video_dashboard_panel(): string
 {
+    $user = ve_current_user();
+
+    if (!is_array($user)) {
+        return '';
+    }
+
+    $settings = ve_get_user_settings((int) $user['id']);
+    $playerMode = trim((string) ($settings['player_image_mode'] ?? ''));
+    $playerModeLabel = ve_h(ve_video_player_image_mode_label($playerMode));
+    $playerModeDescription = ve_h(ve_video_player_image_mode_description($playerMode));
+    $settingsUrl = ve_h(ve_url('/dashboard/settings'));
+    $uploadLimit = ve_video_upload_limit_bytes();
+    $uploadLimitLabel = ve_h($uploadLimit > 0 ? ve_video_format_bytes($uploadLimit) : 'Server default');
+    $processingReady = ve_video_processing_available();
+    $processingCopy = ve_h($processingReady
+        ? 'FFmpeg is available. Uploads are compressed, packaged as HLS and preview images are generated automatically.'
+        : 'FFmpeg is not available yet. Uploading is disabled until video processing is configured on this server.');
+    $embedWidth = max(240, (int) ($settings['embed_width'] ?? 600));
+    $embedHeight = max(240, (int) ($settings['embed_height'] ?? 480));
+    $noPoster = ve_h(ve_url('/assets/img/no-poster.png'));
+    $acceptedTypes = ve_h('video/*,.mp4,.m4v,.mov,.mkv,.webm,.avi,.wmv,.flv,.mpeg,.mpg,.ts,.m2ts,.mts,.3gp');
+
     return <<<HTML
-<section class="ve-dashboard-panel">
-    <div id="ve-dashboard-videos" class="ve-video-portal" data-auth="1" data-scope="dashboard">
-        <div class="ve-portal-loader">Loading video dashboard...</div>
+<section class="container-fluid manage ve-videos-page">
+    <div class="container container-mp">
+        <div
+            id="ve-dashboard-videos"
+            class="ve-dashboard-videos"
+            data-settings-url="{$settingsUrl}"
+            data-player-mode-label="{$playerModeLabel}"
+            data-player-mode-description="{$playerModeDescription}"
+            data-upload-limit-label="{$uploadLimitLabel}"
+            data-processing-ready="{$processingReady}"
+            data-processing-copy="{$processingCopy}"
+            data-embed-width="{$embedWidth}"
+            data-embed-height="{$embedHeight}"
+            data-no-poster="{$noPoster}"
+        >
+            <input type="file" id="ve-video-upload-input" class="d-none" data-upload-input accept="{$acceptedTypes}" multiple>
+            <div class="file_manager">
+                <div class="title_wrap d-flex align-items-center justify-content-between flex-wrap">
+                    <div>
+                        <h2 class="title mb-1">My Videos</h2>
+                        <span>Upload, compress and manage secure streams inside the existing dashboard workflow.</span>
+                    </div>
+                    <div class="btn-group mt-3 mt-lg-0">
+                        <button type="button" class="btn btn-primary" data-action="select-files"><i class="fad fa-cloud-upload mr-2"></i>Upload Videos</button>
+                        <button type="button" class="btn btn-white" data-action="refresh"><i class="fad fa-sync mr-2"></i>Refresh</button>
+                        <a class="btn btn-white" href="{$settingsUrl}"><i class="fad fa-images mr-2"></i>Player Settings</a>
+                    </div>
+                </div>
+
+                <div data-feedback></div>
+
+                <div class="row mb-2">
+                    <div class="col-sm-6 col-xl-3 mb-4">
+                        <div class="the_box usage text-center ve-stat-box">
+                            <i class="fad fa-play-circle"></i>
+                            <span>Ready videos</span>
+                            <div class="used"><strong data-stat-ready>0</strong></div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-xl-3 mb-4">
+                        <div class="the_box usage text-center ve-stat-box">
+                            <i class="fad fa-cogs"></i>
+                            <span>Queue / processing</span>
+                            <div class="used"><strong data-stat-active>0</strong></div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-xl-3 mb-4">
+                        <div class="the_box usage text-center ve-stat-box">
+                            <i class="fad fa-hdd"></i>
+                            <span>Current storage</span>
+                            <div class="used"><strong data-stat-storage>0 B</strong></div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-xl-3 mb-4">
+                        <div class="the_box usage text-center ve-stat-box">
+                            <i class="fad fa-images"></i>
+                            <span>Poster mode</span>
+                            <div class="used"><strong data-stat-poster>{$playerModeLabel}</strong></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-xl-4 mb-4">
+                        <div class="ve-dashboard-box h-100">
+                            <h4>Upload new videos</h4>
+                            <p class="text-muted mb-3">All uploads are stored privately, compressed once and streamed back through short-lived HLS sessions instead of a public MP4 URL.</p>
+                            <button type="button" class="ve-drop-zone" data-action="select-files">
+                                <strong data-selected-title>Select one or more video files</strong>
+                                <span data-selected-files>MP4, MKV, MOV, AVI, WEBM and similar containers are accepted.</span>
+                            </button>
+                            <div class="form-group mb-2">
+                                <label class="small text-muted">Custom title for a single upload</label>
+                                <input type="text" class="form-control" data-title-input placeholder="Optional title">
+                            </div>
+                            <div class="small text-muted mb-3">Upload limit: <span data-upload-limit-copy>{$uploadLimitLabel}</span></div>
+                            <div class="small text-muted mb-3">{$processingCopy}</div>
+                            <div class="d-flex flex-wrap">
+                                <button type="button" class="btn btn-primary mr-2 mb-2" data-action="upload-selected">Start Upload</button>
+                                <button type="button" class="btn btn-white mb-2" data-action="clear-selected">Clear</button>
+                            </div>
+                            <div class="small text-muted mb-0">Splash image and poster behaviour are managed from <a href="{$settingsUrl}">Player Settings</a>.</div>
+                        </div>
+                    </div>
+                    <div class="col-xl-8 mb-4">
+                        <div class="files">
+                            <ul class="file_list" data-video-list>
+                                <li class="header d-flex align-items-center">
+                                    <div class="name">Name</div>
+                                    <div class="size">Storage</div>
+                                    <div class="date">Updated</div>
+                                    <div class="views">Actions</div>
+                                </li>
+                                <li class="d-flex align-items-center ve-list-placeholder">
+                                    <div class="name"><h4>Loading videos...</h4></div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal fade" id="ve-video-links-modal" tabindex="-1" role="dialog" aria-hidden="true">
+                <div class="modal-dialog modal-lg" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" data-modal-title>Video links</h5>
+                            <button class="close" type="button" data-dismiss="modal" aria-label="Close">
+                                <span aria-hidden="true">×</span>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="row align-items-center mb-4">
+                                <div class="col-md-4 mb-3 mb-md-0">
+                                    <div class="ve-export-preview">
+                                        <img src="{$noPoster}" alt="Poster preview" data-modal-poster>
+                                    </div>
+                                </div>
+                                <div class="col-md-8">
+                                    <div class="small text-muted mb-2" data-modal-meta>Token-protected HLS stream with generated poster and preview assets.</div>
+                                    <a class="btn btn-white btn-sm" href="{$settingsUrl}">Change player settings</a>
+                                </div>
+                            </div>
+                            <div class="tab-content">
+                                <div class="tab-pane fade show active buttonInside" id="ve-links-watch" role="tabpanel" aria-labelledby="ve-links-watch-tab">
+                                    <textarea id="ve-link-watch" class="form-control export-txt" rows="1"></textarea>
+                                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="ve-link-watch">copy</button>
+                                </div>
+                                <div class="tab-pane fade buttonInside" id="ve-links-embed" role="tabpanel" aria-labelledby="ve-links-embed-tab">
+                                    <textarea id="ve-link-embed" class="form-control export-txt" rows="1"></textarea>
+                                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="ve-link-embed">copy</button>
+                                </div>
+                                <div class="tab-pane fade buttonInside" id="ve-links-iframe" role="tabpanel" aria-labelledby="ve-links-iframe-tab">
+                                    <textarea id="ve-link-iframe" class="form-control export-txt" rows="2"></textarea>
+                                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="ve-link-iframe">copy</button>
+                                </div>
+                            </div>
+                            <ul class="nav nav-pills mb-0 mt-4" role="tablist">
+                                <li class="nav-item">
+                                    <a class="nav-link active" id="ve-links-watch-tab" data-toggle="tab" href="#ve-links-watch" role="tab" aria-controls="ve-links-watch">Watch link</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" id="ve-links-embed-tab" data-toggle="tab" href="#ve-links-embed" role="tab" aria-controls="ve-links-embed">Embed link</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" id="ve-links-iframe-tab" data-toggle="tab" href="#ve-links-iframe" role="tab" aria-controls="ve-links-iframe">Embed code</a>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="uploading-files position-fixed is-hidden" data-upload-panel>
+                <div class="header d-flex align-items-center justify-content-between">
+                    <strong data-upload-header>Uploads</strong>
+                    <button type="button" data-action="toggle-upload-panel"><i class="fad fa-minus"></i></button>
+                </div>
+                <div class="uploading-list" data-upload-list></div>
+            </div>
+        </div>
     </div>
 </section>
 HTML;
@@ -2272,10 +3823,57 @@ function ve_render_home_page(): void
 
 function ve_render_videos_dashboard_page(): void
 {
-    $html = (string) file_get_contents(ve_root_path('dashboard', 'videos.html'));
+    $user = ve_current_user();
+    $settings = is_array($user) ? ve_get_user_settings((int) $user['id']) : [];
+    $embedWidth = max(240, (int) ($settings['embed_width'] ?? 600));
+    $embedHeight = max(240, (int) ($settings['embed_height'] ?? 480));
+
+    $html = (string) file_get_contents(ve_root_path('dashboard', 'index.html'));
+    $html = str_replace('<title>Dashboard - DoodStream</title>', '<title>My Videos - DoodStream</title>', $html);
+    $html = str_replace('href="/videos"', 'href="/dashboard/videos"', $html);
+
+    $headAssets = <<<'HTML'
+<style type="text/css">.vue-simple-context-menu{top:0;left:0;margin:0;padding:0;display:none;list-style:none;position:absolute;z-index:1000000;background-color:#ecf0f1;border-bottom-width:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,"Fira Sans","Droid Sans","Helvetica Neue",sans-serif;box-shadow:0 3px 6px 0 rgba(51,51,51,.2);border-radius:4px}.vue-simple-context-menu--active{display:block}.vue-simple-context-menu__item{display:flex;color:#333;cursor:pointer;padding:5px 15px;align-items:center}.vue-simple-context-menu__item:hover{background-color:#007aff;color:#fff}.vue-simple-context-menu li:first-of-type{margin-top:4px}.vue-simple-context-menu li:last-of-type{margin-bottom:4px}.text-orange{color:#f90;}@media (max-width: 768px){ .container-fluid{ padding-right:0px; padding-left:0px; } .file_manager { border-radius:0px !important; padding: 5px !important; } .file_manager .title_wrap { padding: 0px !important; margin-bottom:0px !important; }}.my-premium .bandwidth-plans .payments .selection, .my-premium .premium-plans .payments .selection { width: 100% !important;}.my-premium .bandwidth-plans .payments .selection .custom-control.p-plan:nth-of-type(3n), .my-premium .premium-plans .payments .selection .custom-control.p-plan:nth-of-type(3n) { margin-right: 20px !important;}@media (min-width: 1200px){ .my-premium .bandwidth-plans .payments .selection .custom-control:not(.p-plan):nth-of-type(5n+1), .my-premium .premium-plans .payments .selection .custom-control:not(.p-plan):nth-of-type(5n+1) { clear: both; margin-left: 20px !important; }}.my-premium .bandwidth-plans .payments .btn, .my-premium .premium-plans .payments .btn { margin-left: 20px;}.remote-list small{ display: block; color: #ea8c00;}.remote-list .fa-external-link{ font-size: 10px; margin: 2px;}.remote-list .badge{ padding: 7px;}@media (min-width: 1350px){ .container-mp { max-width: 1350px !important; }} </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tootik/1.0.2/css/tootik.min.css" />
+<link rel="stylesheet" href="/assets/css/video_page.min.css">
+HTML;
+    $html = str_replace('</head>', $headAssets . '</head>', $html);
+
+    $contentMarker = '<div class="container-fluid pt-3 pt-sm-5 mt-sm-5">';
+    $footerMarker = '<footer class="footer mt-4">';
+    $contentPosition = strpos($html, $contentMarker);
+    $footerPosition = strpos($html, $footerMarker);
+
+    if ($contentPosition !== false && $footerPosition !== false && $footerPosition > $contentPosition) {
+        $pageContent = <<<HTML
+<div id="app" class="ve-video-dashboard-app">
+    <video-manager :ask-content-type="0" embed-code-width="{$embedWidth}" embed-code-height="{$embedHeight}"></video-manager>
+</div>
+HTML;
+        $html = substr($html, 0, $contentPosition + strlen($contentMarker))
+            . $pageContent
+            . substr($html, $footerPosition);
+    }
+
+    $selectionJs = 'https://cdnjs.cloudflare.com/ajax/libs/selection-js/1.7.1/selection.min.js';
+    $vueJs = 'https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.min.js';
+    $videoPageJs = ve_h(ve_url('/assets/js/video_page__q_f247575e8408.js'));
+    $bootstrapJs = ve_h(ve_url('/assets/js/video_dashboard_bootstrap.js'));
+    $legacyJs = ve_h(ve_url('/assets/js/video_dashboard_legacy.js'));
+    $extraScripts = '<script src="' . ve_h($vueJs) . '"></script>'
+        . '<script src="' . ve_h($selectionJs) . '"></script>'
+        . '<script src="' . $videoPageJs . '"></script>'
+        . '<script src="' . $bootstrapJs . '"></script>'
+        . '<script src="' . $legacyJs . '"></script>';
+
+    $doodLoadTag = '<script src="/assets/js/dood_load.js" type="module" defer></script>';
+
+    if (str_contains($html, $doodLoadTag)) {
+        $html = str_replace($doodLoadTag, $extraScripts . $doodLoadTag, $html);
+    } else {
+        $html = str_replace('</body>', $extraScripts . '</body>', $html);
+    }
+
     $html = ve_runtime_html_transform($html, 'dashboard/videos.html');
-    $html = str_replace('<script src="/assets/js/video_page__q_f247575e8408.js"></script>', '', $html);
-    $html = str_replace('<video-manager :ask-content-type="0" embed-code-width="600" embed-code-height="480"></video-manager>', ve_video_dashboard_panel(), $html);
-    $html = str_replace('</head>', ve_video_portal_assets() . "\n</head>", $html);
     ve_html(ve_rewrite_html_paths($html));
 }
