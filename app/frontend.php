@@ -265,6 +265,7 @@ function ve_not_found(): void
 }
 
 require __DIR__ . '/backend.php';
+require __DIR__ . '/video.php';
 
 function ve_dashboard_stats(): array
 {
@@ -911,6 +912,30 @@ function ve_dispatch(): void
         ], $deleted ? 200 : 404);
     }
 
+    if ($path === '/api/videos') {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        ve_handle_video_list_api();
+    }
+
+    if ($path === '/api/videos/upload') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_video_upload_api();
+    }
+
+    if (preg_match('#^/api/videos/([A-Za-z0-9_-]+)$#', $path, $matches) === 1) {
+        if (!ve_is_method('DELETE')) {
+            ve_method_not_allowed(['DELETE']);
+        }
+
+        ve_handle_video_delete_api($matches[1]);
+    }
+
     if ($path === '/api/domains') {
         if (ve_is_method('GET')) {
             ve_handle_custom_domain_list();
@@ -930,6 +955,18 @@ function ve_dispatch(): void
 
         $_POST['domain'] = rawurldecode($matches[1]);
         ve_handle_custom_domain_delete();
+    }
+
+    if ($path === '/api/account/api-usage') {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        $user = ve_require_auth();
+        ve_json([
+            'status' => 'ok',
+            'api' => ve_api_usage_snapshot((int) $user['id']),
+        ]);
     }
 
     if ($path === '/account/settings') {
@@ -968,6 +1005,15 @@ function ve_dispatch(): void
         ve_save_player_settings((int) $user['id']);
     }
 
+    if ($path === '/account/player/splash-preview') {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        $user = ve_require_auth();
+        ve_render_player_splash_preview((int) $user['id']);
+    }
+
     if ($path === '/account/advertising') {
         if (!ve_is_method('POST')) {
             ve_method_not_allowed(['POST']);
@@ -975,6 +1021,15 @@ function ve_dispatch(): void
 
         $user = ve_require_auth();
         ve_save_ad_settings((int) $user['id']);
+    }
+
+    if ($path === '/account/api-settings') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        $user = ve_require_auth();
+        ve_save_api_settings((int) $user['id']);
     }
 
     if ($path === '/account/delete') {
@@ -999,6 +1054,7 @@ function ve_dispatch(): void
                 'status' => 'ok',
                 'message' => 'API key regenerated successfully.',
                 'api_key' => $apiKey,
+                'api' => ve_api_usage_snapshot((int) $user['id']),
             ]);
         }
 
@@ -1030,7 +1086,7 @@ function ve_dispatch(): void
     }
 
     if ($path === '/' || $path === '/index.php') {
-        ve_render_file('index.html');
+        ve_render_home_page();
     }
 
     if ($path === '/index.html') {
@@ -1042,11 +1098,23 @@ function ve_dispatch(): void
         ve_render_reset_password_page($token);
     }
 
-    if (preg_match('#^/d/([A-Za-z0-9]+)$#', $path, $matches) === 1) {
+    if (preg_match('#^/d/([A-Za-z0-9_-]+)$#', $path, $matches) === 1) {
+        $video = ve_video_get_by_public_id($matches[1]);
+
+        if (is_array($video)) {
+            ve_render_secure_video_page($matches[1], false);
+        }
+
         ve_render_player_page($matches[1]);
     }
 
-    if (preg_match('#^/e/([A-Za-z0-9]+)$#', $path, $matches) === 1) {
+    if (preg_match('#^/e/([A-Za-z0-9_-]+)$#', $path, $matches) === 1) {
+        $video = ve_video_get_by_public_id($matches[1]);
+
+        if (is_array($video)) {
+            ve_render_secure_video_page($matches[1], true);
+        }
+
         $file = ve_player_file($matches[1]);
 
         if ($file === null || !isset($file['embed_url']) || !is_string($file['embed_url']) || $file['embed_url'] === '') {
@@ -1054,6 +1122,18 @@ function ve_dispatch(): void
         }
 
         ve_redirect($file['embed_url']);
+    }
+
+    if (preg_match('#^/stream/([A-Za-z0-9_-]+)/manifest\.m3u8$#', $path, $matches) === 1) {
+        ve_video_stream_manifest($matches[1]);
+    }
+
+    if (preg_match('#^/stream/([A-Za-z0-9_-]+)/key$#', $path, $matches) === 1) {
+        ve_video_stream_key($matches[1]);
+    }
+
+    if (preg_match('#^/stream/([A-Za-z0-9_-]+)/segment/([^/]+)$#', $path, $matches) === 1) {
+        ve_video_stream_segment($matches[1], rawurldecode($matches[2]));
     }
 
     foreach (VE_LEGACY_DASHBOARD_ROUTES as $legacy => $target) {
@@ -1081,6 +1161,10 @@ function ve_dispatch(): void
         if (is_string($slug) && array_key_exists($slug, VE_DASHBOARD_PAGES)) {
             if ($slug === 'settings') {
                 ve_render_settings_page();
+            }
+
+            if ($slug === 'videos') {
+                ve_render_videos_dashboard_page();
             }
 
             ve_render_dashboard_file(VE_DASHBOARD_PAGES[$slug]);

@@ -1,0 +1,345 @@
+.ve-home-panel,
+.ve-dashboard-panel {
+    padding: 48px 0;
+}
+
+.ve-video-portal {
+    width: 100%;
+}
+
+.ve-home-portal {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+    gap: 32px;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 20px;
+    align-items: start;
+}
+
+.ve-portal-copy {
+    color: #fff;
+    padding-top: 24px;
+}
+
+.ve-eyebrow {
+    margin: 0 0 14px;
+    color: #ffb347;
+    font-size: 0.9rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+
+.ve-home-portal h1 {
+    margin: 0 0 16px;
+    font-size: clamp(2.2rem, 4vw, 4rem);
+    line-height: 0.96;
+    font-weight: 700;
+}
+
+.ve-copy {
+    margin: 0;
+    max-width: 580px;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 1.05rem;
+    line-height: 1.8;
+}
+
+.ve-portal-app {
+    min-height: 240px;
+}
+
+.ve-portal-shell {
+    background:
+        linear-gradient(180deg, rgba(16, 16, 16, 0.96) 0%, rgba(9, 9, 9, 0.98) 100%),
+        radial-gradient(circle at top right, rgba(255, 153, 0, 0.18), transparent 32%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 28px;
+    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.38);
+    overflow: hidden;
+}
+
+.ve-portal-loader {
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.68);
+}
+
+.ve-portal-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+    gap: 24px;
+    padding: 24px;
+}
+
+.ve-upload-card,
+.ve-library-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 22px;
+    padding: 22px;
+    color: #fff;
+}
+
+.ve-upload-card h2,
+.ve-library-card h2 {
+    margin: 0 0 10px;
+    font-size: 1.2rem;
+}
+
+.ve-card-copy {
+    margin: 0 0 18px;
+    color: rgba(255, 255, 255, 0.68);
+    line-height: 1.65;
+    font-size: 0.95rem;
+}
+
+.ve-upload-zone {
+    position: relative;
+    border: 1px dashed rgba(255, 153, 0, 0.45);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(255, 153, 0, 0.08), rgba(255, 153, 0, 0.03));
+    padding: 28px 18px;
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+.ve-upload-zone strong {
+    display: block;
+    font-size: 1rem;
+    margin-bottom: 8px;
+}
+
+.ve-upload-zone span {
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 0.92rem;
+}
+
+.ve-upload-zone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.ve-upload-actions {
+    display: grid;
+    gap: 12px;
+}
+
+.ve-upload-actions input[type="text"] {
+    width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #0c0c0c;
+    color: #fff;
+    border-radius: 14px;
+    padding: 13px 14px;
+}
+
+.ve-upload-actions button,
+.ve-link-button,
+.ve-danger-button {
+    border: 0;
+    border-radius: 14px;
+    padding: 13px 16px;
+    font-weight: 700;
+    transition: transform 0.18s ease, opacity 0.18s ease, background 0.18s ease;
+}
+
+.ve-upload-actions button:hover,
+.ve-link-button:hover,
+.ve-danger-button:hover {
+    transform: translateY(-1px);
+}
+
+.ve-upload-actions button[disabled],
+.ve-link-button[disabled],
+.ve-danger-button[disabled] {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.ve-primary-button {
+    background: linear-gradient(135deg, #ff9900, #ff7300);
+    color: #fff;
+}
+
+.ve-link-button {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.ve-danger-button {
+    background: rgba(255, 84, 84, 0.12);
+    color: #ff9797;
+}
+
+.ve-upload-meta {
+    margin-top: 16px;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 0.88rem;
+    line-height: 1.7;
+}
+
+.ve-stats-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.ve-stat {
+    background: #0b0b0b;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    padding: 14px;
+}
+
+.ve-stat strong {
+    display: block;
+    font-size: 1.25rem;
+    margin-bottom: 4px;
+}
+
+.ve-stat span {
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 0.84rem;
+}
+
+.ve-video-list {
+    display: grid;
+    gap: 14px;
+}
+
+.ve-video-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 18px;
+    align-items: start;
+    padding: 18px;
+    background: #0a0a0a;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 18px;
+}
+
+.ve-video-item h3 {
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+}
+
+.ve-video-meta,
+.ve-video-status {
+    display: flex;
+    gap: 10px 14px;
+    flex-wrap: wrap;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 0.87rem;
+}
+
+.ve-video-status {
+    margin-top: 12px;
+}
+
+.ve-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 11px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    letter-spacing: 0.02em;
+    text-transform: capitalize;
+}
+
+.ve-status-pill.ready {
+    background: rgba(45, 184, 92, 0.12);
+    color: #89f5ab;
+}
+
+.ve-status-pill.processing {
+    background: rgba(255, 153, 0, 0.12);
+    color: #ffc26b;
+}
+
+.ve-status-pill.queued {
+    background: rgba(103, 168, 255, 0.12);
+    color: #a6ceff;
+}
+
+.ve-status-pill.failed {
+    background: rgba(255, 84, 84, 0.12);
+    color: #ff9d9d;
+}
+
+.ve-video-actions {
+    display: grid;
+    gap: 10px;
+    min-width: 150px;
+}
+
+.ve-inline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.ve-video-message,
+.ve-upload-feedback {
+    margin-top: 14px;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.68);
+}
+
+.ve-video-message.is-error,
+.ve-upload-feedback.is-error {
+    color: #ff9b9b;
+}
+
+.ve-empty-state {
+    padding: 28px 18px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.62);
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border-radius: 18px;
+}
+
+@media (max-width: 991.98px) {
+    .ve-home-portal,
+    .ve-portal-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .ve-home-panel,
+    .ve-dashboard-panel {
+        padding: 24px 0 36px;
+    }
+
+    .ve-home-portal {
+        gap: 20px;
+        padding: 0 12px;
+    }
+
+    .ve-portal-grid {
+        padding: 14px;
+    }
+
+    .ve-stats-row {
+        grid-template-columns: 1fr;
+    }
+
+    .ve-video-item {
+        grid-template-columns: 1fr;
+    }
+
+    .ve-video-actions {
+        min-width: 0;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}

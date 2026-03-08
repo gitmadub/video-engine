@@ -105,6 +105,15 @@ function extract_hidden_token(string $html): string
     return $matches[1];
 }
 
+/**
+ * @return string[]
+ */
+function extract_hidden_tokens(string $html): array
+{
+    preg_match_all('/<input type="hidden" name="token" value="([^"]+)"/i', $html, $matches);
+    return array_values(array_filter($matches[1] ?? [], static fn ($value): bool => is_string($value) && $value !== ''));
+}
+
 function extract_api_key(string $html): string
 {
     preg_match('/<label>API key<\/label>.*?<input[^>]*value="([^"]+)"/is', $html, $matches);
@@ -126,6 +135,13 @@ function create_test_png(string $path): void
     $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO1ZzWQAAAAASUVORK5CYII=', true);
     assert_true(is_string($png), 'Unable to create PNG fixture.');
     file_put_contents($path, $png);
+}
+
+function create_test_video(string $path): void
+{
+    $bytes = random_bytes(1024);
+    file_put_contents($path, $bytes);
+    assert_true(is_file($path) && filesize($path) > 0, 'Unable to create MP4 fixture.');
 }
 
 function wait_for_server(string $baseUrl, int $attempts = 50): void
@@ -181,16 +197,20 @@ $root = dirname(__DIR__);
 $php = 'C:\\xampp\\php\\php.exe';
 $dbPath = getenv('VE_TEST_DB_PATH') ?: ($root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'test-suite.sqlite');
 $cookiePath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'test-suite.cookie';
+$apiCookiePath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'test-suite-api.cookie';
 $resetCookiePath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'test-suite-reset.cookie';
 $logoPath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'test-logo.png';
+$videoPath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'test-video.mp4';
 $port = 18080;
 $baseUrl = getenv('VE_TEST_BASE_URL') ?: ('http://127.0.0.1:' . $port);
 $managedServer = getenv('VE_TEST_BASE_URL') === false || getenv('VE_TEST_BASE_URL') === '';
 
 @unlink($dbPath);
 @unlink($cookiePath);
+@unlink($apiCookiePath);
 @unlink($resetCookiePath);
 @unlink($logoPath);
+@unlink($videoPath);
 
 $env = array_merge($_ENV, [
     'VE_DB_DSN' => 'sqlite:' . str_replace('\\', '/', $dbPath),
@@ -244,6 +264,7 @@ try {
     }
 
     $client = new HttpClient($baseUrl, $cookiePath);
+    $apiClient = new HttpClient($baseUrl, $apiCookiePath);
     $resetClient = new HttpClient($baseUrl, $resetCookiePath);
     $ajaxHeaders = [
         'X-Requested-With' => 'XMLHttpRequest',
@@ -305,6 +326,18 @@ try {
     }
     assert_true(str_contains($settingsPage['body'], '/premium-plans'), 'Settings page should use the dashboard premium-plans route.');
     assert_true(!str_contains($settingsPage['body'], 'href="/premium"'), 'Settings page should not use the guest premium route.');
+    assert_true(str_contains($settingsPage['body'], '/account/api-settings'), 'Settings page should expose the API policy form.');
+    assert_true(str_contains($settingsPage['body'], 'data-api-status'), 'Settings page should render the API usage summary.');
+    $runtimeCsrf = extract_runtime_token($settingsPage['body']);
+    $hiddenTokens = extract_hidden_tokens($settingsPage['body']);
+    assert_true(count($hiddenTokens) >= 6, 'Every settings form should render a hidden CSRF token.');
+    foreach ($hiddenTokens as $hiddenToken) {
+        assert_true($hiddenToken === $runtimeCsrf, 'Settings forms should use the current session CSRF token.');
+    }
+    assert_true(
+        preg_match('/name="op" value="(?:my_account|my_password|my_email|premium_settings|api_settings)">\s*[A-Fa-f0-9]{32}">/i', $settingsPage['body']) !== 1,
+        'CSRF tokens must never leak as visible plaintext in the settings DOM.'
+    );
     $csrf = extract_hidden_token($settingsPage['body']);
     $oldApiKey = extract_api_key($settingsPage['body']);
 
@@ -405,6 +438,139 @@ try {
     assert_true($newApiKey === $apiRotate['api_key'], 'Rendered API key should match the JSON response.');
     $csrf = extract_hidden_token($settingsAfterApiRotate['body']);
     echo "api rotate ok\n";
+
+    $apiUsageInitial = json_response($client->request('GET', '/api/account/api-usage', [
+        'headers' => $ajaxHeaders,
+    ]));
+    assert_true(($apiUsageInitial['status'] ?? null) === 'ok', 'API usage endpoint should return success JSON.');
+    assert_true(($apiUsageInitial['api']['limits']['requests_per_hour'] ?? null) === 250, 'API usage should expose the default hourly limit.');
+
+    create_test_video($videoPath);
+    $apiHeaders = [
+        'Accept' => 'application/json',
+        'Authorization' => 'Bearer ' . $newApiKey,
+    ];
+
+    $apiList = json_response($apiClient->request('GET', '/api/videos', [
+        'headers' => $apiHeaders,
+    ]));
+    assert_true(($apiList['status'] ?? null) === 'ok', 'API key should authorize video list requests.');
+    assert_true(($apiList['capabilities']['processing_available'] ?? null) === true, 'Video API should report processing availability in the test environment.');
+
+    $apiUpload = json_response($apiClient->request('POST', '/api/videos/upload', [
+        'headers' => $apiHeaders,
+        'form' => [
+            'title' => 'API Upload Test',
+            'video' => new CURLFile($videoPath, 'video/mp4', 'api-test.mp4'),
+        ],
+    ]));
+    assert_true(($apiUpload['status'] ?? null) === 'ok', 'API key should authorize video uploads.');
+    $uploadedPublicId = (string) ($apiUpload['video']['public_id'] ?? '');
+    assert_true($uploadedPublicId !== '', 'API upload should return a public video id.');
+
+    $apiDelete = json_response($apiClient->request('DELETE', '/api/videos/' . rawurlencode($uploadedPublicId), [
+        'headers' => $apiHeaders,
+    ]));
+    assert_true(($apiDelete['status'] ?? null) === 'ok', 'API key should authorize video deletion.');
+
+    $apiUsageAfterTraffic = json_response($client->request('GET', '/api/account/api-usage', [
+        'headers' => $ajaxHeaders,
+    ]));
+    assert_true(($apiUsageAfterTraffic['api']['usage']['requests_last_hour'] ?? 0) >= 3, 'API usage should track external API requests.');
+    assert_true(($apiUsageAfterTraffic['api']['usage']['uploads_today'] ?? 0) >= 1, 'API usage should track API uploads.');
+    assert_true(count($apiUsageAfterTraffic['api']['recent_activity'] ?? []) >= 3, 'API usage should expose recent activity.');
+
+    $requestsLastHour = (int) ($apiUsageAfterTraffic['api']['usage']['requests_last_hour'] ?? 0);
+    $apiPolicy = json_response($client->request('POST', '/account/api-settings', [
+        'headers' => array_merge($ajaxHeaders, [
+            'X-CSRF-Token' => $csrf,
+        ]),
+        'form' => [
+            'token' => $csrf,
+            'api_enabled' => '1',
+            'api_requests_per_hour' => (string) ($requestsLastHour + 1),
+            'api_requests_per_day' => (string) ($requestsLastHour + 3),
+            'api_uploads_per_day' => '1',
+        ],
+    ]));
+    assert_true(($apiPolicy['status'] ?? null) === 'ok', 'Saving API policy should return success JSON.');
+    assert_true(($apiPolicy['api']['limits']['uploads_per_day'] ?? null) === 1, 'API policy response should reflect the saved upload limit.');
+
+    $limitAllowed = $apiClient->request('GET', '/api/videos', [
+        'headers' => $apiHeaders,
+    ]);
+    $limitDenied = $apiClient->request('GET', '/api/videos', [
+        'headers' => $apiHeaders,
+    ]);
+    assert_true($limitAllowed['status'] === 200, 'One request should still fit under the updated hourly limit.');
+    assert_true($limitDenied['status'] === 429, 'Hourly API limits should block excess requests.');
+
+    $uploadOnlyPolicy = json_response($client->request('POST', '/account/api-settings', [
+        'headers' => array_merge($ajaxHeaders, [
+            'X-CSRF-Token' => $csrf,
+        ]),
+        'form' => [
+            'token' => $csrf,
+            'api_enabled' => '1',
+            'api_requests_per_hour' => '50',
+            'api_requests_per_day' => '200',
+            'api_uploads_per_day' => '1',
+        ],
+    ]));
+    assert_true(($uploadOnlyPolicy['status'] ?? null) === 'ok', 'API policy should allow resetting request limits independently of upload limits.');
+
+    $uploadLimitDenied = $apiClient->request('POST', '/api/videos/upload', [
+        'headers' => $apiHeaders,
+        'form' => [
+            'title' => 'Upload Limit Test',
+            'video' => new CURLFile($videoPath, 'video/mp4', 'api-limit.mp4'),
+        ],
+    ]);
+    assert_true($uploadLimitDenied['status'] === 429, 'Daily API upload limits should block additional uploads.');
+
+    $disableApi = json_response($client->request('POST', '/account/api-settings', [
+        'headers' => array_merge($ajaxHeaders, [
+            'X-CSRF-Token' => $csrf,
+        ]),
+        'form' => [
+            'token' => $csrf,
+            'api_requests_per_hour' => '10',
+            'api_requests_per_day' => '25',
+            'api_uploads_per_day' => '5',
+        ],
+    ]));
+    assert_true(($disableApi['status'] ?? null) === 'ok' && ($disableApi['api']['enabled'] ?? true) === false, 'API access should be disableable from settings.');
+    $disabledApiCall = $apiClient->request('GET', '/api/videos', [
+        'headers' => $apiHeaders,
+    ]);
+    assert_true($disabledApiCall['status'] === 403, 'Disabled API access should reject API key requests.');
+
+    $reenableApi = json_response($client->request('POST', '/account/api-settings', [
+        'headers' => array_merge($ajaxHeaders, [
+            'X-CSRF-Token' => $csrf,
+        ]),
+        'form' => [
+            'token' => $csrf,
+            'api_enabled' => '1',
+            'api_requests_per_hour' => '50',
+            'api_requests_per_day' => '200',
+            'api_uploads_per_day' => '5',
+        ],
+    ]));
+    assert_true(($reenableApi['status'] ?? null) === 'ok' && ($reenableApi['api']['enabled'] ?? false) === true, 'API access should be re-enableable from settings.');
+
+    $oldKeyDenied = $apiClient->request('GET', '/api/videos', [
+        'headers' => [
+            'Accept' => 'application/json',
+            'Authorization' => 'Bearer ' . $oldApiKey,
+        ],
+    ]);
+    $newKeyAllowed = $apiClient->request('GET', '/api/videos', [
+        'headers' => $apiHeaders,
+    ]);
+    assert_true($oldKeyDenied['status'] === 401, 'Regenerating the API key should invalidate the previous key immediately.');
+    assert_true($newKeyAllowed['status'] === 200, 'The regenerated API key should remain usable after policy updates.');
+    echo "api usage ok\n";
 
     $domainAdd = json_response($client->request('POST', '/api/domains', [
         'form' => [
@@ -598,6 +764,8 @@ try {
     }
 
     @unlink($cookiePath);
+    @unlink($apiCookiePath);
     @unlink($resetCookiePath);
     @unlink($logoPath);
+    @unlink($videoPath);
 }

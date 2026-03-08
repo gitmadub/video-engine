@@ -11,6 +11,31 @@ function ve_storage_path(string ...$parts): string
     return ve_root_path('storage', ...$parts);
 }
 
+function ve_player_storage_path(string ...$parts): string
+{
+    return ve_storage_path('private', 'player', ...$parts);
+}
+
+function ve_storage_relative_path_to_absolute(string $relativePath): string
+{
+    $relativePath = trim(str_replace('\\', '/', $relativePath), '/');
+
+    if ($relativePath === '') {
+        return '';
+    }
+
+    $parts = array_values(array_filter(
+        explode('/', $relativePath),
+        static fn (string $part): bool => $part !== '' && $part !== '.' && $part !== '..'
+    ));
+
+    if ($parts === []) {
+        return '';
+    }
+
+    return ve_storage_path(...$parts);
+}
+
 function ve_ensure_directory(string $path): void
 {
     if (!is_dir($path)) {
@@ -40,6 +65,9 @@ function ve_config(): array
     ve_ensure_directory($storagePath);
     ve_ensure_directory(ve_storage_path('uploads'));
     ve_ensure_directory(ve_storage_path('uploads', 'logos'));
+    ve_ensure_directory(ve_storage_path('private'));
+    ve_ensure_directory(ve_player_storage_path());
+    ve_ensure_directory(ve_player_storage_path('splashes'));
 
     $config = [
         'db_dsn' => getenv('VE_DB_DSN') ?: 'sqlite:' . str_replace('\\', '/', ve_storage_path('video-engine.sqlite')),
@@ -123,14 +151,144 @@ function ve_db(): PDO
 
 function ve_initialize_database(PDO $pdo): void
 {
-    $exists = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'")->fetchColumn();
+    $schema = (string) file_get_contents(ve_root_path('database', 'schema.sql'));
 
-    if ($exists === false) {
-        $schema = (string) file_get_contents(ve_root_path('database', 'schema.sql'));
-        $pdo->exec($schema);
+    foreach (ve_schema_statements($schema, false) as $statement) {
+        $pdo->exec($statement);
+    }
+
+    ve_run_database_migrations($pdo);
+
+    foreach (ve_schema_statements($schema, true) as $statement) {
+        $pdo->exec($statement);
     }
 
     ve_seed_ftp_servers($pdo);
+}
+
+function ve_schema_statements(string $schema, bool $indexesOnly): array
+{
+    $statements = preg_split('/;\s*(?:\r?\n|$)/', $schema) ?: [];
+    $filtered = [];
+
+    foreach ($statements as $statement) {
+        $statement = trim($statement);
+
+        if ($statement === '') {
+            continue;
+        }
+
+        $isIndexStatement = preg_match('/^CREATE\s+(?:UNIQUE\s+)?INDEX\b/i', $statement) === 1;
+
+        if ($indexesOnly !== $isIndexStatement) {
+            continue;
+        }
+
+        $filtered[] = $statement;
+    }
+
+    return $filtered;
+}
+
+function ve_table_columns(PDO $pdo, string $table): array
+{
+    $quotedTable = str_replace("'", "''", $table);
+    $columns = $pdo->query("PRAGMA table_info('{$quotedTable}')")->fetchAll();
+
+    if (!is_array($columns)) {
+        return [];
+    }
+
+    return array_map(
+        static fn (array $column): string => (string) ($column['name'] ?? ''),
+        array_filter($columns, static fn ($column): bool => is_array($column))
+    );
+}
+
+function ve_table_has_column(PDO $pdo, string $table, string $column): bool
+{
+    return in_array($column, ve_table_columns($pdo, $table), true);
+}
+
+function ve_add_column_if_missing(PDO $pdo, string $table, string $column, string $definition): void
+{
+    if (ve_table_has_column($pdo, $table, $column)) {
+        return;
+    }
+
+    $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+}
+
+function ve_run_database_migrations(PDO $pdo): void
+{
+    ve_add_column_if_missing($pdo, 'users', 'api_key_hash', "TEXT NOT NULL DEFAULT ''");
+    ve_add_column_if_missing($pdo, 'users', 'api_key_last_rotated_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'users', 'api_key_last_used_at', 'TEXT DEFAULT NULL');
+
+    ve_add_column_if_missing($pdo, 'user_settings', 'api_enabled', 'INTEGER NOT NULL DEFAULT 1');
+    ve_add_column_if_missing($pdo, 'user_settings', 'api_requests_per_hour', 'INTEGER NOT NULL DEFAULT 250');
+    ve_add_column_if_missing($pdo, 'user_settings', 'api_requests_per_day', 'INTEGER NOT NULL DEFAULT 5000');
+    ve_add_column_if_missing($pdo, 'user_settings', 'api_uploads_per_day', 'INTEGER NOT NULL DEFAULT 25');
+    ve_add_column_if_missing($pdo, 'user_settings', 'splash_image_path', "TEXT NOT NULL DEFAULT ''");
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS api_request_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            api_key_hash TEXT NOT NULL,
+            auth_type TEXT NOT NULL DEFAULT "api_key",
+            request_kind TEXT NOT NULL DEFAULT "request",
+            endpoint TEXT NOT NULL,
+            http_method TEXT NOT NULL,
+            status_code INTEGER NOT NULL,
+            bytes_in INTEGER NOT NULL DEFAULT 0,
+            client_ip TEXT NOT NULL DEFAULT "",
+            user_agent TEXT NOT NULL DEFAULT "",
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )'
+    );
+
+    $users = $pdo->query('SELECT id, api_key_encrypted, created_at, updated_at, api_key_hash, api_key_last_rotated_at FROM users')->fetchAll();
+
+    if (is_array($users)) {
+        $update = $pdo->prepare(
+            'UPDATE users
+             SET api_key_encrypted = :api_key_encrypted,
+                 api_key_hash = :api_key_hash,
+                 api_key_last_rotated_at = :api_key_last_rotated_at
+             WHERE id = :id'
+        );
+
+        foreach ($users as $user) {
+            if (!is_array($user)) {
+                continue;
+            }
+
+            $rawKey = ve_decrypt_string((string) ($user['api_key_encrypted'] ?? ''));
+
+            if ($rawKey === '') {
+                $rawKey = ve_generate_api_key();
+            }
+
+            $rotatedAt = (string) ($user['api_key_last_rotated_at'] ?? '');
+
+            if ($rotatedAt === '') {
+                $rotatedAt = (string) ($user['updated_at'] ?: $user['created_at'] ?: ve_now());
+            }
+
+            $update->execute([
+                ':api_key_encrypted' => ve_encrypt_string($rawKey),
+                ':api_key_hash' => ve_api_key_hash($rawKey),
+                ':api_key_last_rotated_at' => $rotatedAt,
+                ':id' => (int) $user['id'],
+            ]);
+        }
+    }
+
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_created ON api_request_logs(user_id, created_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_kind_created ON api_request_logs(user_id, request_kind, created_at DESC)');
 }
 
 function ve_seed_ftp_servers(PDO $pdo): void
@@ -406,12 +564,14 @@ function ve_create_default_settings(PDO $pdo, int $userId): void
             user_id, payment_method, payment_id, ads_mode, uploader_type, embed_domains,
             embed_access_only, disable_download, disable_adblock, extract_subtitles,
             show_embed_title, auto_subtitle_start, player_image_mode, player_colour,
-            embed_width, embed_height, logo_path, vast_url, pop_type, pop_url, pop_cap, updated_at
+            embed_width, embed_height, logo_path, splash_image_path, vast_url, pop_type, pop_url, pop_cap,
+            api_enabled, api_requests_per_hour, api_requests_per_day, api_uploads_per_day, updated_at
         ) VALUES (
             :user_id, :payment_method, :payment_id, :ads_mode, :uploader_type, :embed_domains,
             :embed_access_only, :disable_download, :disable_adblock, :extract_subtitles,
             :show_embed_title, :auto_subtitle_start, :player_image_mode, :player_colour,
-            :embed_width, :embed_height, :logo_path, :vast_url, :pop_type, :pop_url, :pop_cap, :updated_at
+            :embed_width, :embed_height, :logo_path, :splash_image_path, :vast_url, :pop_type, :pop_url, :pop_cap,
+            :api_enabled, :api_requests_per_hour, :api_requests_per_day, :api_uploads_per_day, :updated_at
         )'
     );
 
@@ -433,10 +593,15 @@ function ve_create_default_settings(PDO $pdo, int $userId): void
         ':embed_width' => 600,
         ':embed_height' => 480,
         ':logo_path' => '',
+        ':splash_image_path' => '',
         ':vast_url' => '',
         ':pop_type' => '1',
         ':pop_url' => '',
         ':pop_cap' => 0,
+        ':api_enabled' => 1,
+        ':api_requests_per_hour' => 250,
+        ':api_requests_per_day' => 5000,
+        ':api_uploads_per_day' => 25,
         ':updated_at' => ve_now(),
     ]);
 }
@@ -444,6 +609,11 @@ function ve_create_default_settings(PDO $pdo, int $userId): void
 function ve_generate_api_key(): string
 {
     return ve_random_token(18);
+}
+
+function ve_api_key_hash(string $apiKey): string
+{
+    return hash_hmac('sha256', $apiKey, base64_encode(ve_app_secret()));
 }
 
 function ve_generate_ftp_password(): string
@@ -472,6 +642,10 @@ function ve_get_user_settings(int $userId): array
     }
 
     $settings['embed_domains_array'] = json_decode((string) $settings['embed_domains'], true) ?: [];
+    $settings['api_enabled'] = (int) ($settings['api_enabled'] ?? 1);
+    $settings['api_requests_per_hour'] = (int) ($settings['api_requests_per_hour'] ?? 250);
+    $settings['api_requests_per_day'] = (int) ($settings['api_requests_per_day'] ?? 5000);
+    $settings['api_uploads_per_day'] = (int) ($settings['api_uploads_per_day'] ?? 25);
 
     return $settings;
 }
@@ -485,6 +659,30 @@ function ve_find_user_by_login(string $login): ?array
     return is_array($user) ? $user : null;
 }
 
+function ve_find_user_by_api_key(string $apiKey): ?array
+{
+    $stmt = ve_db()->prepare(
+        'SELECT * FROM users
+         WHERE api_key_hash = :api_key_hash
+           AND status = :status
+           AND deleted_at IS NULL
+         LIMIT 1'
+    );
+    $stmt->execute([
+        ':api_key_hash' => ve_api_key_hash($apiKey),
+        ':status' => 'active',
+    ]);
+    $user = $stmt->fetch();
+
+    if (!is_array($user)) {
+        return null;
+    }
+
+    $user['settings'] = ve_get_user_settings((int) $user['id']);
+
+    return $user;
+}
+
 function ve_create_user(string $username, string $email, string $password): array
 {
     $pdo = ve_db();
@@ -494,10 +692,12 @@ function ve_create_user(string $username, string $email, string $password): arra
 
     $stmt = $pdo->prepare(
         'INSERT INTO users (
-            username, email, password_hash, status, api_key_encrypted, ftp_username,
+            username, email, password_hash, status, api_key_encrypted, api_key_hash,
+            api_key_last_rotated_at, api_key_last_used_at, ftp_username,
             ftp_password_encrypted, created_at, updated_at
         ) VALUES (
-            :username, :email, :password_hash, :status, :api_key_encrypted, :ftp_username,
+            :username, :email, :password_hash, :status, :api_key_encrypted, :api_key_hash,
+            :api_key_last_rotated_at, :api_key_last_used_at, :ftp_username,
             :ftp_password_encrypted, :created_at, :updated_at
         )'
     );
@@ -508,6 +708,9 @@ function ve_create_user(string $username, string $email, string $password): arra
         ':password_hash' => password_hash($password, PASSWORD_DEFAULT),
         ':status' => 'active',
         ':api_key_encrypted' => ve_encrypt_string($apiKey),
+        ':api_key_hash' => ve_api_key_hash($apiKey),
+        ':api_key_last_rotated_at' => $now,
+        ':api_key_last_used_at' => null,
         ':ftp_username' => $username,
         ':ftp_password_encrypted' => ve_encrypt_string($ftpPassword),
         ':created_at' => $now,
@@ -668,9 +871,18 @@ function ve_user_ftp_password(array $user): string
 function ve_regenerate_api_key_for_user(int $userId): string
 {
     $apiKey = ve_generate_api_key();
-    $stmt = ve_db()->prepare('UPDATE users SET api_key_encrypted = :api_key_encrypted, updated_at = :updated_at WHERE id = :id');
+    $stmt = ve_db()->prepare(
+        'UPDATE users
+         SET api_key_encrypted = :api_key_encrypted,
+             api_key_hash = :api_key_hash,
+             api_key_last_rotated_at = :api_key_last_rotated_at,
+             updated_at = :updated_at
+         WHERE id = :id'
+    );
     $stmt->execute([
         ':api_key_encrypted' => ve_encrypt_string($apiKey),
+        ':api_key_hash' => ve_api_key_hash($apiKey),
+        ':api_key_last_rotated_at' => ve_now(),
         ':updated_at' => ve_now(),
         ':id' => $userId,
     ]);
@@ -678,6 +890,286 @@ function ve_regenerate_api_key_for_user(int $userId): string
     ve_add_notification($userId, 'API key regenerated', 'Your API key was rotated from the settings page.');
 
     return $apiKey;
+}
+
+function ve_format_datetime_label(?string $timestamp, string $fallback = 'Never'): string
+{
+    if (!is_string($timestamp) || trim($timestamp) === '') {
+        return $fallback;
+    }
+
+    return ve_notification_date($timestamp);
+}
+
+function ve_human_bytes(int $bytes): string
+{
+    if ($bytes <= 0) {
+        return '0 B';
+    }
+
+    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    $size = (float) $bytes;
+    $unit = 0;
+
+    while ($size >= 1024 && $unit < count($units) - 1) {
+        $size /= 1024;
+        $unit++;
+    }
+
+    $precision = $unit === 0 ? 0 : 1;
+
+    return number_format($size, $precision) . ' ' . $units[$unit];
+}
+
+function ve_api_extract_key_from_request(): ?string
+{
+    $authorization = trim((string) ($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? ''));
+
+    if ($authorization !== '' && preg_match('/^(?:Bearer|ApiKey)\s+(.+)$/i', $authorization, $matches) === 1) {
+        $candidate = trim((string) ($matches[1] ?? ''));
+
+        if ($candidate !== '') {
+            return $candidate;
+        }
+    }
+
+    $headerKey = trim((string) ($_SERVER['HTTP_X_API_KEY'] ?? ''));
+
+    return $headerKey !== '' ? $headerKey : null;
+}
+
+function ve_api_limit_value(array $settings, string $key, int $default): int
+{
+    return max(0, (int) ($settings[$key] ?? $default));
+}
+
+function ve_api_window_start(string $window): string
+{
+    $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+
+    return match ($window) {
+        'hour' => $now->modify('-1 hour')->format('Y-m-d H:i:s'),
+        'month' => $now->modify('first day of this month')->setTime(0, 0)->format('Y-m-d H:i:s'),
+        default => $now->setTime(0, 0)->format('Y-m-d H:i:s'),
+    };
+}
+
+function ve_api_count_requests_since(int $userId, string $since, ?string $requestKind = null): int
+{
+    $sql = 'SELECT COUNT(*) FROM api_request_logs WHERE user_id = :user_id AND created_at >= :since';
+    $params = [
+        ':user_id' => $userId,
+        ':since' => $since,
+    ];
+
+    if ($requestKind !== null) {
+        $sql .= ' AND request_kind = :request_kind';
+        $params[':request_kind'] = $requestKind;
+    }
+
+    $stmt = ve_db()->prepare($sql);
+    $stmt->execute($params);
+
+    return (int) $stmt->fetchColumn();
+}
+
+function ve_api_recent_activity(int $userId, int $limit = 10): array
+{
+    $limit = max(1, min(50, $limit));
+    $stmt = ve_db()->prepare(
+        'SELECT request_kind, endpoint, http_method, status_code, bytes_in, created_at
+         FROM api_request_logs
+         WHERE user_id = :user_id
+         ORDER BY id DESC
+         LIMIT ' . $limit
+    );
+    $stmt->execute([':user_id' => $userId]);
+    $rows = $stmt->fetchAll();
+
+    if (!is_array($rows)) {
+        return [];
+    }
+
+    return array_map(static function (array $row): array {
+        $statusCode = (int) ($row['status_code'] ?? 0);
+
+        return [
+            'request_kind' => (string) ($row['request_kind'] ?? 'request'),
+            'endpoint' => (string) ($row['endpoint'] ?? ''),
+            'http_method' => strtoupper((string) ($row['http_method'] ?? 'GET')),
+            'status_code' => $statusCode,
+            'status_label' => $statusCode >= 200 && $statusCode < 300 ? 'Success' : ($statusCode >= 400 ? 'Error' : 'Accepted'),
+            'status_class' => $statusCode >= 200 && $statusCode < 300 ? 'text-success' : ($statusCode >= 400 ? 'text-danger' : 'text-warning'),
+            'bytes_in' => (int) ($row['bytes_in'] ?? 0),
+            'bytes_in_human' => ve_human_bytes((int) ($row['bytes_in'] ?? 0)),
+            'created_at' => (string) ($row['created_at'] ?? ''),
+            'created_at_label' => ve_format_datetime_label((string) ($row['created_at'] ?? ''), 'Unknown'),
+        ];
+    }, array_filter($rows, static fn ($row): bool => is_array($row)));
+}
+
+function ve_api_usage_snapshot(int $userId): array
+{
+    $settings = ve_get_user_settings($userId);
+    $user = ve_get_user_by_id($userId);
+    $requestsLastHour = ve_api_count_requests_since($userId, ve_api_window_start('hour'));
+    $requestsToday = ve_api_count_requests_since($userId, ve_api_window_start('day'));
+    $requestsThisMonth = ve_api_count_requests_since($userId, ve_api_window_start('month'));
+    $uploadsToday = ve_api_count_requests_since($userId, ve_api_window_start('day'), 'upload');
+    $deletesToday = ve_api_count_requests_since($userId, ve_api_window_start('day'), 'delete');
+
+    return [
+        'enabled' => ((int) ($settings['api_enabled'] ?? 1)) === 1,
+        'status_label' => ((int) ($settings['api_enabled'] ?? 1)) === 1 ? 'Active' : 'Disabled',
+        'limits' => [
+            'requests_per_hour' => ve_api_limit_value($settings, 'api_requests_per_hour', 250),
+            'requests_per_day' => ve_api_limit_value($settings, 'api_requests_per_day', 5000),
+            'uploads_per_day' => ve_api_limit_value($settings, 'api_uploads_per_day', 25),
+        ],
+        'usage' => [
+            'requests_last_hour' => $requestsLastHour,
+            'requests_today' => $requestsToday,
+            'requests_this_month' => $requestsThisMonth,
+            'uploads_today' => $uploadsToday,
+            'deletes_today' => $deletesToday,
+            'last_used_at' => ve_format_datetime_label((string) ($user['api_key_last_used_at'] ?? ''), 'Never used'),
+            'last_used_at_raw' => (string) ($user['api_key_last_used_at'] ?? ''),
+            'last_rotated_at' => ve_format_datetime_label((string) ($user['api_key_last_rotated_at'] ?? ''), 'Not available'),
+            'last_rotated_at_raw' => (string) ($user['api_key_last_rotated_at'] ?? ''),
+        ],
+        'recent_activity' => ve_api_recent_activity($userId, 10),
+    ];
+}
+
+function ve_api_record_request(int $userId, string $apiKeyHash, string $requestKind, int $statusCode, int $bytesIn = 0): void
+{
+    $now = ve_now();
+    $stmt = ve_db()->prepare(
+        'INSERT INTO api_request_logs (
+            user_id, api_key_hash, auth_type, request_kind, endpoint, http_method,
+            status_code, bytes_in, client_ip, user_agent, created_at
+        ) VALUES (
+            :user_id, :api_key_hash, :auth_type, :request_kind, :endpoint, :http_method,
+            :status_code, :bytes_in, :client_ip, :user_agent, :created_at
+        )'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':api_key_hash' => $apiKeyHash,
+        ':auth_type' => 'api_key',
+        ':request_kind' => $requestKind,
+        ':endpoint' => ve_request_path(),
+        ':http_method' => ve_request_method(),
+        ':status_code' => $statusCode,
+        ':bytes_in' => max(0, $bytesIn),
+        ':client_ip' => (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
+        ':user_agent' => substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500),
+        ':created_at' => $now,
+    ]);
+
+    $update = ve_db()->prepare('UPDATE users SET api_key_last_used_at = :api_key_last_used_at WHERE id = :id');
+    $update->execute([
+        ':api_key_last_used_at' => $now,
+        ':id' => $userId,
+    ]);
+}
+
+function ve_api_rate_limit_state(array $user, string $requestKind): array
+{
+    $settings = is_array($user['settings'] ?? null) ? $user['settings'] : ve_get_user_settings((int) $user['id']);
+    $requestsLastHour = ve_api_count_requests_since((int) $user['id'], ve_api_window_start('hour'));
+    $requestsToday = ve_api_count_requests_since((int) $user['id'], ve_api_window_start('day'));
+    $uploadsToday = ve_api_count_requests_since((int) $user['id'], ve_api_window_start('day'), 'upload');
+    $hourLimit = ve_api_limit_value($settings, 'api_requests_per_hour', 250);
+    $dayLimit = ve_api_limit_value($settings, 'api_requests_per_day', 5000);
+    $uploadLimit = ve_api_limit_value($settings, 'api_uploads_per_day', 25);
+    $enabled = ((int) ($settings['api_enabled'] ?? 1)) === 1;
+
+    $state = [
+        'enabled' => $enabled,
+        'allowed' => true,
+        'status' => 200,
+        'message' => '',
+        'retry_after' => 0,
+        'limits' => [
+            'requests_per_hour' => $hourLimit,
+            'requests_per_day' => $dayLimit,
+            'uploads_per_day' => $uploadLimit,
+        ],
+        'counts' => [
+            'requests_last_hour' => $requestsLastHour,
+            'requests_today' => $requestsToday,
+            'uploads_today' => $uploadsToday,
+        ],
+        'remaining' => [
+            'requests_per_hour' => $hourLimit > 0 ? max(0, $hourLimit - $requestsLastHour - 1) : null,
+            'requests_per_day' => $dayLimit > 0 ? max(0, $dayLimit - $requestsToday - 1) : null,
+            'uploads_per_day' => $uploadLimit > 0 ? max(0, $uploadLimit - $uploadsToday - ($requestKind === 'upload' ? 1 : 0)) : null,
+        ],
+    ];
+
+    if (!$enabled) {
+        $state['allowed'] = false;
+        $state['status'] = 403;
+        $state['message'] = 'API access is disabled for this account.';
+
+        return $state;
+    }
+
+    if ($hourLimit > 0 && $requestsLastHour >= $hourLimit) {
+        $state['allowed'] = false;
+        $state['status'] = 429;
+        $state['message'] = 'The hourly API request limit has been reached.';
+        $state['retry_after'] = 3600;
+
+        return $state;
+    }
+
+    if ($dayLimit > 0 && $requestsToday >= $dayLimit) {
+        $endOfDay = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->setTime(23, 59, 59);
+        $state['allowed'] = false;
+        $state['status'] = 429;
+        $state['message'] = 'The daily API request limit has been reached.';
+        $state['retry_after'] = max(60, $endOfDay->getTimestamp() - ve_timestamp());
+
+        return $state;
+    }
+
+    if ($requestKind === 'upload' && $uploadLimit > 0 && $uploadsToday >= $uploadLimit) {
+        $endOfDay = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->setTime(23, 59, 59);
+        $state['allowed'] = false;
+        $state['status'] = 429;
+        $state['message'] = 'The daily API upload limit has been reached.';
+        $state['retry_after'] = max(60, $endOfDay->getTimestamp() - ve_timestamp());
+    }
+
+    return $state;
+}
+
+function ve_api_send_rate_limit_headers(array $state): void
+{
+    $hourLimit = (int) ($state['limits']['requests_per_hour'] ?? 0);
+    $dayLimit = (int) ($state['limits']['requests_per_day'] ?? 0);
+    $uploadLimit = (int) ($state['limits']['uploads_per_day'] ?? 0);
+
+    if ($hourLimit > 0) {
+        header('X-RateLimit-Limit-Hour: ' . $hourLimit);
+        header('X-RateLimit-Remaining-Hour: ' . max(0, (int) ($state['remaining']['requests_per_hour'] ?? 0)));
+    }
+
+    if ($dayLimit > 0) {
+        header('X-RateLimit-Limit-Day: ' . $dayLimit);
+        header('X-RateLimit-Remaining-Day: ' . max(0, (int) ($state['remaining']['requests_per_day'] ?? 0)));
+    }
+
+    if ($uploadLimit > 0) {
+        header('X-UploadLimit-Day: ' . $uploadLimit);
+        header('X-UploadRemaining-Day: ' . max(0, (int) ($state['remaining']['uploads_per_day'] ?? 0)));
+    }
+
+    if ((int) ($state['retry_after'] ?? 0) > 0) {
+        header('Retry-After: ' . (int) $state['retry_after']);
+    }
 }
 
 function ve_handle_login_ajax(): void
@@ -1068,6 +1560,98 @@ function ve_store_logo_upload(array $file, int $userId): string
     return 'storage/uploads/logos/' . $targetName;
 }
 
+function ve_delete_storage_relative_file(string $relativePath): void
+{
+    $absolutePath = ve_storage_relative_path_to_absolute($relativePath);
+
+    if ($absolutePath === '' || !is_file($absolutePath)) {
+        return;
+    }
+
+    @unlink($absolutePath);
+}
+
+function ve_detect_file_mime_type(string $path): string
+{
+    if (!is_file($path)) {
+        return 'application/octet-stream';
+    }
+
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+
+        if ($finfo !== false) {
+            $mime = finfo_file($finfo, $path);
+            finfo_close($finfo);
+
+            if (is_string($mime) && $mime !== '') {
+                return $mime;
+            }
+        }
+    }
+
+    return match (strtolower((string) pathinfo($path, PATHINFO_EXTENSION))) {
+        'jpg', 'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'gif' => 'image/gif',
+        'webp' => 'image/webp',
+        default => 'application/octet-stream',
+    };
+}
+
+function ve_store_player_splash_upload(array $file, int $userId, string $currentPath = ''): string
+{
+    $errorCode = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+
+    if ($errorCode !== UPLOAD_ERR_OK) {
+        ve_fail_form_submission('Splash image upload failed. Please try again.', '/dashboard/settings#player_settings');
+    }
+
+    $tmpName = (string) ($file['tmp_name'] ?? '');
+
+    if ($tmpName === '' || !is_file($tmpName)) {
+        ve_fail_form_submission('Uploaded splash image was not found.', '/dashboard/settings#player_settings');
+    }
+
+    $imageInfo = @getimagesize($tmpName);
+
+    if (!is_array($imageInfo)) {
+        ve_fail_form_submission('Upload a valid image file for the splash image.', '/dashboard/settings#player_settings');
+    }
+
+    if (($imageInfo[0] ?? 0) > 4096 || ($imageInfo[1] ?? 0) > 4096) {
+        ve_fail_form_submission('Splash images must be no larger than 4096x4096 pixels.', '/dashboard/settings#player_settings');
+    }
+
+    $extensionMap = [
+        'image/png' => 'png',
+        'image/jpeg' => 'jpg',
+        'image/webp' => 'webp',
+    ];
+
+    $mime = (string) ($imageInfo['mime'] ?? '');
+
+    if (!isset($extensionMap[$mime])) {
+        ve_fail_form_submission('Only PNG, JPG, and WEBP splash images are supported.', '/dashboard/settings#player_settings');
+    }
+
+    $targetName = 'user-' . $userId . '-' . ve_timestamp() . '.' . $extensionMap[$mime];
+    $targetPath = ve_player_storage_path('splashes', $targetName);
+    ve_ensure_directory(dirname($targetPath));
+
+    if (!move_uploaded_file($tmpName, $targetPath)) {
+        if (!rename($tmpName, $targetPath)) {
+            ve_fail_form_submission('Unable to store the uploaded splash image.', '/dashboard/settings#player_settings');
+        }
+    }
+
+    if ($currentPath !== '' && str_starts_with($currentPath, 'private/player/splashes/')) {
+        ve_delete_storage_relative_file($currentPath);
+    }
+
+    return 'private/player/splashes/' . $targetName;
+}
+
 function ve_save_player_settings(int $userId): void
 {
     ve_require_csrf(ve_request_csrf_token());
@@ -1076,7 +1660,9 @@ function ve_save_player_settings(int $userId): void
     $playerColour = ltrim(trim((string) ($_POST['usr_player_colour'] ?? 'ff9900')), '#');
     $embedWidth = max(200, min(4000, (int) ($_POST['embedcode_width'] ?? 600)));
     $embedHeight = max(200, min(4000, (int) ($_POST['embedcode_height'] ?? 480)));
-    $logoPath = ve_get_user_settings($userId)['logo_path'] ?? '';
+    $settings = ve_get_user_settings($userId);
+    $logoPath = (string) ($settings['logo_path'] ?? '');
+    $splashImagePath = (string) ($settings['splash_image_path'] ?? '');
 
     if (!in_array($playerImageMode, ['', 'splash', 'single'], true)) {
         ve_fail_form_submission('Choose a valid player image mode.', '/dashboard/settings#player_settings');
@@ -1090,6 +1676,10 @@ function ve_save_player_settings(int $userId): void
         $logoPath = ve_store_logo_upload($_FILES['logo_image'], $userId);
     }
 
+    if (isset($_FILES['splash_image']) && is_array($_FILES['splash_image']) && (int) ($_FILES['splash_image']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+        $splashImagePath = ve_store_player_splash_upload($_FILES['splash_image'], $userId, $splashImagePath);
+    }
+
     $stmt = ve_db()->prepare(
         'UPDATE user_settings SET
             show_embed_title = :show_embed_title,
@@ -1097,6 +1687,7 @@ function ve_save_player_settings(int $userId): void
             player_image_mode = :player_image_mode,
             player_colour = :player_colour,
             logo_path = :logo_path,
+            splash_image_path = :splash_image_path,
             embed_width = :embed_width,
             embed_height = :embed_height,
             updated_at = :updated_at
@@ -1108,6 +1699,7 @@ function ve_save_player_settings(int $userId): void
         ':player_image_mode' => $playerImageMode,
         ':player_colour' => strtolower($playerColour),
         ':logo_path' => $logoPath,
+        ':splash_image_path' => $splashImagePath,
         ':embed_width' => $embedWidth,
         ':embed_height' => $embedHeight,
         ':updated_at' => ve_now(),
@@ -1122,8 +1714,26 @@ function ve_save_player_settings(int $userId): void
             'embed_width' => $embedWidth,
             'embed_height' => $embedHeight,
             'logo_path' => $logoPath,
+            'splash_image_path' => $splashImagePath,
         ],
     ]);
+}
+
+function ve_render_player_splash_preview(int $userId): void
+{
+    $settings = ve_get_user_settings($userId);
+    $path = ve_storage_relative_path_to_absolute((string) ($settings['splash_image_path'] ?? ''));
+
+    if ($path === '' || !is_file($path)) {
+        ve_not_found();
+    }
+
+    header('Content-Type: ' . ve_detect_file_mime_type($path));
+    header('Content-Length: ' . (string) filesize($path));
+    header('Cache-Control: private, no-store, no-cache, must-revalidate');
+    header('X-Content-Type-Options: nosniff');
+    readfile($path);
+    exit;
 }
 
 function ve_save_ad_settings(int $userId): void
@@ -1173,6 +1783,71 @@ function ve_save_ad_settings(int $userId): void
             'pop_url' => $popUrl,
             'pop_cap' => $popCap,
         ],
+    ]);
+}
+
+function ve_parse_api_limit_input(string $rawValue, string $label, int $maxValue): int
+{
+    $rawValue = trim($rawValue);
+
+    if ($rawValue === '') {
+        return 0;
+    }
+
+    if (!preg_match('/^\d+$/', $rawValue)) {
+        ve_fail_form_submission($label . ' must be a whole number.', '/dashboard/settings#api_access');
+    }
+
+    $value = (int) $rawValue;
+
+    if ($value < 0 || $value > $maxValue) {
+        ve_fail_form_submission($label . ' must be between 0 and ' . number_format($maxValue) . '.', '/dashboard/settings#api_access');
+    }
+
+    return $value;
+}
+
+function ve_save_api_settings(int $userId): void
+{
+    ve_require_csrf(ve_request_csrf_token());
+
+    $apiEnabled = isset($_POST['api_enabled']) ? 1 : 0;
+    $requestsPerHour = ve_parse_api_limit_input((string) ($_POST['api_requests_per_hour'] ?? '0'), 'Requests per hour', 100000);
+    $requestsPerDay = ve_parse_api_limit_input((string) ($_POST['api_requests_per_day'] ?? '0'), 'Requests per day', 1000000);
+    $uploadsPerDay = ve_parse_api_limit_input((string) ($_POST['api_uploads_per_day'] ?? '0'), 'Uploads per day', 10000);
+
+    if ($requestsPerDay > 0 && $requestsPerHour > $requestsPerDay) {
+        ve_fail_form_submission('Requests per hour cannot exceed requests per day.', '/dashboard/settings#api_access');
+    }
+
+    $stmt = ve_db()->prepare(
+        'UPDATE user_settings
+         SET api_enabled = :api_enabled,
+             api_requests_per_hour = :api_requests_per_hour,
+             api_requests_per_day = :api_requests_per_day,
+             api_uploads_per_day = :api_uploads_per_day,
+             updated_at = :updated_at
+         WHERE user_id = :user_id'
+    );
+    $stmt->execute([
+        ':api_enabled' => $apiEnabled,
+        ':api_requests_per_hour' => $requestsPerHour,
+        ':api_requests_per_day' => $requestsPerDay,
+        ':api_uploads_per_day' => $uploadsPerDay,
+        ':updated_at' => ve_now(),
+        ':user_id' => $userId,
+    ]);
+
+    ve_add_notification(
+        $userId,
+        'API policy updated',
+        $apiEnabled === 1
+            ? 'API access policy and usage limits were updated.'
+            : 'API access was disabled for your account.'
+    );
+
+    ve_success_form_submission('API access policy saved successfully.', '/dashboard/settings#api_access', [
+        'api' => ve_api_usage_snapshot($userId),
     ]);
 }
 
@@ -1537,6 +2212,72 @@ function ve_html_set_select_value(string $html, string $name, string $value): st
     }, $html, 1);
 }
 
+function ve_settings_bind_form(string $html, string $op, string $action): string
+{
+    $quotedOp = preg_quote($op, '/');
+    $token = ve_h(ve_csrf_token());
+    $pattern = '/<form\b([^>]*)>\s*<input type="hidden" name="op" value="' . $quotedOp . '">\s*(?:<input type="hidden" name="token" value="[^"]*">\s*)?/i';
+
+    return (string) preg_replace_callback($pattern, static function (array $matches) use ($action, $op, $token): string {
+        $attributes = preg_replace('/\saction="[^"]*"/i', '', $matches[1]) ?? $matches[1];
+
+        return '<form' . $attributes . ' action="' . ve_h($action) . '">' . "\n                        "
+            . '<input type="hidden" name="op" value="' . ve_h($op) . '">' . "\n                        "
+            . '<input type="hidden" name="token" value="' . $token . '">' . "\n                        ";
+    }, $html, 1);
+}
+
+function ve_settings_bind_delete_account_form(string $html): string
+{
+    $token = ve_h(ve_csrf_token());
+    $pattern = '/<form class="delete-account-form"([^>]*)>\s*(?:<input type="hidden" name="token" value="[^"]*">\s*)?/i';
+
+    return (string) preg_replace_callback($pattern, static function (array $matches) use ($token): string {
+        $attributes = $matches[1];
+        $attributes = preg_replace('/\saction="[^"]*"/i', '', $attributes) ?? $attributes;
+
+        return '<form class="delete-account-form"' . $attributes . ' action="/account/delete">' . "\n                        "
+            . '<input type="hidden" name="token" value="' . $token . '">' . "\n                        ";
+    }, $html, 1);
+}
+
+function ve_html_replace_element_contents_by_id(string $html, string $id, string $content): string
+{
+    $quotedId = preg_quote($id, '/');
+    $pattern = '/(<[^>]+\bid="' . $quotedId . '"[^>]*>)(.*?)(<\/[^>]+>)/is';
+
+    return (string) preg_replace($pattern, '$1' . $content . '$3', $html, 1);
+}
+
+function ve_render_api_activity_rows_html(array $activity): string
+{
+    if ($activity === []) {
+        return '<tr><td colspan="6" class="text-center text-muted">No API activity recorded yet.</td></tr>';
+    }
+
+    $rows = [];
+
+    foreach ($activity as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $rows[] = sprintf(
+            '<tr><td>%s</td><td>%s</td><td><code>%s</code></td><td>%s</td><td><span class="%s">%s (%d)</span></td><td>%s</td></tr>',
+            ve_h((string) ($entry['created_at_label'] ?? 'Unknown')),
+            ve_h((string) ($entry['http_method'] ?? 'GET')),
+            ve_h((string) ($entry['endpoint'] ?? '')),
+            ve_h(ucfirst((string) ($entry['request_kind'] ?? 'request'))),
+            ve_h((string) ($entry['status_class'] ?? 'text-muted')),
+            ve_h((string) ($entry['status_label'] ?? 'Unknown')),
+            (int) ($entry['status_code'] ?? 0),
+            ve_h((string) ($entry['bytes_in_human'] ?? '0 B'))
+        );
+    }
+
+    return implode("\n", $rows);
+}
+
 function ve_settings_script(): string
 {
     $domainTarget = json_encode(ve_config()['custom_domain_target'], JSON_UNESCAPED_SLASHES);
@@ -1551,6 +2292,12 @@ function ve_settings_script(): string
             'Accept': 'application/json',
             'X-Requested-With': 'XMLHttpRequest'
         };
+
+        function csrfAjaxHeaders() {
+            return $.extend({}, ajaxHeaders, {
+                'X-CSRF-Token': csrfToken
+            });
+        }
 
         function appUrl(path) {
             if (!path) {
@@ -1623,6 +2370,17 @@ function ve_settings_script(): string
                 return response.message;
             }
 
+            if (xhr && xhr.responseText) {
+                try {
+                    response = JSON.parse(xhr.responseText);
+
+                    if (response && response.message) {
+                        return response.message;
+                    }
+                } catch (error) {
+                }
+            }
+
             return fallbackMessage;
         }
 
@@ -1693,6 +2451,59 @@ function ve_settings_script(): string
             );
         }
 
+        function renderApiActivity(entries) {
+            var rows = entries || [];
+
+            if (!rows.length) {
+                $('#api-activity-rows').html('<tr><td colspan="6" class="text-center text-muted">No API activity recorded yet.</td></tr>');
+                return;
+            }
+
+            var html = rows.map(function (entry) {
+                var statusClass = entry.status_class || 'text-muted';
+                var statusLabel = entry.status_label || 'Unknown';
+                var statusCode = entry.status_code || 0;
+
+                return [
+                    '<tr>',
+                    '<td>' + escapeHtml(entry.created_at_label || 'Unknown') + '</td>',
+                    '<td>' + escapeHtml(entry.http_method || 'GET') + '</td>',
+                    '<td><code>' + escapeHtml(entry.endpoint || '') + '</code></td>',
+                    '<td>' + escapeHtml(entry.request_kind || 'request') + '</td>',
+                    '<td><span class="' + escapeHtml(statusClass) + '">' + escapeHtml(statusLabel) + ' (' + escapeHtml(String(statusCode)) + ')</span></td>',
+                    '<td>' + escapeHtml(entry.bytes_in_human || '0 B') + '</td>',
+                    '</tr>'
+                ].join('');
+            }).join('');
+
+            $('#api-activity-rows').html(html);
+        }
+
+        function applyApiSnapshot(snapshot) {
+            if (!snapshot) {
+                return;
+            }
+
+            var usage = snapshot.usage || {};
+            var limits = snapshot.limits || {};
+
+            $('[data-api-status]').text(snapshot.status_label || (snapshot.enabled ? 'Active' : 'Disabled'));
+            $('[data-api-last-rotated]').text(usage.last_rotated_at || 'Not available');
+            $('[data-api-last-used]').text(usage.last_used_at || 'Never used');
+            $('[data-api-requests-today]').text(usage.requests_today || 0);
+            $('[data-api-card="requests_last_hour"]').text(usage.requests_last_hour || 0);
+            $('[data-api-card="requests_today"]').text(usage.requests_today || 0);
+            $('[data-api-card="requests_this_month"]').text(usage.requests_this_month || 0);
+            $('[data-api-card="uploads_today"]').text(usage.uploads_today || 0);
+
+            $('#api_enabled').prop('checked', !!snapshot.enabled);
+            $('input[name="api_requests_per_hour"]').val(limits.requests_per_hour != null ? limits.requests_per_hour : 0);
+            $('input[name="api_requests_per_day"]').val(limits.requests_per_day != null ? limits.requests_per_day : 0);
+            $('input[name="api_uploads_per_day"]').val(limits.uploads_per_day != null ? limits.uploads_per_day : 0);
+
+            renderApiActivity(snapshot.recent_activity || []);
+        }
+
         function loadDomains(successMessage) {
             $.getJSON(appUrl('/api/domains'))
                 .done(function (response) {
@@ -1708,9 +2519,32 @@ function ve_settings_script(): string
                 });
         }
 
+        function loadApiUsage(successMessage) {
+            $.ajax({
+                type: 'GET',
+                url: appUrl('/api/account/api-usage'),
+                dataType: 'json',
+                headers: ajaxHeaders
+            }).done(function (response) {
+                if (response.status !== 'ok' || !response.api) {
+                    showFormFeedback($('#api_access'), 'danger', response.message || 'Unable to load API usage.');
+                    return;
+                }
+
+                applyApiSnapshot(response.api);
+
+                if (successMessage) {
+                    showFormFeedback($('#api_access'), 'success', successMessage);
+                }
+            }).fail(function (xhr) {
+                showFormFeedback($('#api_access'), 'danger', handleAjaxError(xhr, 'Unable to load API usage right now.'));
+            });
+        }
+
         $('.pop_type').on('change', syncPopupMode);
         syncPopupMode();
         loadDomains();
+        loadApiUsage();
 
         $('.custom-file-input').on('change', function () {
             var fileName = $(this).val().split('\\\\').pop();
@@ -1733,7 +2567,7 @@ function ve_settings_script(): string
                 type: 'POST',
                 url: appUrl('/api/domains'),
                 dataType: 'json',
-                headers: ajaxHeaders,
+                headers: csrfAjaxHeaders(),
                 data: {
                     token: csrfToken,
                     domain: domain
@@ -1759,9 +2593,7 @@ function ve_settings_script(): string
                 type: 'DELETE',
                 url: appUrl('/api/domains/' + encodeURIComponent(domain)),
                 dataType: 'json',
-                headers: $.extend({}, ajaxHeaders, {
-                    'X-CSRF-Token': csrfToken
-                }),
+                headers: csrfAjaxHeaders(),
                 data: {
                     token: csrfToken
                 }
@@ -1797,7 +2629,7 @@ function ve_settings_script(): string
         $(document).on('submit', '.settings-panel form[action]', function (event) {
             var action = $(this).attr('action') || '';
 
-            if (!/^\\/account\\/(settings|password|email|player|advertising)$/.test(action)) {
+            if (!/^\\/account\\/(settings|password|email|player|advertising|api-settings)$/.test(action)) {
                 return;
             }
 
@@ -1821,7 +2653,7 @@ function ve_settings_script(): string
                 dataType: 'json',
                 processData: false,
                 contentType: false,
-                headers: ajaxHeaders
+                headers: csrfAjaxHeaders()
             }).done(function (response) {
                 if (response.status !== 'ok') {
                     showFormFeedback(\$panel, 'danger', response.message || 'Unable to save settings.');
@@ -1843,6 +2675,10 @@ function ve_settings_script(): string
                     \$form.find('input[type="file"]').val('');
                     \$form.find('.custom-file-label').text('Choose logo');
                 }
+
+                if (action === '/account/api-settings' && response.api) {
+                    applyApiSnapshot(response.api);
+                }
             }).fail(function (xhr) {
                 showFormFeedback(\$panel, 'danger', handleAjaxError(xhr, 'Unable to save settings right now.'));
             }).always(function () {
@@ -1850,7 +2686,7 @@ function ve_settings_script(): string
             });
         });
 
-        $('.delete-account-form').on('submit', function (event) {
+        $(document).on('submit', '.delete-account-form', function (event) {
             event.preventDefault();
             clearAllPanelFeedback();
 
@@ -1861,7 +2697,7 @@ function ve_settings_script(): string
                 type: 'POST',
                 url: appUrl('/account/delete'),
                 dataType: 'json',
-                headers: ajaxHeaders,
+                headers: csrfAjaxHeaders(),
                 data: $.param(payload)
             }).done(function (response) {
                 if (response.status === 'redirect') {
@@ -1875,7 +2711,7 @@ function ve_settings_script(): string
             });
         });
 
-        $('.regenerate-key').on('click', function (event) {
+        $(document).on('click', '.regenerate-key', function (event) {
             event.preventDefault();
 
             if (!confirm('Are you sure you want to regenerate the API key?')) {
@@ -1888,7 +2724,7 @@ function ve_settings_script(): string
                 type: 'POST',
                 url: appUrl('/account/api-key/regenerate'),
                 dataType: 'json',
-                headers: ajaxHeaders,
+                headers: csrfAjaxHeaders(),
                 data: {
                     token: csrfToken
                 }
@@ -1901,10 +2737,19 @@ function ve_settings_script(): string
                 }
 
                 $('.add-key input').val(response.api_key);
+                if (response.api) {
+                    applyApiSnapshot(response.api);
+                }
                 showFormFeedback(\$sidebar, 'success', response.message || 'API key regenerated successfully.');
             }).fail(function (xhr) {
                 showFormFeedback($('.settings-page'), 'danger', handleAjaxError(xhr, 'Unable to regenerate the API key right now.'));
             });
+        });
+
+        $(document).on('click', '#refreshApiUsage', function (event) {
+            event.preventDefault();
+            clearAllPanelFeedback();
+            loadApiUsage('API usage refreshed.');
         });
     });
 </script>
@@ -1915,7 +2760,17 @@ function ve_render_settings_page(): void
 {
     $user = ve_require_auth();
     $settings = $user['settings'];
+    $api = ve_api_usage_snapshot((int) $user['id']);
     $flash = ve_pull_flash();
+    $splashPreviewHtml = '<div class="text-muted small">No splash image uploaded yet.</div>';
+    $splashPath = ve_storage_relative_path_to_absolute((string) ($settings['splash_image_path'] ?? ''));
+
+    if ($splashPath !== '' && is_file($splashPath)) {
+        $splashPreviewUrl = ve_h(ve_url('/account/player/splash-preview?ts=' . rawurlencode((string) ($settings['updated_at'] ?? ve_timestamp()))));
+        $splashPreviewHtml = '<div class="small text-muted mb-2">Current protected splash image</div>' .
+            '<img src="' . $splashPreviewUrl . '" alt="Splash preview" style="display:block;width:100%;max-width:100%;border-radius:12px;border:1px solid rgba(255,255,255,0.08);background:#0c0c0c;">';
+    }
+
     $html = (string) file_get_contents(ve_root_path('dashboard', 'settings.html'));
 
     $html = ve_runtime_html_transform($html, 'dashboard/settings.html');
@@ -1936,36 +2791,14 @@ function ve_render_settings_page(): void
         'This workflow immediately closes the account, revokes active sessions, and prevents future logins.',
         $html
     );
-    $html = str_replace(
-        "<form method=\"POST\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_account\">",
-        "<form method=\"POST\" action=\"/account/settings\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_account\">",
-        $html
-    );
-    $html = str_replace(
-        "<form method=\"POST\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_password\">",
-        "<form method=\"POST\" action=\"/account/password\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_password\">",
-        $html
-    );
-    $html = str_replace(
-        "<form method=\"POST\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_email\">",
-        "<form method=\"POST\" action=\"/account/email\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_email\">",
-        $html
-    );
-    $html = str_replace(
-        "<form method=\"POST\" enctype=\"multipart/form-data\" class=\"mb-4\">\n                        <input type=\"hidden\" name=\"op\" value=\"upload_logo\">",
-        "<form method=\"POST\" action=\"/account/player\" enctype=\"multipart/form-data\" class=\"mb-4\">\n                        <input type=\"hidden\" name=\"op\" value=\"upload_logo\">",
-        $html
-    );
-    $html = str_replace(
-        "<form method=\"POST\">\n                        <input type=\"hidden\" name=\"op\" value=\"premium_settings\">",
-        "<form method=\"POST\" action=\"/account/advertising\">\n                        <input type=\"hidden\" name=\"op\" value=\"premium_settings\">",
-        $html
-    );
-    $html = str_replace('<button class="btn btn-primary btn-block regenerate-key">', '<button type="button" class="btn btn-primary btn-block regenerate-key">', $html);
+    $html = ve_settings_bind_form($html, 'my_account', '/account/settings');
+    $html = ve_settings_bind_form($html, 'my_password', '/account/password');
+    $html = ve_settings_bind_form($html, 'my_email', '/account/email');
+    $html = ve_settings_bind_form($html, 'upload_logo', '/account/player');
+    $html = ve_settings_bind_form($html, 'premium_settings', '/account/advertising');
+    $html = ve_settings_bind_form($html, 'api_settings', '/account/api-settings');
+    $html = ve_settings_bind_delete_account_form($html);
     $html = preg_replace('/\sdisabled(?:="disabled")?/i', '', $html) ?? $html;
-    $html = preg_replace('/(<input type="hidden" name="token" value=")[^"]*(")/i', '$1' . ve_csrf_token() . '$2', $html) ?? $html;
-    $html = str_replace('<input type="hidden" name="logo_mode" value="image">', '<input type="hidden" name="logo_mode" value="image">' . "\n                        " . '<input type="hidden" name="token" value="' . ve_h(ve_csrf_token()) . '">', $html);
-    $html = str_replace('<form class="delete-account-form" method="POST">', '<form class="delete-account-form" method="POST" action="/account/delete"><input type="hidden" name="token" value="' . ve_h(ve_csrf_token()) . '">', $html);
 
     $html = ve_html_set_select_value($html, 'usr_pay_type', (string) ($settings['payment_method'] ?? 'Webmoney'));
     $html = ve_html_set_input_value($html, 'usr_pay_email', (string) ($settings['payment_id'] ?? ''));
@@ -1982,10 +2815,24 @@ function ve_render_settings_page(): void
     $html = ve_html_set_input_value($html, 'usr_player_colour', (string) ($settings['player_colour'] ?? 'ff9900'));
     $html = ve_html_set_input_value($html, 'embedcode_width', (string) ($settings['embed_width'] ?? 600));
     $html = ve_html_set_input_value($html, 'embedcode_height', (string) ($settings['embed_height'] ?? 480));
+    $html = ve_html_replace_element_contents_by_id($html, 'player-splash-preview', $splashPreviewHtml);
     $html = ve_html_set_input_value($html, 'vast_url', (string) ($settings['vast_url'] ?? ''));
     $html = ve_html_set_select_value($html, 'pop_type', (string) ($settings['pop_type'] ?? '1'));
     $html = ve_html_set_input_value($html, 'pop_url', (string) ($settings['pop_url'] ?? ''));
     $html = ve_html_set_input_value($html, 'pop_cap', (string) ($settings['pop_cap'] ?? 0));
+    $html = ve_html_set_checkbox($html, 'api_enabled', (bool) ($api['enabled'] ?? true));
+    $html = ve_html_set_input_value($html, 'api_requests_per_hour', (string) ($api['limits']['requests_per_hour'] ?? 250));
+    $html = ve_html_set_input_value($html, 'api_requests_per_day', (string) ($api['limits']['requests_per_day'] ?? 5000));
+    $html = ve_html_set_input_value($html, 'api_uploads_per_day', (string) ($api['limits']['uploads_per_day'] ?? 25));
+    $html = str_replace('data-api-status>Active</strong>', 'data-api-status>' . ve_h((string) ($api['status_label'] ?? 'Active')) . '</strong>', $html);
+    $html = str_replace('data-api-last-rotated>Not available</strong>', 'data-api-last-rotated>' . ve_h((string) ($api['usage']['last_rotated_at'] ?? 'Not available')) . '</strong>', $html);
+    $html = str_replace('data-api-last-used>Never used</strong>', 'data-api-last-used>' . ve_h((string) ($api['usage']['last_used_at'] ?? 'Never used')) . '</strong>', $html);
+    $html = str_replace('data-api-requests-today>0</strong>', 'data-api-requests-today>' . ve_h((string) ($api['usage']['requests_today'] ?? 0)) . '</strong>', $html);
+    $html = str_replace('data-api-card="requests_last_hour">0</div>', 'data-api-card="requests_last_hour">' . ve_h((string) ($api['usage']['requests_last_hour'] ?? 0)) . '</div>', $html);
+    $html = str_replace('data-api-card="requests_today">0</div>', 'data-api-card="requests_today">' . ve_h((string) ($api['usage']['requests_today'] ?? 0)) . '</div>', $html);
+    $html = str_replace('data-api-card="requests_this_month">0</div>', 'data-api-card="requests_this_month">' . ve_h((string) ($api['usage']['requests_this_month'] ?? 0)) . '</div>', $html);
+    $html = str_replace('data-api-card="uploads_today">0</div>', 'data-api-card="uploads_today">' . ve_h((string) ($api['usage']['uploads_today'] ?? 0)) . '</div>', $html);
+    $html = ve_html_replace_element_contents_by_id($html, 'api-activity-rows', ve_render_api_activity_rows_html((array) ($api['recent_activity'] ?? [])));
     $html = preg_replace(
         '/(<div class="data settings-panel" id="ftp_servers">[\s\S]*?<tbody>)[\s\S]*?(<\/tbody>)/',
         '$1' . "\n" . ve_render_ftp_servers_rows() . "\n" . '$2',
