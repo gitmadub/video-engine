@@ -2695,6 +2695,60 @@ function ve_video_validate_playback_session(array $video, ?string $token): ?arra
     return $session;
 }
 
+function ve_video_mark_playback_started(array $video, array $session): void
+{
+    $sessionId = (int) ($session['id'] ?? 0);
+    $videoId = (int) ($video['id'] ?? 0);
+    $userId = (int) ($video['user_id'] ?? 0);
+
+    if ($sessionId <= 0 || $videoId <= 0 || $userId <= 0) {
+        return;
+    }
+
+    $stmt = ve_db()->prepare(
+        'UPDATE video_playback_sessions
+         SET playback_started_at = :playback_started_at
+         WHERE id = :id
+           AND revoked_at IS NULL
+           AND playback_started_at IS NULL'
+    );
+    $stmt->execute([
+        ':playback_started_at' => ve_now(),
+        ':id' => $sessionId,
+    ]);
+
+    if ($stmt->rowCount() > 0) {
+        ve_dashboard_record_video_view($videoId, $userId);
+    }
+}
+
+function ve_video_record_segment_delivery(array $video, array $session, int $bytes): void
+{
+    $sessionId = (int) ($session['id'] ?? 0);
+    $videoId = (int) ($video['id'] ?? 0);
+    $userId = (int) ($video['user_id'] ?? 0);
+    $bytes = max(0, $bytes);
+
+    if ($sessionId <= 0 || $videoId <= 0 || $userId <= 0 || $bytes === 0) {
+        return;
+    }
+
+    ve_video_mark_playback_started($video, $session);
+
+    $stmt = ve_db()->prepare(
+        'UPDATE video_playback_sessions
+         SET bandwidth_bytes_served = bandwidth_bytes_served + :bandwidth_bytes_served
+         WHERE id = :id
+           AND revoked_at IS NULL'
+    );
+    $stmt->execute([
+        ':bandwidth_bytes_served' => $bytes,
+        ':id' => $sessionId,
+    ]);
+
+    ve_dashboard_record_video_bandwidth($videoId, $userId, $bytes);
+}
+
 function ve_video_stream_access_denied(): void
 {
     http_response_code(403);
@@ -2714,9 +2768,13 @@ function ve_video_stream_manifest(string $publicId): void
 
     $token = isset($_GET['token']) ? (string) $_GET['token'] : '';
 
-    if (ve_video_validate_playback_session($video, $token) === null) {
+    $session = ve_video_validate_playback_session($video, $token);
+
+    if ($session === null) {
         ve_video_stream_access_denied();
     }
+
+    ve_video_mark_playback_started($video, $session);
 
     $playlistPath = ve_video_playlist_path($video);
 
@@ -2763,7 +2821,9 @@ function ve_video_stream_key(string $publicId): void
 
     $token = isset($_GET['token']) ? (string) $_GET['token'] : '';
 
-    if (ve_video_validate_playback_session($video, $token) === null) {
+    $session = ve_video_validate_playback_session($video, $token);
+
+    if ($session === null) {
         ve_video_stream_access_denied();
     }
 
@@ -2791,7 +2851,9 @@ function ve_video_stream_segment(string $publicId, string $filename): void
 
     $token = isset($_GET['token']) ? (string) $_GET['token'] : '';
 
-    if (ve_video_validate_playback_session($video, $token) === null) {
+    $session = ve_video_validate_playback_session($video, $token);
+
+    if ($session === null) {
         ve_video_stream_access_denied();
     }
 
@@ -2806,6 +2868,8 @@ function ve_video_stream_segment(string $publicId, string $filename): void
     if (!is_file($path)) {
         ve_not_found();
     }
+
+    ve_video_record_segment_delivery($video, $session, (int) (filesize($path) ?: 0));
 
     header('Content-Type: video/mp2t');
     header('Content-Length: ' . (string) filesize($path));

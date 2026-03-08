@@ -221,9 +221,40 @@ CREATE TABLE IF NOT EXISTS video_playback_sessions (
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
+    playback_started_at TEXT DEFAULT NULL,
+    bandwidth_bytes_served INTEGER NOT NULL DEFAULT 0,
     revoked_at TEXT DEFAULT NULL,
     FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_video_sessions_video_expires ON video_playback_sessions(video_id, expires_at);
+
+CREATE TABLE IF NOT EXISTS user_stats_daily (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    stat_date TEXT NOT NULL,
+    views INTEGER NOT NULL DEFAULT 0,
+    earned_micro_usd INTEGER NOT NULL DEFAULT 0,
+    bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS video_stats_daily (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    stat_date TEXT NOT NULL,
+    views INTEGER NOT NULL DEFAULT 0,
+    earned_micro_usd INTEGER NOT NULL DEFAULT 0,
+    bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_stats_daily_user_date ON user_stats_daily(user_id, stat_date);
+CREATE INDEX IF NOT EXISTS idx_user_stats_daily_date ON user_stats_daily(stat_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_stats_daily_video_date ON video_stats_daily(video_id, stat_date);
+CREATE INDEX IF NOT EXISTS idx_video_stats_daily_date ON video_stats_daily(stat_date);

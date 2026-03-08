@@ -268,25 +268,34 @@ require __DIR__ . '/backend.php';
 require __DIR__ . '/video.php';
 require __DIR__ . '/remote_upload.php';
 
-function ve_dashboard_stats(): array
+function ve_dashboard_stats(?int $userId = null): array
 {
-    $file = ve_root_path('api', 'dashboard-update.json');
+    if ($userId === null) {
+        $user = ve_current_user();
 
-    if (!is_file($file)) {
-        return [
-            'online' => 0,
-            'today' => '$0.00000',
-            'balance' => '$0.00000',
-        ];
+        if (!is_array($user)) {
+            return [
+                'status' => 'ok',
+                'online' => 0,
+                'today' => '$0.00000',
+                'balance' => '$0.00000',
+                'widgets' => [
+                    'online' => ['value' => 0, 'formatted' => '0'],
+                    'today_earnings' => ['micro_usd' => 0, 'formatted' => '$0.00000'],
+                    'yesterday_earnings' => ['micro_usd' => 0, 'formatted' => '$0.00000'],
+                    'balance' => ['micro_usd' => 0, 'formatted' => '$0.00000'],
+                    'storage_used' => ['bytes' => 0, 'formatted' => '0.00 GB'],
+                ],
+                'chart' => [],
+                'top_files' => [],
+                'range' => ve_dashboard_normalize_date_range(null, null, 7),
+            ];
+        }
+
+        $userId = (int) $user['id'];
     }
 
-    $payload = json_decode((string) file_get_contents($file), true);
-
-    return is_array($payload) ? $payload : [
-        'online' => 0,
-        'today' => '$0.00000',
-        'balance' => '$0.00000',
-    ];
+    return ve_dashboard_summary($userId);
 }
 
 function ve_player_files(): array
@@ -900,6 +909,44 @@ function ve_dispatch(): void
         ], $deleted ? 200 : 404);
     }
 
+    if ($path === '/api/dashboard/summary') {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        $user = ve_current_user();
+
+        if (!is_array($user)) {
+            ve_json([
+                'status' => 'fail',
+                'message' => 'Authentication required.',
+            ], 401);
+        }
+
+        ve_json(ve_dashboard_summary((int) $user['id']));
+    }
+
+    if ($path === '/api/dashboard/reports') {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        $user = ve_current_user();
+
+        if (!is_array($user)) {
+            ve_json([
+                'status' => 'fail',
+                'message' => 'Authentication required.',
+            ], 401);
+        }
+
+        ve_json(ve_dashboard_reports_snapshot(
+            (int) $user['id'],
+            isset($_GET['from']) ? (string) $_GET['from'] : null,
+            isset($_GET['to']) ? (string) $_GET['to'] : null
+        ));
+    }
+
     if ($path === '/api/videos') {
         if (!ve_is_method('GET')) {
             ve_method_not_allowed(['GET']);
@@ -1073,7 +1120,16 @@ function ve_dispatch(): void
             ve_not_found();
         }
 
-        ve_json(ve_dashboard_stats());
+        $user = ve_current_user();
+
+        if (!is_array($user)) {
+            ve_json([
+                'status' => 'fail',
+                'message' => 'Authentication required.',
+            ], 401);
+        }
+
+        ve_json(ve_dashboard_stats((int) $user['id']));
     }
 
     if ($path === '/genrate-api/' || $path === '/genrate-api') {

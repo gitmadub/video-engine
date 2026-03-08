@@ -35,10 +35,29 @@ function ve_remote_config(): array
     ve_ensure_directory(ve_remote_storage_path());
     ve_ensure_directory(ve_remote_storage_path('jobs'));
 
+    $ytDlpBinary = ve_video_find_binary(array_filter([
+        getenv('VE_YT_DLP_PATH') ?: null,
+        ve_root_path('tools', 'yt-dlp', ve_video_is_windows() ? 'yt-dlp.exe' : 'yt-dlp'),
+        ve_video_is_windows() ? 'C:\\Users\\User\\AppData\\Roaming\\Python\\Python39\\Scripts\\yt-dlp.exe' : null,
+        'yt-dlp',
+    ]));
+
+    $pythonBinary = ve_video_find_binary(array_filter([
+        getenv('VE_PYTHON_BINARY') ?: null,
+        ve_video_is_windows() ? 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python39\\python.exe' : null,
+        ve_video_is_windows() ? 'C:\\Users\\User\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe' : null,
+        ve_video_is_windows() ? 'C:\\Windows\\py.exe' : null,
+        'py',
+        'python3',
+        'python',
+    ]));
+
     $config = [
         'root' => ve_remote_storage_path(),
         'jobs_root' => ve_remote_storage_path('jobs'),
         'php_binary' => ve_video_find_php_binary(),
+        'python_binary' => $pythonBinary,
+        'yt_dlp_binary' => $ytDlpBinary,
         'max_queue_per_user' => max(1, (int) (getenv('VE_REMOTE_MAX_QUEUE_PER_USER') ?: 25)),
         'worker_stale_after' => max(900, (int) (getenv('VE_REMOTE_STALE_AFTER') ?: 7200)),
         'connect_timeout' => max(5, (int) (getenv('VE_REMOTE_CONNECT_TIMEOUT') ?: 20)),
@@ -49,6 +68,183 @@ function ve_remote_config(): array
     ];
 
     return $config;
+}
+
+function ve_remote_yt_dlp_command(): array
+{
+    $binary = (string) (ve_remote_config()['yt_dlp_binary'] ?? '');
+
+    if ($binary !== '') {
+        return [$binary];
+    }
+
+    $pythonBinary = (string) (ve_remote_config()['python_binary'] ?? '');
+
+    if ($pythonBinary !== '') {
+        $basename = strtolower(pathinfo($pythonBinary, PATHINFO_BASENAME));
+
+        if ($basename === 'py.exe' || $basename === 'py') {
+            return [$pythonBinary, '-m', 'yt_dlp'];
+        }
+
+        return [$pythonBinary, '-m', 'yt_dlp'];
+    }
+
+    return [];
+}
+
+function ve_remote_python_command(): array
+{
+    $binary = (string) (ve_remote_config()['python_binary'] ?? '');
+
+    if ($binary === '') {
+        return [];
+    }
+
+    $basename = strtolower(pathinfo($binary, PATHINFO_BASENAME));
+
+    if ($basename === 'py.exe' || $basename === 'py') {
+        return [$binary, '-3'];
+    }
+
+    return [$binary];
+}
+
+function ve_remote_command_output_last_json(string $output): ?array
+{
+    $output = trim($output);
+
+    if ($output === '') {
+        return null;
+    }
+
+    $lines = preg_split('/\r\n|\r|\n/', $output) ?: [];
+
+    for ($index = count($lines) - 1; $index >= 0; $index--) {
+        $line = trim((string) $lines[$index]);
+
+        if ($line === '') {
+            continue;
+        }
+
+        $decoded = json_decode($line, true);
+
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+    }
+
+    $decoded = json_decode($output, true);
+
+    return is_array($decoded) ? $decoded : null;
+}
+
+function ve_remote_header_lines_from_assoc(array $headers): array
+{
+    $lines = [];
+
+    foreach ($headers as $name => $value) {
+        if (!is_string($name) || trim($name) === '') {
+            continue;
+        }
+
+        if (is_array($value)) {
+            $value = implode(', ', array_map(static fn ($item): string => trim((string) $item), $value));
+        }
+
+        $value = trim((string) $value);
+
+        if ($value === '') {
+            continue;
+        }
+
+        $lines[] = trim($name) . ': ' . $value;
+    }
+
+    return $lines;
+}
+
+function ve_remote_yt_dlp_extract_info(string $url, array $options = []): array
+{
+    $command = ve_remote_yt_dlp_command();
+
+    if ($command === []) {
+        throw new RuntimeException('yt-dlp is not available on this server.');
+    }
+
+    $args = array_merge($command, [
+        '--skip-download',
+        '--dump-single-json',
+        '--no-warnings',
+        '--no-playlist',
+        '--socket-timeout',
+        '30',
+        '--user-agent',
+        (string) ve_remote_config()['user_agent'],
+    ]);
+
+    $format = trim((string) ($options['format'] ?? ''));
+
+    if ($format !== '') {
+        $args[] = '-f';
+        $args[] = $format;
+    }
+
+    if (($options['referer'] ?? '') !== '') {
+        $args[] = '--referer';
+        $args[] = (string) $options['referer'];
+    }
+
+    foreach (($options['extra_args'] ?? []) as $extraArg) {
+        if (is_string($extraArg) && $extraArg !== '') {
+            $args[] = $extraArg;
+        }
+    }
+
+    $args[] = $url;
+
+    [$exitCode, $output] = ve_video_run_command($args);
+    $info = ve_remote_command_output_last_json($output);
+
+    if ($exitCode !== 0 || !is_array($info)) {
+        throw new RuntimeException('yt-dlp could not inspect the remote URL. ' . trim($output));
+    }
+
+    return $info;
+}
+
+function ve_remote_mega_helper_script(): string
+{
+    return ve_root_path('scripts', 'mega_helper.py');
+}
+
+function ve_remote_mega_info(string $url): array
+{
+    $command = ve_remote_python_command();
+
+    if ($command === []) {
+        throw new RuntimeException('Python is required for MEGA remote downloads.');
+    }
+
+    $script = ve_remote_mega_helper_script();
+
+    if (!is_file($script)) {
+        throw new RuntimeException('The MEGA helper script is missing from this installation.');
+    }
+
+    [$exitCode, $output] = ve_video_run_command(array_merge($command, [
+        $script,
+        'info',
+        $url,
+    ]));
+
+    $info = ve_remote_command_output_last_json($output);
+
+    if ($exitCode !== 0 || !is_array($info)) {
+        throw new RuntimeException('MEGA link inspection failed. ' . trim($output));
+    }
+
+    return $info;
 }
 
 function ve_remote_require_auth_json(): array
@@ -76,10 +272,28 @@ function ve_remote_hosts(): array
     $hosts = [];
 
     foreach ([
+        '1fichier.php',
+        'fembed.php',
         'google_drive.php',
         'dropbox.php',
+        'mega.php',
+        'mixdrop.php',
+        'netu.php',
         'okru.php',
+        'streamsb.php',
         'streamtape.php',
+        'uploaded.php',
+        'uptobox.php',
+        'uptostream.php',
+        'upstream.php',
+        'videobin.php',
+        'vidoza.php',
+        'vidlox.php',
+        'vivo.php',
+        'xvideos.php',
+        'youporn.php',
+        'youtube.php',
+        'zippyshare.php',
         'direct.php',
     ] as $file) {
         $host = require __DIR__ . '/remote_upload/hosts/' . $file;
@@ -166,6 +380,26 @@ function ve_remote_absolute_url(string $baseUrl, string $location): string
     $directory = preg_replace('#/[^/]*$#', '/', $path) ?? '/';
 
     return $scheme . '://' . $host . $port . $directory . $location;
+}
+
+function ve_remote_origin_url(string $url): string
+{
+    $parts = parse_url($url);
+
+    if (!is_array($parts)) {
+        return '';
+    }
+
+    $scheme = (string) ($parts['scheme'] ?? 'https');
+    $host = trim((string) ($parts['host'] ?? ''));
+
+    if ($host === '') {
+        return '';
+    }
+
+    $port = isset($parts['port']) ? ':' . $parts['port'] : '';
+
+    return $scheme . '://' . $host . $port . '/';
 }
 
 function ve_remote_sanitize_filename(string $filename, string $fallback = 'video.mp4'): string
@@ -276,6 +510,32 @@ function ve_remote_cookie_header_from_response(array $response): string
     return implode('; ', array_unique($cookies));
 }
 
+function ve_remote_merge_cookie_header(string $current, string $incoming): string
+{
+    $pairs = [];
+
+    foreach ([$current, $incoming] as $header) {
+        foreach (explode(';', (string) $header) as $pair) {
+            $pair = trim($pair);
+
+            if ($pair === '' || !str_contains($pair, '=')) {
+                continue;
+            }
+
+            [$name, $value] = explode('=', $pair, 2);
+            $name = trim($name);
+
+            if ($name === '') {
+                continue;
+            }
+
+            $pairs[$name] = $name . '=' . trim($value);
+        }
+    }
+
+    return implode('; ', array_values($pairs));
+}
+
 function ve_remote_http_request(string $url, array $options = []): array
 {
     if (!function_exists('curl_init')) {
@@ -299,6 +559,8 @@ function ve_remote_http_request(string $url, array $options = []): array
         }
     }
 
+    $verifySsl = (bool) ($options['verify_ssl'] ?? true);
+
     curl_setopt($handle, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($handle, CURLOPT_FOLLOWLOCATION, (bool) ($options['follow_location'] ?? true));
     curl_setopt($handle, CURLOPT_MAXREDIRS, (int) ve_remote_config()['max_redirects']);
@@ -307,6 +569,9 @@ function ve_remote_http_request(string $url, array $options = []): array
     curl_setopt($handle, CURLOPT_ENCODING, '');
     curl_setopt($handle, CURLOPT_USERAGENT, (string) ($options['user_agent'] ?? ve_remote_config()['user_agent']));
     curl_setopt($handle, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($handle, CURLOPT_SSL_VERIFYPEER, $verifySsl);
+    curl_setopt($handle, CURLOPT_SSL_VERIFYHOST, $verifySsl ? 2 : 0);
+    curl_setopt($handle, CURLOPT_COOKIEFILE, '');
     curl_setopt($handle, CURLOPT_HEADERFUNCTION, static function ($curl, string $line) use (&$currentHeaders, &$finalHeaders): int {
         $trimmed = trim($line);
 
@@ -337,6 +602,10 @@ function ve_remote_http_request(string $url, array $options = []): array
 
     if (($options['referer'] ?? '') !== '') {
         curl_setopt($handle, CURLOPT_REFERER, (string) $options['referer']);
+    }
+
+    if (($options['cookie'] ?? '') !== '') {
+        curl_setopt($handle, CURLOPT_COOKIE, (string) $options['cookie']);
     }
 
     if ($method === 'HEAD') {
@@ -373,6 +642,465 @@ function ve_remote_http_request(string $url, array $options = []): array
     curl_close($handle);
 
     return $response;
+}
+
+function ve_remote_base_encode(int $value, int $base): string
+{
+    $alphabet = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    $base = max(2, min(62, $base));
+
+    if ($value === 0) {
+        return '0';
+    }
+
+    $encoded = '';
+
+    while ($value > 0) {
+        $encoded = $alphabet[$value % $base] . $encoded;
+        $value = intdiv($value, $base);
+    }
+
+    return $encoded;
+}
+
+function ve_remote_unpack_packer_payload(string $payload, int $base, int $count, array $symbols): string
+{
+    if ($payload === '' || $base < 2 || $base > 62 || $count < 1) {
+        return $payload;
+    }
+
+    for ($index = $count - 1; $index >= 0; $index--) {
+        $replacement = (string) ($symbols[$index] ?? '');
+
+        if ($replacement === '') {
+            continue;
+        }
+
+        $token = ve_remote_base_encode($index, $base);
+        $pattern = '/\b' . preg_quote($token, '/') . '\b/u';
+        $payload = preg_replace_callback(
+            $pattern,
+            static fn (): string => $replacement,
+            $payload
+        ) ?? $payload;
+    }
+
+    return $payload;
+}
+
+function ve_remote_unpack_packer_blocks(string $html): string
+{
+    if (!str_contains($html, 'eval(function(p,a,c,k,e,d)')) {
+        return '';
+    }
+
+    if (preg_match_all(
+        "/eval\\(function\\(p,a,c,k,e,d\\)\\{.*?\\}\\(\\s*'((?:\\\\.|[^'])*)'\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*'((?:\\\\.|[^'])*)'\\.split\\('\\|'\\)/is",
+        $html,
+        $matches,
+        PREG_SET_ORDER
+    ) !== 1 && ($matches === [])) {
+        return '';
+    }
+
+    $blocks = [];
+
+    foreach ($matches as $match) {
+        $payload = stripcslashes((string) ($match[1] ?? ''));
+        $base = (int) ($match[2] ?? 0);
+        $count = (int) ($match[3] ?? 0);
+        $symbols = explode('|', stripcslashes((string) ($match[4] ?? '')));
+        $decoded = ve_remote_unpack_packer_payload($payload, $base, $count, $symbols);
+
+        if (trim($decoded) !== '') {
+            $blocks[] = $decoded;
+        }
+    }
+
+    return implode("\n", $blocks);
+}
+
+function ve_remote_html_redirect_url(string $html, string $baseUrl): string
+{
+    $patterns = [
+        '/window\.location\.replace\(\s*["\']([^"\']+)["\']\s*\)/i',
+        '/location\.replace\(\s*["\']([^"\']+)["\']\s*\)/i',
+        '/window\.location\.href\s*=\s*["\']([^"\']+)["\']/i',
+        '/<meta[^>]+http-equiv=["\']refresh["\'][^>]+content=["\'][^"\']*url=([^"\']+)["\']/i',
+    ];
+
+    foreach ($patterns as $pattern) {
+        if (preg_match($pattern, $html, $match) !== 1 || !isset($match[1])) {
+            continue;
+        }
+
+        $redirectUrl = ve_remote_decode_escaped_url((string) $match[1], $baseUrl);
+
+        if ($redirectUrl !== '' && ve_remote_is_http_url($redirectUrl)) {
+            return $redirectUrl;
+        }
+    }
+
+    return '';
+}
+
+function ve_remote_decode_escaped_url(string $value, string $baseUrl = ''): string
+{
+    $value = html_entity_decode(trim($value), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+    if ($value === '') {
+        return '';
+    }
+
+    $decoded = json_decode('"' . addcslashes($value, "\"\n\r\t") . '"', true);
+
+    if (is_string($decoded) && $decoded !== '') {
+        $value = $decoded;
+    }
+
+    $value = str_replace(['\\/', '\\u0026'], ['/', '&'], $value);
+    $value = preg_replace('/\\\\u([0-9a-fA-F]{4})/', '&#x$1;', $value) ?? $value;
+    $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+    if (preg_match('/^(?:data|blob|javascript|mailto):/i', $value) === 1) {
+        return trim($value);
+    }
+
+    if ($baseUrl !== '' && !ve_remote_is_http_url($value)) {
+        $value = ve_remote_absolute_url($baseUrl, $value);
+    }
+
+    return trim($value);
+}
+
+function ve_remote_media_sources_from_html(string $html, string $baseUrl): array
+{
+    $unpacked = ve_remote_unpack_packer_blocks($html);
+
+    if ($unpacked !== '') {
+        $html .= "\n" . $unpacked;
+    }
+
+    $patterns = [
+        '/hlsManifestUrl["\']?\s*:\s*["\']([^"\']+)["\']/i',
+        '/MDCore\.(?:wurl|vurl|furl)\s*=\s*["\']([^"\']+)["\']/i',
+        '/\bvsr\s*=\s*["\']([^"\']+)["\']/i',
+        '/sources?(?:Code)?\s*:\s*\[[^\]]*?\{[^}]*?(?:file|src)\s*:\s*["\']([^"\']+)["\']/is',
+        '/\b(?:file|src)\s*:\s*["\']([^"\']+)["\']/i',
+        '/["\']file["\']\s*:\s*["\']([^"\']+)["\']/i',
+        '/["\']src["\']\s*:\s*["\']([^"\']+)["\']/i',
+        '/<source[^>]+src=["\']([^"\']+)["\']/i',
+        '/player\.src\(\s*["\']([^"\']+)["\']/i',
+        '/video[^>]+src=["\']([^"\']+)["\']/i',
+    ];
+
+    $sources = [];
+
+    foreach ($patterns as $pattern) {
+        if (preg_match_all($pattern, $html, $matches, PREG_SET_ORDER) !== 1 && ($matches === [])) {
+            continue;
+        }
+
+        foreach ($matches as $match) {
+            if (!is_array($match) || !isset($match[1])) {
+                continue;
+            }
+
+            $url = ve_remote_decode_escaped_url((string) $match[1], $baseUrl);
+
+            if ($url === '' || !ve_remote_is_http_url($url)) {
+                continue;
+            }
+
+            $downloadMethod = str_contains(strtolower($url), '.m3u8') ? 'ffmpeg' : 'curl';
+            $sources[$url] = [
+                'url' => $url,
+                'download_method' => $downloadMethod,
+            ];
+        }
+    }
+
+    return array_values($sources);
+}
+
+function ve_remote_pick_media_source(array $sources): ?array
+{
+    if ($sources === []) {
+        return null;
+    }
+
+    usort($sources, static function (array $left, array $right): int {
+        $leftUrl = strtolower((string) ($left['url'] ?? ''));
+        $rightUrl = strtolower((string) ($right['url'] ?? ''));
+        $leftScore = str_contains($leftUrl, '.mp4') ? 3 : (str_contains($leftUrl, '.m3u8') ? 2 : 1);
+        $rightScore = str_contains($rightUrl, '.mp4') ? 3 : (str_contains($rightUrl, '.m3u8') ? 2 : 1);
+
+        return $rightScore <=> $leftScore;
+    });
+
+    return $sources[0] ?? null;
+}
+
+function ve_remote_headers_to_ffmpeg_blob(array $source): string
+{
+    $headers = [];
+
+    if (($source['referer'] ?? '') !== '') {
+        $headers[] = 'Referer: ' . trim((string) $source['referer']);
+    }
+
+    if (($source['cookie'] ?? '') !== '') {
+        $headers[] = 'Cookie: ' . trim((string) $source['cookie']);
+    }
+
+    foreach (($source['headers'] ?? []) as $header) {
+        if (!is_string($header) || trim($header) === '') {
+            continue;
+        }
+
+        $headers[] = trim($header);
+    }
+
+    if ($headers === []) {
+        return '';
+    }
+
+    return implode("\r\n", $headers) . "\r\n";
+}
+
+function ve_remote_find_downloaded_file(string $directory): ?string
+{
+    if (!is_dir($directory)) {
+        return null;
+    }
+
+    $candidates = [];
+    $items = scandir($directory);
+
+    if (!is_array($items)) {
+        return null;
+    }
+
+    foreach ($items as $item) {
+        if ($item === '.' || $item === '..') {
+            continue;
+        }
+
+        $path = $directory . DIRECTORY_SEPARATOR . $item;
+
+        if (!is_file($path)) {
+            continue;
+        }
+
+        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        if (in_array($extension, ['part', 'ytdl', 'tmp'], true)) {
+            continue;
+        }
+
+        $candidates[$path] = filemtime($path) ?: 0;
+    }
+
+    if ($candidates === []) {
+        return null;
+    }
+
+    arsort($candidates);
+
+    return (string) array_key_first($candidates);
+}
+
+function ve_remote_download_via_ffmpeg(int $jobId, array $source): array
+{
+    $ffmpeg = (string) (ve_video_config()['ffmpeg'] ?? '');
+
+    if ($ffmpeg === '') {
+        throw new RuntimeException('FFmpeg is required for this remote stream source.');
+    }
+
+    $directory = ve_remote_job_directory($jobId);
+    ve_ensure_directory($directory);
+
+    $filename = trim((string) ($source['filename'] ?? 'remote-stream.mp4'));
+    $filename = ve_remote_ensure_filename_extension($filename, 'video/mp4');
+    $path = $directory . DIRECTORY_SEPARATOR . $filename;
+    $headerBlob = ve_remote_headers_to_ffmpeg_blob($source);
+
+    $args = [
+        $ffmpeg,
+        '-y',
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-protocol_whitelist',
+        'file,http,https,tcp,tls,crypto',
+        '-user_agent',
+        (string) ve_remote_config()['user_agent'],
+    ];
+
+    if ($headerBlob !== '') {
+        $args[] = '-headers';
+        $args[] = $headerBlob;
+    }
+
+    $args[] = '-i';
+    $args[] = (string) ($source['download_url'] ?? '');
+    $args[] = '-c';
+    $args[] = 'copy';
+    $args[] = '-bsf:a';
+    $args[] = 'aac_adtstoasc';
+    $args[] = $path;
+
+    [$exitCode, $output] = ve_video_run_command($args);
+
+    if ($exitCode !== 0 || !is_file($path)) {
+        @unlink($path);
+        throw new RuntimeException('FFmpeg could not download the remote stream. ' . trim($output));
+    }
+
+    $size = (int) (filesize($path) ?: 0);
+    ve_remote_update_progress($jobId, $size, $size, 0, 100);
+
+    return [
+        'path' => $path,
+        'filename' => basename($path),
+        'size' => $size,
+        'content_type' => 'video/mp4',
+        'effective_url' => (string) ($source['download_url'] ?? ''),
+        'headers' => [],
+        'speed' => 0,
+    ];
+}
+
+function ve_remote_download_via_ytdlp(int $jobId, array $source): array
+{
+    $command = ve_remote_yt_dlp_command();
+
+    if ($command === []) {
+        throw new RuntimeException('yt-dlp is required for this remote host but is not available on the server.');
+    }
+
+    $directory = ve_remote_job_directory($jobId);
+    ve_ensure_directory($directory);
+
+    $outputTemplate = $directory . DIRECTORY_SEPARATOR . 'yt-dlp-download.%(ext)s';
+    $args = array_merge($command, [
+        '--no-warnings',
+        '--no-progress',
+        '--no-playlist',
+        '--socket-timeout',
+        '30',
+        '--user-agent',
+        (string) ve_remote_config()['user_agent'],
+        '-o',
+        $outputTemplate,
+    ]);
+
+    $format = trim((string) ($source['yt_dlp_format'] ?? ''));
+
+    if ($format !== '') {
+        $args[] = '-f';
+        $args[] = $format;
+    }
+
+    $mergeOutputFormat = trim((string) ($source['merge_output_format'] ?? 'mp4'));
+
+    if ($mergeOutputFormat !== '') {
+        $args[] = '--merge-output-format';
+        $args[] = $mergeOutputFormat;
+    }
+
+    if (($source['referer'] ?? '') !== '') {
+        $args[] = '--referer';
+        $args[] = (string) $source['referer'];
+    }
+
+    foreach (($source['yt_dlp_extra_args'] ?? []) as $extraArg) {
+        if (is_string($extraArg) && $extraArg !== '') {
+            $args[] = $extraArg;
+        }
+    }
+
+    $args[] = (string) ($source['download_url'] ?? '');
+
+    [$exitCode, $output] = ve_video_run_command($args);
+    $path = ve_remote_find_downloaded_file($directory);
+
+    if ($exitCode !== 0 || !is_string($path) || $path === '' || !is_file($path)) {
+        throw new RuntimeException('yt-dlp could not download the remote video. ' . trim($output));
+    }
+
+    $size = (int) (filesize($path) ?: 0);
+    ve_remote_update_progress($jobId, $size, $size, 0, 100);
+
+    return [
+        'path' => $path,
+        'filename' => basename($path),
+        'size' => $size,
+        'content_type' => '',
+        'effective_url' => (string) ($source['download_url'] ?? ''),
+        'headers' => [],
+        'speed' => 0,
+    ];
+}
+
+function ve_remote_download_via_mega_py(int $jobId, array $source): array
+{
+    $command = ve_remote_python_command();
+
+    if ($command === []) {
+        throw new RuntimeException('Python is required for MEGA remote downloads.');
+    }
+
+    $script = ve_remote_mega_helper_script();
+
+    if (!is_file($script)) {
+        throw new RuntimeException('The MEGA helper script is missing from this installation.');
+    }
+
+    $directory = ve_remote_job_directory($jobId);
+    ve_ensure_directory($directory);
+
+    $filename = trim((string) ($source['filename'] ?? 'remote-mega-download.bin'));
+
+    if ($filename === '') {
+        $filename = 'remote-mega-download.bin';
+    }
+
+    [$exitCode, $output] = ve_video_run_command(array_merge($command, [
+        $script,
+        'download',
+        (string) ($source['download_url'] ?? ''),
+        $directory,
+        $filename,
+    ]), [
+        'timeout' => (int) ve_remote_config()['download_timeout'],
+    ]);
+
+    $result = ve_remote_command_output_last_json($output);
+
+    if ($exitCode !== 0 || !is_array($result)) {
+        throw new RuntimeException('MEGA download failed. ' . trim($output));
+    }
+
+    $path = (string) ($result['path'] ?? '');
+
+    if ($path === '' || !is_file($path)) {
+        throw new RuntimeException('MEGA download finished without a local file.');
+    }
+
+    $size = (int) (filesize($path) ?: 0);
+    ve_remote_update_progress($jobId, $size, $size, 0, 100);
+
+    return [
+        'path' => $path,
+        'filename' => basename($path),
+        'size' => $size,
+        'content_type' => '',
+        'effective_url' => (string) ($source['download_url'] ?? ''),
+        'headers' => [],
+        'speed' => 0,
+    ];
 }
 
 function ve_remote_update_job(int $jobId, array $columns): void
@@ -1052,6 +1780,20 @@ function ve_remote_resolve_source(array $job): array
 
 function ve_remote_download_to_file(int $jobId, array $source): array
 {
+    $downloadMethod = strtolower(trim((string) ($source['download_method'] ?? 'curl')));
+
+    if ($downloadMethod === 'yt_dlp') {
+        return ve_remote_download_via_ytdlp($jobId, $source);
+    }
+
+    if ($downloadMethod === 'mega_py') {
+        return ve_remote_download_via_mega_py($jobId, $source);
+    }
+
+    if ($downloadMethod === 'ffmpeg') {
+        return ve_remote_download_via_ffmpeg($jobId, $source);
+    }
+
     if (!function_exists('curl_init')) {
         throw new RuntimeException('The PHP cURL extension is required for remote uploads.');
     }
@@ -1088,6 +1830,8 @@ function ve_remote_download_to_file(int $jobId, array $source): array
         }
     }
 
+    $verifySsl = (bool) ($source['verify_ssl'] ?? true);
+
     curl_setopt($handle, CURLOPT_FILE, $stream);
     curl_setopt($handle, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($handle, CURLOPT_MAXREDIRS, (int) ve_remote_config()['max_redirects']);
@@ -1096,6 +1840,9 @@ function ve_remote_download_to_file(int $jobId, array $source): array
     curl_setopt($handle, CURLOPT_ENCODING, '');
     curl_setopt($handle, CURLOPT_USERAGENT, (string) ve_remote_config()['user_agent']);
     curl_setopt($handle, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($handle, CURLOPT_SSL_VERIFYPEER, $verifySsl);
+    curl_setopt($handle, CURLOPT_SSL_VERIFYHOST, $verifySsl ? 2 : 0);
+    curl_setopt($handle, CURLOPT_COOKIEFILE, '');
     curl_setopt($handle, CURLOPT_HEADERFUNCTION, static function ($curl, string $line) use (&$currentHeaders, &$finalHeaders): int {
         $trimmed = trim($line);
 
@@ -1157,6 +1904,10 @@ function ve_remote_download_to_file(int $jobId, array $source): array
 
     if (($source['referer'] ?? '') !== '') {
         curl_setopt($handle, CURLOPT_REFERER, (string) $source['referer']);
+    }
+
+    if (($source['cookie'] ?? '') !== '') {
+        curl_setopt($handle, CURLOPT_COOKIE, (string) $source['cookie']);
     }
 
     $success = curl_exec($handle);

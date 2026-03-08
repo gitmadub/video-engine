@@ -324,6 +324,34 @@ function ve_run_database_migrations(PDO $pdo): void
     );
 
     $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS user_stats_daily (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            stat_date TEXT NOT NULL,
+            views INTEGER NOT NULL DEFAULT 0,
+            earned_micro_usd INTEGER NOT NULL DEFAULT 0,
+            bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )'
+    );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS video_stats_daily (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            video_id INTEGER NOT NULL,
+            stat_date TEXT NOT NULL,
+            views INTEGER NOT NULL DEFAULT 0,
+            earned_micro_usd INTEGER NOT NULL DEFAULT 0,
+            bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE
+        )'
+    );
+
+    $pdo->exec(
         'CREATE TABLE IF NOT EXISTS video_folders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -361,6 +389,8 @@ function ve_run_database_migrations(PDO $pdo): void
     ve_add_column_if_missing($pdo, 'remote_uploads', 'started_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'remote_uploads', 'completed_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'remote_uploads', 'deleted_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'playback_started_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'bandwidth_bytes_served', 'INTEGER NOT NULL DEFAULT 0');
 
     $users = $pdo->query('SELECT id, api_key_encrypted, created_at, updated_at, api_key_hash, api_key_last_rotated_at FROM users')->fetchAll();
 
@@ -407,6 +437,10 @@ function ve_run_database_migrations(PDO $pdo): void
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_videos_user_folder_created ON videos(user_id, folder_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_remote_uploads_user_created ON remote_uploads(user_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_remote_uploads_status_created ON remote_uploads(status, created_at ASC)');
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_stats_daily_user_date ON user_stats_daily(user_id, stat_date)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_user_stats_daily_date ON user_stats_daily(stat_date)');
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_video_stats_daily_video_date ON video_stats_daily(video_id, stat_date)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_stats_daily_date ON video_stats_daily(stat_date)');
 }
 
 function ve_seed_ftp_servers(PDO $pdo): void
@@ -1093,6 +1127,491 @@ function ve_human_bytes(int $bytes): string
     $precision = $unit === 0 ? 0 : 1;
 
     return number_format($size, $precision) . ' ' . $units[$unit];
+}
+
+function ve_dashboard_earnings_per_view_micro_usd(): int
+{
+    static $rate;
+
+    if (is_int($rate)) {
+        return $rate;
+    }
+
+    $perThousand = (int) (getenv('VE_DASHBOARD_RATE_PER_1000_VIEWS_MICRO_USD') ?: 3500000);
+    $rate = max(0, (int) round($perThousand / 1000));
+
+    return $rate;
+}
+
+function ve_dashboard_format_currency_micro_usd(int $amount): string
+{
+    return '$' . number_format($amount / 1000000, 5, '.', '');
+}
+
+function ve_dashboard_format_traffic_gb(int $bytes, int $precision = 4): string
+{
+    return number_format($bytes / (1024 ** 3), $precision, '.', '');
+}
+
+function ve_dashboard_format_storage_bytes(int $bytes): string
+{
+    return number_format($bytes / (1024 ** 3), 2, '.', '') . ' GB';
+}
+
+/**
+ * @return array{from:string,to:string}
+ */
+function ve_dashboard_normalize_date_range(?string $from, ?string $to, int $defaultLookbackDays = 7): array
+{
+    $timezone = new DateTimeZone('UTC');
+    $today = new DateTimeImmutable('today', $timezone);
+    $defaultFrom = $today->sub(new DateInterval('P' . max(0, $defaultLookbackDays) . 'D'));
+    $defaultTo = $today;
+
+    $parse = static function (?string $value, DateTimeImmutable $fallback, DateTimeZone $timezone): DateTimeImmutable {
+        if (!is_string($value) || trim($value) === '' || preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) !== 1) {
+            return $fallback;
+        }
+
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value, $timezone);
+
+        return $date instanceof DateTimeImmutable ? $date : $fallback;
+    };
+
+    $fromDate = $parse($from, $defaultFrom, $timezone);
+    $toDate = $parse($to, $defaultTo, $timezone);
+
+    if ($fromDate > $toDate) {
+        [$fromDate, $toDate] = [$toDate, $fromDate];
+    }
+
+    $maxSpanDays = 120;
+
+    if ($fromDate->diff($toDate)->days > $maxSpanDays) {
+        $fromDate = $toDate->sub(new DateInterval('P' . $maxSpanDays . 'D'));
+    }
+
+    return [
+        'from' => $fromDate->format('Y-m-d'),
+        'to' => $toDate->format('Y-m-d'),
+    ];
+}
+
+/**
+ * @return string[]
+ */
+function ve_dashboard_date_series(string $fromDate, string $toDate): array
+{
+    $timezone = new DateTimeZone('UTC');
+    $from = DateTimeImmutable::createFromFormat('!Y-m-d', $fromDate, $timezone);
+    $to = DateTimeImmutable::createFromFormat('!Y-m-d', $toDate, $timezone);
+
+    if (!$from instanceof DateTimeImmutable || !$to instanceof DateTimeImmutable) {
+        return [];
+    }
+
+    if ($from > $to) {
+        [$from, $to] = [$to, $from];
+    }
+
+    $dates = [];
+    $cursor = $from;
+
+    while ($cursor <= $to) {
+        $dates[] = $cursor->format('Y-m-d');
+        $cursor = $cursor->add(new DateInterval('P1D'));
+    }
+
+    return $dates;
+}
+
+function ve_dashboard_increment_daily_stat_row(
+    string $table,
+    string $keyColumn,
+    int $keyValue,
+    string $statDate,
+    int $viewDelta,
+    int $earnedDelta,
+    int $bandwidthDelta
+): void {
+    if ($keyValue <= 0 || ($viewDelta === 0 && $earnedDelta === 0 && $bandwidthDelta === 0)) {
+        return;
+    }
+
+    $allowedTables = [
+        'user_stats_daily' => 'user_id',
+        'video_stats_daily' => 'video_id',
+    ];
+
+    if (($allowedTables[$table] ?? null) !== $keyColumn) {
+        throw new InvalidArgumentException('Unsupported dashboard aggregate target.');
+    }
+
+    $pdo = ve_db();
+    $now = ve_now();
+    $update = $pdo->prepare(
+        'UPDATE ' . $table . '
+         SET views = views + :views,
+             earned_micro_usd = earned_micro_usd + :earned_micro_usd,
+             bandwidth_bytes = bandwidth_bytes + :bandwidth_bytes,
+             updated_at = :updated_at
+         WHERE ' . $keyColumn . ' = :key_value
+           AND stat_date = :stat_date'
+    );
+    $params = [
+        ':views' => $viewDelta,
+        ':earned_micro_usd' => $earnedDelta,
+        ':bandwidth_bytes' => $bandwidthDelta,
+        ':updated_at' => $now,
+        ':key_value' => $keyValue,
+        ':stat_date' => $statDate,
+    ];
+    $update->execute($params);
+
+    if ($update->rowCount() > 0) {
+        return;
+    }
+
+    $insert = $pdo->prepare(
+        'INSERT INTO ' . $table . ' (
+            ' . $keyColumn . ', stat_date, views, earned_micro_usd, bandwidth_bytes, created_at, updated_at
+         ) VALUES (
+            :key_value, :stat_date, :views, :earned_micro_usd, :bandwidth_bytes, :created_at, :updated_at
+         )'
+    );
+
+    try {
+        $insert->execute([
+            ':key_value' => $keyValue,
+            ':stat_date' => $statDate,
+            ':views' => $viewDelta,
+            ':earned_micro_usd' => $earnedDelta,
+            ':bandwidth_bytes' => $bandwidthDelta,
+            ':created_at' => $now,
+            ':updated_at' => $now,
+        ]);
+    } catch (PDOException $exception) {
+        $update->execute($params);
+    }
+}
+
+function ve_dashboard_record_video_view(int $videoId, int $userId, ?string $statDate = null, ?int $earnedMicroUsd = null): void
+{
+    $statDate = is_string($statDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $statDate) === 1 ? $statDate : gmdate('Y-m-d');
+    $earnedMicroUsd = $earnedMicroUsd ?? ve_dashboard_earnings_per_view_micro_usd();
+
+    ve_dashboard_increment_daily_stat_row('video_stats_daily', 'video_id', $videoId, $statDate, 1, max(0, $earnedMicroUsd), 0);
+    ve_dashboard_increment_daily_stat_row('user_stats_daily', 'user_id', $userId, $statDate, 1, max(0, $earnedMicroUsd), 0);
+}
+
+function ve_dashboard_record_video_bandwidth(int $videoId, int $userId, int $bytes, ?string $statDate = null): void
+{
+    $bytes = max(0, $bytes);
+
+    if ($bytes === 0) {
+        return;
+    }
+
+    $statDate = is_string($statDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $statDate) === 1 ? $statDate : gmdate('Y-m-d');
+
+    ve_dashboard_increment_daily_stat_row('video_stats_daily', 'video_id', $videoId, $statDate, 0, 0, $bytes);
+    ve_dashboard_increment_daily_stat_row('user_stats_daily', 'user_id', $userId, $statDate, 0, 0, $bytes);
+}
+
+/**
+ * @return array<string, array{views:int,earned_micro_usd:int,bandwidth_bytes:int}>
+ */
+function ve_dashboard_user_stats_map(int $userId, string $fromDate, string $toDate): array
+{
+    $stmt = ve_db()->prepare(
+        'SELECT stat_date, views, earned_micro_usd, bandwidth_bytes
+         FROM user_stats_daily
+         WHERE user_id = :user_id
+           AND stat_date BETWEEN :from_date AND :to_date
+         ORDER BY stat_date ASC'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':from_date' => $fromDate,
+        ':to_date' => $toDate,
+    ]);
+
+    $map = [];
+
+    foreach ($stmt->fetchAll() as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $date = (string) ($row['stat_date'] ?? '');
+
+        if ($date === '') {
+            continue;
+        }
+
+        $map[$date] = [
+            'views' => (int) ($row['views'] ?? 0),
+            'earned_micro_usd' => (int) ($row['earned_micro_usd'] ?? 0),
+            'bandwidth_bytes' => (int) ($row['bandwidth_bytes'] ?? 0),
+        ];
+    }
+
+    return $map;
+}
+
+/**
+ * @return array<int, array{time:string,views:int,profit:string,traffic:string,earned_micro_usd:int,bandwidth_bytes:int}>
+ */
+function ve_dashboard_chart_series(int $userId, string $fromDate, string $toDate): array
+{
+    $stats = ve_dashboard_user_stats_map($userId, $fromDate, $toDate);
+    $series = [];
+
+    foreach (ve_dashboard_date_series($fromDate, $toDate) as $date) {
+        $row = $stats[$date] ?? [
+            'views' => 0,
+            'earned_micro_usd' => 0,
+            'bandwidth_bytes' => 0,
+        ];
+
+        $series[] = [
+            'time' => $date,
+            'views' => (int) $row['views'],
+            'profit' => number_format(((int) $row['earned_micro_usd']) / 1000000, 5, '.', ''),
+            'traffic' => ve_dashboard_format_traffic_gb((int) $row['bandwidth_bytes']),
+            'earned_micro_usd' => (int) $row['earned_micro_usd'],
+            'bandwidth_bytes' => (int) $row['bandwidth_bytes'],
+        ];
+    }
+
+    return $series;
+}
+
+/**
+ * @return array{views:int,earned_micro_usd:int,bandwidth_bytes:int}
+ */
+function ve_dashboard_totals_for_date(int $userId, string $statDate): array
+{
+    $stmt = ve_db()->prepare(
+        'SELECT views, earned_micro_usd, bandwidth_bytes
+         FROM user_stats_daily
+         WHERE user_id = :user_id AND stat_date = :stat_date
+         LIMIT 1'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':stat_date' => $statDate,
+    ]);
+    $row = $stmt->fetch();
+
+    if (!is_array($row)) {
+        return [
+            'views' => 0,
+            'earned_micro_usd' => 0,
+            'bandwidth_bytes' => 0,
+        ];
+    }
+
+    return [
+        'views' => (int) ($row['views'] ?? 0),
+        'earned_micro_usd' => (int) ($row['earned_micro_usd'] ?? 0),
+        'bandwidth_bytes' => (int) ($row['bandwidth_bytes'] ?? 0),
+    ];
+}
+
+function ve_dashboard_balance_micro_usd(int $userId): int
+{
+    $stmt = ve_db()->prepare(
+        'SELECT COALESCE(SUM(earned_micro_usd), 0)
+         FROM user_stats_daily
+         WHERE user_id = :user_id'
+    );
+    $stmt->execute([':user_id' => $userId]);
+
+    return (int) $stmt->fetchColumn();
+}
+
+function ve_dashboard_storage_bytes(int $userId): int
+{
+    $stmt = ve_db()->prepare(
+        'SELECT COALESCE(SUM(CASE
+            WHEN processed_size_bytes > 0 THEN processed_size_bytes
+            ELSE original_size_bytes
+         END), 0)
+         FROM videos
+         WHERE user_id = :user_id
+           AND deleted_at IS NULL'
+    );
+    $stmt->execute([':user_id' => $userId]);
+
+    return (int) $stmt->fetchColumn();
+}
+
+function ve_dashboard_online_watchers(int $userId, int $windowSeconds = 600): int
+{
+    $stmt = ve_db()->prepare(
+        'SELECT COUNT(*)
+         FROM video_playback_sessions sessions
+         INNER JOIN videos ON videos.id = sessions.video_id
+         WHERE videos.user_id = :user_id
+           AND videos.deleted_at IS NULL
+           AND sessions.revoked_at IS NULL
+           AND sessions.expires_at >= :now
+           AND sessions.last_seen_at >= :active_since'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':now' => ve_now(),
+        ':active_since' => gmdate('Y-m-d H:i:s', ve_timestamp() - max(60, $windowSeconds)),
+    ]);
+
+    return (int) $stmt->fetchColumn();
+}
+
+/**
+ * @return array<int, array<string, mixed>>
+ */
+function ve_dashboard_top_files(int $userId, string $fromDate, string $toDate, int $limit = 5): array
+{
+    $stmt = ve_db()->prepare(
+        'SELECT
+            videos.public_id,
+            videos.title,
+            videos.status,
+            COALESCE(SUM(video_stats_daily.views), 0) AS total_views,
+            COALESCE(SUM(video_stats_daily.earned_micro_usd), 0) AS total_earned_micro_usd,
+            COALESCE(SUM(video_stats_daily.bandwidth_bytes), 0) AS total_bandwidth_bytes
+         FROM videos
+         LEFT JOIN video_stats_daily
+           ON video_stats_daily.video_id = videos.id
+          AND video_stats_daily.stat_date BETWEEN :from_date AND :to_date
+         WHERE videos.user_id = :user_id
+           AND videos.deleted_at IS NULL
+         GROUP BY videos.id
+         HAVING total_views > 0 OR total_bandwidth_bytes > 0
+         ORDER BY total_views DESC, total_bandwidth_bytes DESC, videos.created_at DESC
+         LIMIT ' . max(1, $limit)
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':from_date' => $fromDate,
+        ':to_date' => $toDate,
+    ]);
+
+    $rows = $stmt->fetchAll();
+
+    if (!is_array($rows)) {
+        return [];
+    }
+
+    return array_map(static function (array $row): array {
+        $publicId = (string) ($row['public_id'] ?? '');
+        $bandwidthBytes = (int) ($row['total_bandwidth_bytes'] ?? 0);
+        $earnedMicroUsd = (int) ($row['total_earned_micro_usd'] ?? 0);
+
+        return [
+            'public_id' => $publicId,
+            'title' => (string) ($row['title'] ?? 'Untitled video'),
+            'status' => (string) ($row['status'] ?? ''),
+            'views' => (int) ($row['total_views'] ?? 0),
+            'earned_micro_usd' => $earnedMicroUsd,
+            'earned' => ve_dashboard_format_currency_micro_usd($earnedMicroUsd),
+            'bandwidth_bytes' => $bandwidthBytes,
+            'bandwidth' => ve_human_bytes($bandwidthBytes),
+            'watch_url' => ve_url('/d/' . rawurlencode($publicId)),
+        ];
+    }, array_filter($rows, static fn ($row): bool => is_array($row)));
+}
+
+function ve_dashboard_summary(int $userId, int $lookbackDays = 7): array
+{
+    $range = ve_dashboard_normalize_date_range(null, null, $lookbackDays);
+    $todayDate = $range['to'];
+    $yesterdayDate = (new DateTimeImmutable($todayDate, new DateTimeZone('UTC')))
+        ->sub(new DateInterval('P1D'))
+        ->format('Y-m-d');
+    $today = ve_dashboard_totals_for_date($userId, $todayDate);
+    $yesterday = ve_dashboard_totals_for_date($userId, $yesterdayDate);
+    $balanceMicroUsd = ve_dashboard_balance_micro_usd($userId);
+    $storageBytes = ve_dashboard_storage_bytes($userId);
+    $online = ve_dashboard_online_watchers($userId);
+
+    return [
+        'status' => 'ok',
+        'generated_at' => ve_now(),
+        'online' => $online,
+        'today' => ve_dashboard_format_currency_micro_usd((int) $today['earned_micro_usd']),
+        'balance' => ve_dashboard_format_currency_micro_usd($balanceMicroUsd),
+        'widgets' => [
+            'online' => [
+                'value' => $online,
+                'formatted' => (string) $online,
+            ],
+            'today_earnings' => [
+                'micro_usd' => (int) $today['earned_micro_usd'],
+                'formatted' => ve_dashboard_format_currency_micro_usd((int) $today['earned_micro_usd']),
+            ],
+            'yesterday_earnings' => [
+                'micro_usd' => (int) $yesterday['earned_micro_usd'],
+                'formatted' => ve_dashboard_format_currency_micro_usd((int) $yesterday['earned_micro_usd']),
+            ],
+            'balance' => [
+                'micro_usd' => $balanceMicroUsd,
+                'formatted' => ve_dashboard_format_currency_micro_usd($balanceMicroUsd),
+            ],
+            'storage_used' => [
+                'bytes' => $storageBytes,
+                'formatted' => ve_dashboard_format_storage_bytes($storageBytes),
+            ],
+        ],
+        'chart' => ve_dashboard_chart_series($userId, $range['from'], $range['to']),
+        'top_files' => ve_dashboard_top_files($userId, $range['from'], $range['to']),
+        'range' => $range,
+    ];
+}
+
+function ve_dashboard_reports_snapshot(int $userId, ?string $from = null, ?string $to = null): array
+{
+    $range = ve_dashboard_normalize_date_range($from, $to, 7);
+    $series = ve_dashboard_chart_series($userId, $range['from'], $range['to']);
+    $totalViews = 0;
+    $totalEarnedMicroUsd = 0;
+    $totalBandwidthBytes = 0;
+    $rows = [];
+
+    foreach ($series as $entry) {
+        $views = (int) ($entry['views'] ?? 0);
+        $earnedMicroUsd = (int) ($entry['earned_micro_usd'] ?? 0);
+        $bandwidthBytes = (int) ($entry['bandwidth_bytes'] ?? 0);
+
+        $totalViews += $views;
+        $totalEarnedMicroUsd += $earnedMicroUsd;
+        $totalBandwidthBytes += $bandwidthBytes;
+        $rows[] = [
+            'date' => (string) ($entry['time'] ?? ''),
+            'views' => $views,
+            'profit' => ve_dashboard_format_currency_micro_usd($earnedMicroUsd),
+            'profit_micro_usd' => $earnedMicroUsd,
+            'referral_share' => ve_dashboard_format_currency_micro_usd(0),
+            'traffic' => ve_human_bytes($bandwidthBytes),
+            'bandwidth_bytes' => $bandwidthBytes,
+        ];
+    }
+
+    return [
+        'status' => 'ok',
+        'range' => $range,
+        'chart' => $series,
+        'rows' => $rows,
+        'totals' => [
+            'views' => $totalViews,
+            'profit' => ve_dashboard_format_currency_micro_usd($totalEarnedMicroUsd),
+            'profit_micro_usd' => $totalEarnedMicroUsd,
+            'referral_share' => ve_dashboard_format_currency_micro_usd(0),
+            'traffic' => ve_human_bytes($totalBandwidthBytes),
+            'bandwidth_bytes' => $totalBandwidthBytes,
+        ],
+    ];
 }
 
 function ve_api_extract_key_from_request(): ?string
@@ -3464,12 +3983,18 @@ function ve_render_settings_page(): void
     $user = ve_require_auth();
     $settings = $user['settings'];
     $api = ve_api_usage_snapshot((int) $user['id']);
+    $dashboard = ve_dashboard_summary((int) $user['id']);
     ve_pull_flash();
     $splashPreviewHtml = ve_player_splash_preview_html($settings);
 
     $html = (string) file_get_contents(ve_root_path('dashboard', 'settings.html'));
 
     $html = ve_runtime_html_transform($html, 'dashboard/settings.html');
+    $html = str_replace(
+        '<span class="money d-block">$0</span>',
+        '<span class="money d-block">' . ve_h((string) ($dashboard['widgets']['balance']['formatted'] ?? '$0.00000')) . '</span>',
+        $html
+    );
     $html = str_replace('Current email: <b>lzcoeyhl@telegmail.com</b>', 'Current email: <b>' . ve_h((string) $user['email']) . '</b>', $html);
     $html = str_replace('value="559348grlz3u7np0z0hccb"', 'value="' . ve_h(ve_user_api_key($user)) . '"', $html);
     $html = str_replace('value="8wmdu9ngch"', 'value="' . ve_h(ve_user_ftp_password($user)) . '"', $html);
