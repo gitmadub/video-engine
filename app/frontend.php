@@ -39,6 +39,65 @@ function ve_root_path(string ...$parts): string
     return __DIR__ . '/../' . implode('/', $parts);
 }
 
+function ve_base_path(): string
+{
+    static $basePath;
+
+    if (is_string($basePath)) {
+        return $basePath;
+    }
+
+    $configured = getenv('VE_BASE_PATH');
+
+    if (is_string($configured) && $configured !== '') {
+        $configured = '/' . trim($configured, '/');
+        $basePath = $configured === '/' ? '' : $configured;
+        return $basePath;
+    }
+
+    $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+
+    if (is_string($requestPath) && ($requestPath === '/video-engine' || str_starts_with($requestPath, '/video-engine/'))) {
+        $basePath = '/video-engine';
+        return $basePath;
+    }
+
+    $basePath = '';
+    return $basePath;
+}
+
+function ve_url(string $path = '/'): string
+{
+    if ($path === '') {
+        $path = '/';
+    }
+
+    if (
+        preg_match('#^(?:[a-z][a-z0-9+.-]*:)?//#i', $path) === 1
+        || str_starts_with($path, '#')
+        || str_starts_with($path, 'mailto:')
+        || str_starts_with($path, 'tel:')
+    ) {
+        return $path;
+    }
+
+    $basePath = ve_base_path();
+
+    if ($path === '/') {
+        return $basePath === '' ? '/' : $basePath . '/';
+    }
+
+    if ($path[0] !== '/') {
+        $path = '/' . $path;
+    }
+
+    if ($basePath !== '' && ($path === $basePath || str_starts_with($path, $basePath . '/'))) {
+        return $path;
+    }
+
+    return $basePath . $path;
+}
+
 function ve_request_path(): string
 {
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
@@ -48,6 +107,11 @@ function ve_request_path(): string
     }
 
     $path = rawurldecode($path);
+    $basePath = ve_base_path();
+
+    if ($basePath !== '' && ($path === $basePath || str_starts_with($path, $basePath . '/'))) {
+        $path = substr($path, strlen($basePath)) ?: '/';
+    }
 
     if ($path !== '/') {
         $path = rtrim($path, '/');
@@ -74,9 +138,75 @@ function ve_html(string $html, int $status = 200): void
 
 function ve_redirect(string $location, int $status = 302): void
 {
+    if ($location !== '' && ($location[0] === '/' || $location[0] === '?')) {
+        $location = $location[0] === '/' ? ve_url($location) : ve_url('/' . $location);
+    }
+
     http_response_code($status);
     header('Location: ' . $location);
     exit;
+}
+
+function ve_rewrite_html_paths(string $html): string
+{
+    $basePath = ve_base_path();
+
+    if ($basePath === '') {
+        return $html;
+    }
+
+    $quotedReplacements = [
+        'href="../index.html"' => 'href="' . ve_url('/') . '"',
+        "href='../index.html'" => "href='" . ve_url('/') . "'",
+        'action="../index.html"' => 'action="' . ve_url('/') . '"',
+        "action='../index.html'" => "action='" . ve_url('/') . "'",
+        'src="../js/dood_load.js"' => 'src="' . ve_url('/js/dood_load.js') . '"',
+        "src='../js/dood_load.js'" => "src='" . ve_url('/js/dood_load.js') . "'",
+        'href="/"' => 'href="' . ve_url('/') . '"',
+        "href='/'" => "href='" . ve_url('/') . "'",
+        'action="/"' => 'action="' . ve_url('/') . '"',
+        "action='/'" => "action='" . ve_url('/') . "'",
+    ];
+
+    $html = strtr($html, $quotedReplacements);
+
+    $prefixes = [
+        '/assets/',
+        '/js/',
+        '/dashboard',
+        '/videos',
+        '/settings',
+        '/reports',
+        '/remote-upload',
+        '/referrals',
+        '/premium-plans',
+        '/request-payout',
+        '/dmca-manager',
+        '/api-docs',
+        '/contact',
+        '/copyright',
+        '/earn-money',
+        '/premium',
+        '/terms-and-conditions',
+        '/genrate-api',
+        '/subscene/',
+        '/data/',
+        '/dl',
+        '/?op=',
+    ];
+
+    foreach ($prefixes as $prefix) {
+        $target = ve_url($prefix);
+        $html = str_replace('="' . $prefix, '="' . $target, $html);
+        $html = str_replace("='" . $prefix, "='" . $target, $html);
+        $html = str_replace('("' . $prefix, '("' . $target, $html);
+        $html = str_replace("('" . $prefix, "('" . $target, $html);
+        $html = str_replace('url(' . $prefix, 'url(' . $target, $html);
+        $html = str_replace('url("' . $prefix, 'url("' . $target, $html);
+        $html = str_replace("url('" . $prefix, "url('" . $target, $html);
+    }
+
+    return $html;
 }
 
 function ve_render_file(string $relativePath, int $status = 200): void
@@ -89,7 +219,7 @@ function ve_render_file(string $relativePath, int $status = 200): void
 
     http_response_code($status);
     header('Content-Type: text/html; charset=UTF-8');
-    readfile($fullPath);
+    echo ve_rewrite_html_paths((string) file_get_contents($fullPath));
     exit;
 }
 
@@ -138,7 +268,8 @@ HTML;
 
 function ve_payment_page(string $title): string
 {
-    $backUrl = '/dashboard/premium-plans';
+    $backUrl = ve_url('/dashboard/premium-plans');
+    $bootstrapUrl = ve_url('/assets/i.doodcdn.io/theme_2/css/bootstrap.min.css');
 
     return <<<HTML
 <!doctype html>
@@ -147,7 +278,7 @@ function ve_payment_page(string $title): string
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{$title}</title>
-    <link rel="stylesheet" href="/assets/i.doodcdn.io/theme_2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{$bootstrapUrl}">
     <style>
         body { background:#111; color:#fff; font-family:Arial,sans-serif; }
         .box { max-width:720px; margin:80px auto; background:#1c1c1c; padding:32px; border-radius:12px; }
@@ -180,7 +311,7 @@ function ve_handle_op(string $op, string $path): bool
         case 'login_ajax':
             ve_json([
                 'status' => 'redirect',
-                'message' => '/dashboard',
+                'message' => ve_url('/dashboard'),
             ]);
 
         case 'registration_ajax':
@@ -244,7 +375,7 @@ function ve_handle_op(string $op, string $path): bool
             ve_json([
                 'status' => 'ok',
                 'server' => 'local',
-                'upload_url' => '/dashboard/remote-upload',
+                'upload_url' => ve_url('/dashboard/remote-upload'),
             ]);
 
         case 'pass_file':
@@ -277,7 +408,7 @@ function ve_handle_op(string $op, string $path): bool
         case 'my_account':
         case 'my_reports':
         case 'request_money':
-            ve_back_redirect($path === '/' ? '/dashboard' : $path);
+            ve_back_redirect($path === '/' ? ve_url('/dashboard') : ve_url($path));
 
         default:
             return false;
