@@ -1,0 +1,1853 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>API Documentation - DoodStream</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <script src="/assets/cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+    <link rel="stylesheet" href="/assets/i.doodcdn.io/theme_2/css/bootstrap.min.css">
+    <link rel="stylesheet" type="text/css" href="/assets/static.doodcdn.io/theme_2/css/style.min.css" />
+    <link rel="stylesheet" type="text/css" href="/assets/i.doodcdn.io/theme_2/css/api.css" />
+
+<style type="text/css">
+    
+#api_doc .api-sidebar {
+    width: 300px;
+}
+
+#api_doc .api-content {
+    width: calc(100% - 300px);
+}
+
+
+#api_doc .api-content .api-route .code-type {
+    padding: 8px;
+    background: #2f2f2f;
+}
+
+a {
+    color: rgb(255 154 0);
+}
+
+.cat-open{
+    border-top: 2px solid #5f5f5f;
+    padding: 15px 0px 1px 0px;
+    margin: 30px 11px 0px 0px;
+}
+
+#api_doc .api-content .api-route .results code {
+    background: rgb(29 29 29);
+    padding: 6px 16px;
+    color: #ff9a00;
+}
+
+#api_doc .api-content .api-box {
+    border-bottom: none;
+}
+
+#api_doc .api-content .api-route .code-type {
+    margin: 0 0 10px;
+}
+
+#api_doc .api-content .api-route .results h6 {
+    margin: 30px 0 10px;
+}
+
+.para-sep{
+    border-top: 1px solid #363938;
+    padding: 10px 0px;
+    margin-top: 10px;
+}
+
+.para-sep2{
+    border-top: 1px solid #363938;
+    padding: 10px 0px;
+}
+
+#api_doc .api-content .api-route .border-h {
+    border-top: 1px solid #ff9a00;
+    padding-top: 20px;
+}
+
+#api_doc .api-sidebar .title {
+    font-weight: 600;
+    text-align: center;
+}
+
+#api_doc .api-sidebar .the-menu .nav-link.active + .long-menu {
+    height: 186px;
+}
+
+#api_doc .api-sidebar .the-menu .nav-link.active + .long-menu2 {
+    height: 216px;
+}
+
+#api_doc .api-sidebar .the-menu .nav-link.active + .long-menu4 {
+    height: 255px;
+}
+
+#api_doc .api-sidebar .the-menu .nav-link.active + .long-menu3 {
+    height: 120px;
+}
+
+#api_doc .api-sidebar .the-menu .nav-link.active + .mid-menu {
+    height: 115px;
+}
+
+#api_doc .api-sidebar .the-menu .sub-menu .nav-link.active {
+    color: #ff9a00;
+}
+
+#api_doc .api-content .api-route .code-type code, #api_doc .api-content .api-route .results code {
+    border-radius: 3px;
+}
+
+#api_doc .api-content .api-route .code-type code {padding: 5px 15px;}
+
+</style>
+
+
+</head>
+<body data-spy="scroll" data-target=".api-menu" data-offset="0">
+
+    <div id="api_doc" class="d-flex flex-wrap justify-content-between">
+        <div class="api-sidebar">
+            <a class="navbar-brand w-100" href="../index.html"><img style="width:120px" src="/assets/i.doodcdn.io/img/logo-s.png"></a>
+            <h4 class="title d-block w-100">API Documentation</h4>
+            <nav class="nav api-menu mt-3">
+                <ul class="the-menu p-0 m-0">
+                	<li class="nav-item">
+                        <a class="nav-link" href="#intro">Introduction</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#account">Account</a>
+                        <div class="nav sub-menu mid-menu">
+                            <a href="#account-info" class="nav-link">Info</a>
+                            <a href="#account-reports" class="nav-link">Reports</a>
+                            <a href="#account-dmca" class="nav-link">DMCA List</a>
+                        </div>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link" href="#upload">Upload</a>
+                        <div class="nav sub-menu">
+                            <a href="#local-upload" class="nav-link">Local upload</a>
+                            <a href="#files-copy" class="nav-link">Copy / Clone</a>
+                        </div>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link" href="#remote-upload">Remote upload</a>
+                        <div class="nav sub-menu long-menu">
+                            <a href="#remote-upload-add" class="nav-link">Add</a>
+                            <a href="#remote-upload-list" class="nav-link">List</a>
+                            <a href="#remote-upload-status" class="nav-link">Status</a>
+                            <a href="#remote-upload-slots" class="nav-link">Slots</a>
+                            <a href="#remote-upload-actions" class="nav-link">Actions</a>
+                        </div>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link" href="#manage-folders">Manage folders</a>
+                        <div class="nav sub-menu long-menu3">
+                            <a href="#folders-create" class="nav-link">Create</a>
+                            <a href="#folders-rename" class="nav-link">Rename</a>
+                            <a href="#folders-list" class="nav-link">List folders/files</a>
+                        </div>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link" href="#manage-files">Manage files</a>
+                        <div class="nav sub-menu long-menu4">
+                            <a href="#files-list" class="nav-link">List</a>
+                            <a href="#files-status" class="nav-link">Status</a>
+                            <a href="#files-info" class="nav-link">Info</a>
+                            <a href="#files-image" class="nav-link">Image</a>
+                            <a href="#files-rename" class="nav-link">Rename</a>
+                            <a href="#files-move" class="nav-link">Move</a>
+                            <a href="#files-search" class="nav-link">Search</a>
+                        </div>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link" href="#extras">Extras</a>
+                        <div class="nav sub-menu mid-menu">
+                            <a href="#remote-splash" class="nav-link">Remote splash image</a>
+                            <a href="#remote-subtitle" class="nav-link">Remote subtitle</a>
+                            <a href="#remote-subtitle-json" class="nav-link">Remote subtitle JSON</a>
+                        </div>
+                    </li>
+
+                    <li class="nav-item mt-4">
+                        <a class="nav-link" href="#clients">Clients</a>
+                        <div class="nav sub-menu long-menu2">
+                            <a href="#php" class="nav-link">PHP</a>
+                            <a href="#python" class="nav-link">Python</a>
+                        </div>
+                    </li>
+
+                </ul> 
+            </nav>
+        </div>
+        <div class="ml-auto mr-0 api-content position-relative">
+            
+            <div class="api-box mb-5">
+
+            	<h2 id="intro" class="px-3 mt-3">Introduction</h2>
+            	<p class="px-3 ml-3 mt-1"></br>
+                DoodStream provides a simple HTTP API to integrate ours into your business or application. </br>
+                All requests to the API should be only <b>GET</b> or <b>POST</b></br>
+                You can find your API key here - <a href="https://doodstream.com/settings" target="_blank">https://doodstream.com/settings</a>
+
+
+                <h2 id="account" class="px-3 cat-open">Rate limits</h2>
+                <p style="color: #b4b4b4;padding: 0 0 15px;margin: 0 0 15px;margin-left: 15px;">API requests are rate limited to 10 per second - for more requests contact us</p>
+
+                <h6 class="px-3 ml-3 mt-1" style="color: #b4b4b4;font-weight: 700;padding: 0 0 10px;margin: 40px 0 10px;display: block;border-bottom: 1px solid rgba(28,28,28,0.3);">Response</h6>
+                <pre class="px-3 ml-3 mt-1" style="background:#1c1c1c;color: #fff;padding: 15px;">{"msg":"Too Many Requests","status":"429"}</pre>
+
+                </p>
+
+                <h2 id="account" class="px-3 cat-open">Account</h2>
+
+                <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="account-info">Account Info</h4>
+                        <p>Get basic info of your account</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/account/info?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": {
+      "email": "email@test.com",
+      "balance": "0.00000",
+      "storage_used" :"24186265",
+      "storage_left": 128824832615,
+      "premim_expire": "2025-10-24 21:00:00
+  }
+}</pre>
+                    </div>
+                </div>
+
+
+                <div class="api-route mb-5">
+                    <div class="col-md-12">
+                        <h4 id="account-reports">Account Reports</h4>
+                        <p>Get reports of your account (default last 7 days)</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/account/stats?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>last</code>
+                            </div>
+                            <div class="col-md-4">
+                                Last x days report
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>from_date</code>
+                            </div>
+                            <div class="col-md-4">
+                                From date - <small>YYYY-MM-DD</small>
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>to_date</code>
+                            </div>
+                            <div class="col-md-4">
+                                To date - <small>YYYY-MM-DD</small>
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": [
+    {
+      "profit_views": "0.00000",
+      "downloads": "0",
+      "views": "0",
+      "day": "2017-08-11",
+      "profit_total": "0.00000"
+    },
+    {
+      "profit_views": "0.00000",
+      "downloads": "0",
+      "views": "0",
+      "day": "2017-08-12",
+      "profit_total": "0.00000"
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+
+                <div class="api-route mb-5">
+                    <div class="col-md-12">
+                        <h4 id="account-dmca">DMCA List</h4>
+                        <p>Get DMCA reported files list (500 results per page)</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/dmca/list?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>per_page</code>
+                            </div>
+                            <div class="col-md-4">
+                                Results per page (default 500)
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">no</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>page</code>
+                            </div>
+                            <div class="col-md-4">
+                                Pagination
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">no</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": [
+    {
+      "reported_on": "2017-08-11 04:30:07",
+      "protected_download": "yyy",
+      "protected_embed": "zzz",
+      "file_code": "xxx",
+      "fld_id": "0",
+      "disabled_on": "2017-08-11 05:00:07"
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+
+            <h2 id="upload" class="px-3 cat-open">Upload</h2>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="local-upload">Local upload</h4>
+                        <p>Upload local files using API</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/upload/server?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": "https://xxx.cloudatacdn.com/upload/01"
+}</pre>
+
+                        <h6>Example to use (cURL)</h6>
+                        <pre class="body-return">
+curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudatacdn.com/upload/01?{your_api_key}</pre>
+
+                        <h6>Example to use (HTML)</h6>
+                        <pre class="body-return">
+&lt;form enctype="multipart/form-data" action="https://xxx.cloudatacdn.com/upload/01?{your_api_key}" method="post"&gt;
+&lt;input type="hidden" name="api_key" value="{your_api_key}"&gt;
+&lt;input name="file" type="file"&gt;
+&lt;input type="submit"&gt;
+&lt;/form&gt;</pre>
+
+                        <h6>After upload response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": [
+    {
+      "download_url": "https://dood.to/d/xxx",
+      "single_img": "../assets/img.doodcdn.io/snaps/xxx.jpg",
+      "status": 200,
+      "filecode": "xxx",
+      "splash_img": "../assets/img.doodcdn.io/splash/xxx.jpg",
+      "canplay": 1,
+      "size": "123456",
+      "length": "123456",
+      "uploaded": "2017-08-11 04:30:07",
+      "protected_embed": "https://dood.to/e/yyy",
+      "protected_dl": "https://dood.to/d/zzz",
+      "title": "test_file"
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+
+           <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="files-copy">Copy or Clone</h4>
+                        <p>Copy / Clone your's or other's file</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/file/clone?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>file_code</code>
+                            </div>
+                            <div class="col-md-4">
+                                File code
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>fld_id</code>
+                            </div>
+                            <div class="col-md-4">
+                                Folder ID (to copy inside the folder)
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": {
+    "embed_url": "https://dood.la/e/xxx",
+    "download_url": "https://dood.la/d/xxx",
+    "protected_download": "https://dood.la/d/yyy",
+    "protected_embed": "https://dood.la/e/zzz",
+    "filecode": "xxx"
+  }
+}</pre>
+                    </div>
+                </div>
+
+            <h2 id="remote-upload" class="px-3 cat-open">Remote Upload</h2>
+
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="remote-upload-add">Add link</h4>
+                        <p>Upload files using direct links</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/upload/url?key={your_api_key}&url={upload_url}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>url</code>
+                            </div>
+                            <div class="col-md-4">
+                                URL to upload
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>fld_id</code>
+                            </div>
+                            <div class="col-md-4">
+                                To upload inside a folder
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>new_title</code>
+                            </div>
+                            <div class="col-md-4">
+                                To set new title
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "new_title": "",
+  "status": 200,
+  "total_slots": "100",
+  "result": {
+    "filecode": "98zukoh5jqiw"
+  },
+  "used_slots": "0"
+}</pre>
+                    </div>
+                </div>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="remote-upload-list">Remote upload list</h4>
+                        <p>Remote Upload List & Status</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/urlupload/list?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": [
+    {
+      "bytes_total": "0",
+      "created": "2017-08-11 04:30:07",
+      "remote_url": "https://dropbox.com/hukbasd7k3fd",
+      "status": "working",
+      "file_code": "98zukoh5jqiw",
+      "bytes_downloaded": "0",
+      "folder_id": "0"
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="remote-upload-status">Remote upload status</h4>
+                        <p>Remote Upload Status</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/urlupload/status?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>file_code</code>
+                            </div>
+                            <div class="col-md-4">
+                                File code of the file
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": [
+    {
+      "bytes_total": "0",
+      "created": "2017-08-11 04:30:07",
+      "remote_url": "https://dropbox.com/hukbasd7k3fd",
+      "status": "working",
+      "file_code": "hjsnr087johj",
+      "bytes_downloaded": "0",
+      "folder_id": "0"
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="remote-upload-slots">Remote upload slots</h4>
+                        <p>Get total & used remote upload slots</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/urlupload/slots?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "total_slots": "100",
+  "used_slots": "10"
+}</pre>
+                    </div>
+                </div>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="remote-upload-actions">Remote upload actions</h4>
+                        <p>Perform various actions on remote upload</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/urlupload/actions?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>restart_errors</code>
+                            </div>
+                            <div class="col-md-4">
+                                Restart all errors
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>clear_errors</code>
+                            </div>
+                            <div class="col-md-4">
+                                Clear all errors
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>clear_all</code>
+                            </div>
+                            <div class="col-md-4">
+                                Clear all
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>delete_code</code>
+                            </div>
+                            <div class="col-md-4">
+                                Delete a transfer, pass file_code
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "Errors restarted",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200
+}</pre>
+                    </div>
+                </div>
+
+
+            <h2 id="manage-folders" class="px-3 cat-open">Manage folders</h2>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="folders-create">Create folder</h4>
+                        <p>Create a folder</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/folder/create?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>name</code>
+                            </div>
+                            <div class="col-md-4">
+                                Name of the folder
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>parent_id</code>
+                            </div>
+                            <div class="col-md-4">
+                                Parent folder ID
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": {
+    "fld_id": "1234567"
+  }
+}</pre>
+                    </div>
+                </div>
+
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="folders-rename">Rename folder</h4>
+                        <p>List all folders</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/folder/rename?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>fld_id</code>
+                            </div>
+                            <div class="col-md-4">
+                                Folder ID
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>name</code>
+                            </div>
+                            <div class="col-md-4">
+                                New name of the folder
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": "true"
+}</pre>
+                    </div>
+                </div>
+
+
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="folders-list">List Folders & Files</h4>
+                        <p>List all folders</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/folder/list?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>fld_id</code>
+                            </div>
+                            <div class="col-md-4">
+                                Folder ID
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>only_folders</code>
+                            </div>
+                            <div class="col-md-4">
+                                To list only folders (0 or 1)
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">No</span>
+                            </div>
+                        </div>
+
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+    "msg":"OK",
+    "status":200,
+    "result":{
+        "folders":[
+            {
+            "name":"Folder name",
+            "code":"67299gduj3",
+            "fld_id":"123"
+            },
+        ],
+        "files": [
+              {
+                "download_url": "https://dood.to/d/xxx",
+                "single_img": "../assets/img.doodcdn.io/snaps/xxx.jpg",
+                "file_code": "xxx",
+                "canplay": 1,
+                "length": "1234",
+                "views": "1",
+                "uploaded": "2017-08-11 04:30:07",
+                "public": "1",
+                "fld_id": "0",
+                "title": "test_file"
+              }
+            ],
+    },
+        "server_time":"2023-10-17 07:31:01"
+}
+
+
+</pre>
+                    </div>
+                </div>
+
+
+
+            <h2 id="manage-files" class="px-3 cat-open">Manage Files</h2>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="files-list">List files</h4>
+                        <p>List all files</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/file/list?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-2">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-6">
+                                Your API Key
+                            </div>
+                            <div class="col-md-2">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>page</code>
+                            </div>
+                            <div class="col-md-6">
+                                Pagination
+                            </div>
+                            <div class="col-md-2">
+                                <span class="text-primary">no</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>per_page</code>
+                            </div>
+                            <div class="col-md-6">
+                                Max videos per page (Max 200)
+                            </div>
+                            <div class="col-md-2">
+                                <span class="text-primary">no</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>fld_id</code>
+                            </div>
+                            <div class="col-md-6">
+                                Videos inside a folder
+                            </div>
+                            <div class="col-md-2">
+                                <span class="text-primary">no</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>created</code>
+                            </div>
+                            <div class="col-md-6">
+                                Show files uploaded after timestamp (Ex : 2021-10-07 03:15:19) </br>
+                                Or specify number to show only files uploaded X minutes ago
+                            </div>
+                            <div class="col-md-2">
+                                <span class="text-primary">no</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": {
+    "total_pages": 1,
+    "files": [
+      {
+        "download_url": "https://dood.to/d/xxx",
+        "single_img": "../assets/img.doodcdn.io/snaps/xxx.jpg",
+        "file_code": "xxx",
+        "canplay": 1,
+        "length": "1234",
+        "views": "1",
+        "uploaded": "2017-08-11 04:30:07",
+        "public": "1",
+        "fld_id": "0",
+        "title": "test_file"
+      }
+    ],
+    "results_total": "1",
+    "results": 1
+  }
+}</pre>
+                    </div>
+                </div>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="files-status">File status</h4>
+                        <p>Check status of your file</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/file/check?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>file_code</code>
+                            </div>
+                            <div class="col-md-4">
+                                File code
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": [
+    {
+      "status": "Active",
+      "filecode": "xxx"
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="files-info">File info</h4>
+                        <p>Get file info</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/file/info?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>file_code</code>
+                            </div>
+                            <div class="col-md-4">
+                                File code
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": [
+    {
+      "single_img": "../assets/img.doodcdn.io/snaps/xxx.jpg",
+      "status": 200,
+      "filecode": "xxx",
+      "splash_img": "../assets/img.doodcdn.io/splash/xxx.jpg",
+      "canplay": 1,
+      "size": "123456",
+      "views": "0",
+      "length": "123456",
+      "uploaded": "2017-08-11 04:30:07",
+      "last_view": "",
+      "protected_embed": "/e/yyy",
+      "protected_dl": "/d/zzz",
+      "title": "test_file"
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="files-image">File image</h4>
+                        <p>Get file splash, single or thumbnail image</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/file/image?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>file_code</code>
+                            </div>
+                            <div class="col-md-4">
+                                File code
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": [
+    {
+      "status": 200,
+      "filecode": "xxx",
+      "title": "test_file",
+      "single_img": "../assets/img.doodcdn.io/snaps/xxx.jpg",
+      "thumb_img": "../assets/img.doodcdn.io/thumbnails/xxx.jpg",
+      "splash_img": "../assets/img.doodcdn.io/splash/xxx.jpg"
+    }
+  ]
+}</pre>
+                    </div>
+                </div>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="files-rename">File rename</h4>
+                        <p>Rename your file</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/file/rename?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>file_code</code>
+                            </div>
+                            <div class="col-md-4">
+                                File code
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>title</code>
+                            </div>
+                            <div class="col-md-4">
+                                New file name
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": "true"
+}</pre>
+                    </div>
+                </div>
+
+
+
+           <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="files-move">File move</h4>
+                        <p>Move your file from one folder to another</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/file/move?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>file_code</code>
+                            </div>
+                            <div class="col-md-4">
+                                File code
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep2">
+                            <div class="col-md-4">
+                                <code>fld_id</code>
+                            </div>
+                            <div class="col-md-4">
+                                Folder ID to move the file (set 0 to / directory)
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": "true"
+}</pre>
+                    </div>
+                </div>
+
+
+           <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="files-search">File search</h4>
+                        <p>Search your files</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GET</code>
+                        https://doodapi.co/api/search/videos?key={your_api_key}
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>key</code>
+                            </div>
+                            <div class="col-md-4">
+                                Your API Key
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>search_term</code>
+                            </div>
+                            <div class="col-md-4">
+                                Search term
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <h6>Response</h6>
+                        <pre class="body-return">
+{
+  "msg": "OK",
+  "server_time": "2017-08-11 04:30:07",
+  "status": 200,
+  "result": "true"
+}</pre>
+                    </div>
+                </div>
+
+
+            <h2 id="extras" class="px-3 cat-open">Extras</h2>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="remote-splash">Remote splash image</h4>
+                        <p>Load splash image via URL directly</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>URL</code>
+                        https://dood.so/e/xxx?c_poster=https://example.com/image.jpg
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>c_poster</code>
+                            </div>
+                            <div class="col-md-4">
+                                Splash image
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="remote-subtitle">Remote subtitle</h4>
+                        <p>Load multiple subtitles via URL directly</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>URL</code>
+                        https://dood.so/e/xxx?c1_file=https://example.com/sub.vtt&c1_label=English
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>c1_file</code>
+                            </div>
+                            <div class="col-md-4">
+                                Subtitle URL (srt or vtt)
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center justify-content-between row para-sep">
+                            <div class="col-md-4">
+                                <code>c1_label</code>
+                            </div>
+                            <div class="col-md-4">
+                                Subtitle language or any lable
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="remote-subtitle-json">Remote subtitle JSON</h4>
+                        <p>Load multiple subtitles via URL in JSON format</p>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>URL</code>
+                        https://dood.so/e/xxx?subtitle_json=https://example.com/sub.json
+                    </div>
+                    <div class="results">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <h6>Parameter</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Description</h6>
+                        </div>
+                        <div class="col-md-4">
+                            <h6>Required</h6>
+                        </div>
+                    </div>
+                        <div class="d-flex align-items-center justify-content-between row">
+                            <div class="col-md-4">
+                                <code>subtitle_json</code>
+                            </div>
+                            <div class="col-md-4">
+                                Multiple subtitle in JSON format
+                            </div>
+                            <div class="col-md-4">
+                                <span class="text-primary">Yes</span>
+                            </div>
+                        </div>
+                        <h6>Remote subtitle JSON example</h6>
+                        <pre class="body-return">
+[
+ {"src":"https://example.com/name_en.vtt", "label":"English", default: true},
+ {"src":"https://example.com/name_fr.vtt", "label":"French"}
+]</pre>
+
+
+                    </div>
+                </div>
+
+            <h2 id="clients" class="px-3 cat-open">Clients</h2>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="php">Unofficial PHP client</h4>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>GITHUB</code>
+                        https://github.com/Marchay/doodstream-PHP-library
+                    </div>
+                </div>
+
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="php">Unofficial Python client</h4>
+                    </div>
+                    <div class="d-flex align-items-center code-type px-3">
+                        <code>pypi</code>
+                        https://pypi.org/project/doodstream/
+                    </div>
+                </div>
+
+        </div>
+    </div>
+ 
+<script src="/assets/cdnjs.cloudflare.com/ajax/libs/popper.js/1.15.0/umd/popper.min.js"></script>
+<script src="/assets/i.doodcdn.io/theme_2/js/bootstrap.min.js"></script>
+<script src="/assets/i.doodcdn.io/theme_2/js/feather.min.js"></script>
+<script src="/assets/i.doodcdn.io/theme_2/js/main.js"></script>
+
+
+</body>
+</html>

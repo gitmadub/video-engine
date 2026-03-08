@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>Request payout - DoodStream</title>
+	<link rel="preconnect" href="//i.doodcdn.io"><link rel="preconnect" href="//cdnjs.cloudflare.com"><link rel="preconnect" href="//static.doodcdn.io">
+	<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+	<link rel="stylesheet" href="/assets/i.doodcdn.io/theme_2/css/bootstrap.min.css">
+	<meta name="description" content="DoodStream - Free file upload service">
+	<meta name="keywords" content="file upload,share files,free upload">
+	<script src="/assets/cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+	<link rel="stylesheet" type="text/css" href="/assets/cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/css/iziToast.min.css">
+
+	
+		<link rel="stylesheet" type="text/css" href="/assets/static.doodcdn.io/theme_2/css/panel.min__q_e2207d238712.css" />
+	
+
+</head>
+<body>
+<div class="modal fade" id="notifications" tabindex="-1" role="dialog" aria-labelledby="notificationsLabel" aria-hidden="true">
+	<div class="modal-dialog" role="document">
+		<div class="modal-content">
+
+		</div>
+	</div>
+</div>
+<nav class="navbar navbar-expand-lg main-menu">
+	<div class="container-fluid">
+		<a href="/" class="navbar-brand">
+			<img src="/assets/i.doodcdn.io/img/logo-s.png" height="30" alt="" class="d-inline-block align-top">
+		</a>
+		<ul class="notifications-mobile d-block d-sm-none m-0 p-0 ml-auto">
+			<li class="nav-item dropdown notifications">
+				<a href="#" id="notifications" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+					<i class="fad fa-bell"></i>
+				</a>
+				<div aria-labelledby="notifications" class="dropdown-menu dropdown-menu-right notifications-box">
+					<div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div>
+					<ul class="notifications-list m-0 p-0"></ul>
+				</div>
+			</li>
+		</ul>
+		<button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation">
+			<i class="fad fa-bars"></i>
+		</button>
+		<ul class="navbar-nav px-3 ml-auto d-none d-sm-flex">
+
+<!--     	<div onclick="window.open('/earn-money', '_blank');" style="cursor:pointer;border-radius:7px;padding:10px;background:linear-gradient(312deg, rgb(234 109 2) 0%, rgba(249,150,1,1) 100%);color:white;font-weight:600;font-size:14px;text-shadow: 2px 1px 2px #e96e03;">
+    		Double Rates until 00:00 UTC, 08 January 2024
+    	</div> -->
+
+			<li class="nav-item dropdown notifications">
+				<a href="#" id="notifications" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+					<i class="fad fa-bell"></i>
+				</a>
+				<div aria-labelledby="notifications" class="dropdown-menu dropdown-menu-right notifications-box">
+					<div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div>
+					<ul class="notifications-list m-0 p-0"></ul>
+				</div>
+			</li>
+			<li class="nav-item dropdown">
+				<a href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+					<i class="fad fa-user-circle"></i> videoengine
+				<span class="far fa-chevron-down arrow"></span>
+				</a>
+				<div aria-labelledby="navbarDropdown" class="dropdown-menu dropdown-menu-right">
+					<a href="/dmca-manager" class="dropdown-item"><i class="fad fa-folder-times"></i>DMCA Manager</a>
+					<a href="/api-docs" class="dropdown-item"><i class="fad fa-brackets-curly"></i>API</a>
+					<a href="/referrals" class="dropdown-item"><i class="fad fa-solar-system"></i>Refferal</a>
+					<a href="/settings" class="dropdown-item"><i class="fad fa-cog"></i>Settings</a>
+					<div class="dropdown-divider"></div>
+					<a href="/?op=logout" class="dropdown-item logout"><i class="fad fa-power-off text-danger"></i>Logout</a>
+				</div>
+			</li>
+		</ul>
+	</div>
+</nav>
+
+<nav class="sidebar collapse" id="menu">
+	<button class="navbar-toggler d-block d-sm-none" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation">
+		<i class="fad fa-times"></i>
+	</button>
+	<div class="container-fluid">
+		<ul class="nav justify-content-center">
+			<li class="nav-item">
+				<a href="/dashboard" class="nav-link"><i class="fad fa-shapes"></i></i>Dashboard</a>
+			</li>
+			<li class="nav-item">
+				<a href="/remote-upload" class="nav-link"><i class="fad fa-globe"></i>Remote Upload</a>
+			</li>
+			<li class="nav-item">
+				<a href="/videos" class="nav-link"><i class="fad fa-camera-movie"></i>Videos</a>
+			</li>
+			<li class="nav-item">
+				<a href="/reports" class="nav-link"><i class="fad fa-chart-line"></i>Reports</a>
+			</li>
+			<li class="nav-item">
+				<a href="/premium-plans" class="nav-link"><i class="fad fa-gem"></i>Premium</a>
+			</li>
+			<li class="nav-item d-block d-sm-none"><a href="/dmca-manager" class="nav-link"><i class="fad fa-folder-times"></i>DMCA Manager</a></li>
+			<li class="nav-item d-block d-sm-none"><a href="/api-docs" class="nav-link"><i class="fad fa-brackets-curly"></i>API</a></li>
+			<li class="nav-item d-block d-sm-none"><a href="/referrals" class="nav-link"><i class="fad fa-solar-system"></i>Refferal</a></li>
+			<li class="nav-item d-block d-sm-none"><a href="/settings" class="nav-link"><i class="fad fa-cog"></i>Settings</a></li>
+			<li class="nav-item d-block d-sm-none"><a href="/?op=logout" class="nav-link"><i class="fad fa-power-off text-danger"></i>Logout</a></li>
+		</ul>
+	</div>
+</nav>
+
+<div class="container-fluid pt-3 pt-sm-5 mt-sm-5">
+
+
+<link rel="stylesheet" href="/assets/cdnjs.cloudflare.com/ajax/libs/hint.css/2.7.0/hint.min.css"/>
+<link rel="stylesheet" href="/assets/cdnjs.cloudflare.com/ajax/libs/tootik/1.0.2/css/tootik.min.css"/>
+
+<style type="text/css">
+	
+	.ps_instant{
+		padding: 10px 10px 10px 10px;
+    	border: 1px dotted green;
+    	text-align: center;
+	}
+
+	.ps_normal{
+		padding: 10px 10px 10px 10px;
+    	border: 1px dotted #f90;
+    	text-align: center;
+	}
+
+	.ps_delayed{
+		padding: 10px 10px 10px 10px;
+    	border: 1px dotted red;
+    	text-align: center;
+	}
+
+.list-group-item {
+    background-color: #434645;
+    z-index: 1000;
+    border: 1px solid rgba(0,0,0,.125);
+}
+</style>
+
+    
+
+
+    <form method="POST">
+        <input type="hidden" name="op" value="request_money">
+
+        <div class="d-flex justify-content-between flex-wrap the_box">
+            <div class="sidebar settings-page">
+
+                <div class="status-block d-flex align-items-center mb-2">
+                    <i class="fad fa-box-usd"></i>
+                    <div class="info ml-3">
+                        <h4 class="m-0">Money Collected</h4>
+                        <div class="money">
+                            $0.00
+                        </div>
+                    </div>
+                </div>
+                <p class="mt-3">Minimum payout is <strong>$10</strong></p>
+                <!-- <p>Minimum payout for <strong>payoneer</strong> is <strong>$50</strong></p> -->
+
+                <div class="text-center mt-2 mb-4">
+                    <button type="submit" name="convert_profit" data-tootik="You have not reached min payout of $10" data-tootik-conf="right invert shadow square" class="btn btn-success btn-block btn-go" value="Request payout: $0.00"  disabled>Request Payout <i class="fad fa-check ml-2"></i></button>
+
+                    
+                </div>
+
+				<ul class="list-group">
+					<li class="list-group-item"></li>
+					<li class="list-group-item" style="overflow:hidden;font-size:13px;"></li>
+				</ul>
+
+                <hr>
+                <div class="menu">
+                    <ul class="p-0 m-0 mb-4">
+                        <li>
+                            <a href="/settings" class="d-flex flex-wrap align-items-center active">
+                                <i class="fad fa-cog"></i>
+                                <span>Change Payment Method</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+<ul class="list-group">
+
+   <li class="list-group-item">
+        Webmoney 
+            <span class="float-right" data-tootik="Will be processed within few hours." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-fastest text-success mr-2"></i> 
+                    Fast
+            </span></br>
+            <small><b style="color:#00c92e;margin-right:5px;">No fees</b> | Min 10 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        Tether (USDT) TRC20 
+            <span class="float-right" data-tootik="Will be processed within few hours." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-fastest text-success mr-2"></i> 
+                    Fast
+            </span></br>
+            <small><b style="color:#00c92e;margin-right:5px;">Low fees</b> | Min 15 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        Payeer 
+            <span class="float-right" data-tootik="Will be processed within few hours." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-fastest text-success mr-2"></i> 
+                    Fast
+            </span></br>
+            <small>Normal fees | Min 10 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        PerfectMoney 
+            <span class="float-right" data-tootik="Will be processed within few hours." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-fastest text-success mr-2"></i> 
+                    Fast
+            </span></br>
+            <small>Normal fees | Min 10 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        AdvCash 
+            <span class="float-right" data-tootik="Will be processed within few hours." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-fastest text-success mr-2"></i> 
+                    Fast
+            </span></br>
+            <small>Normal fees | Min 10 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        Litecoin 
+            <span class="float-right" data-tootik="Will be processed within few hours." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-fastest text-success mr-2"></i> 
+                    Fast
+            </span></br>
+            <small><b style="color:#00c92e;margin-right:5px;">Low fees</b> | Min 10 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        Ethereum 
+            <span class="float-right" data-tootik="Will be processed within few hours." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-fastest text-success mr-2"></i> 
+                    Fast
+            </span></br>
+            <small>Normal fees | Min 10 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        Bitcoin Cash 
+            <span class="float-right" data-tootik="Will be processed within few hours." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-fastest text-success mr-2"></i> 
+                    Fast
+            </span></br>
+            <small>Normal fees | Min 10 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        USD Coin (USDC) TRC20 
+            <span class="float-right" data-tootik="Will be processed within few hours." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-fastest text-success mr-2"></i> 
+                    Fast
+            </span></br>
+            <small><b style="color:#00c92e;margin-right:5px;">Low fees</b> | Min 15 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        Capitalist 
+            <span class="float-right" data-tootik="Will be processed within 1 - 3 days." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-average text-warning mr-2"></i> 
+                    Normal
+            </span></br>
+            <small>Normal fees | Min 10 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        Paxum 
+            <span class="float-right" data-tootik="Will be processed within 1 - 3 days." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-average text-warning mr-2"></i> 
+                    Normal
+            </span></br>
+            <small>Normal fees | Min 10 USD</small>
+    </li>
+
+   <li class="list-group-item">
+        Bitcoin 
+            <span class="float-right" data-tootik="Will be processed within 1 week." data-tootik-conf="right invert shadow square">
+                <i class="fad fa-tachometer-alt-slowest text-danger mr-2"></i> 
+                    Delayed
+            </span></br>
+            <small>Normal fees | Min 100 USD</small>
+    </li>
+
+</ul>
+
+            </div>
+
+            <div class="details">
+                <div class="table-responsive">
+                    
+
+                </div>
+            </div>
+
+        </div>
+    </form>
+
+<div class="mb-4"></div>
+</div>
+<footer class="footer mt-4">
+    <div class="container">
+        <div class="row">
+            <div class="col-md-2">
+                <img class="logo" src="/assets/i.doodcdn.io/img/logo-s.png">
+            </div>
+            <div class="col-md-10 text-right">
+                <ul class="menu m-0 p-0 d-flex align-items-center justify-content-center justify-content-sm-end flex-wrap">
+                    <li>
+                        <a href="/">Home</a>
+                    </li>
+                    <li>
+                        <a href="/copyright">Copyright policy</a>
+                    </li>
+                    <li>
+                        <a href="/terms-and-conditions">Terms & conditions</a>
+                    </li>
+                    <li>
+                        <a target="_blank" href="https://help.doodstream.com/">Help center</a>
+                    </li>
+                    <li>
+                        <a href="/contact">Contact Us</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</footer>
+    <script src="/assets/cdnjs.cloudflare.com/ajax/libs/popper.js/1.15.0/umd/popper.min.js" type="text/javascript"></script>
+    <script src="/assets/cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js" type="text/javascript"></script>
+    <script src="/assets/i.doodcdn.io/theme_2/js/main__q_8bb33b25bfc8.js" type="text/javascript"></script>
+    <script src="/assets/cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js" type="text/javascript"></script>
+    <script type="text/javascript">window.$crisp=[];window.CRISP_WEBSITE_ID="a048e736-b92c-49a8-b2b2-970b429ff6d3";(function(){d=document;s=d.createElement("script");s.src="/assets/client.crisp.chat/l.js";s.async=1;d.getElementsByTagName("head")[0].appendChild(s);})();$crisp.push(["set", "user:email", "lzcoeyhl@telegmail.com"],["set", "user:nickname", "videoengine"],["set", "session:data", [[["UserID", "559348"],["Info", "https://doodstream.co/open-user/559348"]]]]);</script>
+<script src="/assets/doodstream.com/js/dood_load.js" type="module" defer></script>
+</body>
+</html>
+

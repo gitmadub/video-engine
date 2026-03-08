@@ -1,0 +1,136 @@
+html {
+	 scroll-behavior: smooth;
+}
+ #api_doc .api-sidebar {
+	 width: 400px;
+	 padding: 20px;
+	 background: #1c1c1c;
+	 position: fixed;
+	 top: 0;
+	 bottom: 0;
+	 left: 0;
+}
+ #api_doc .api-sidebar .navbar-brand {
+	 padding: 0 0 20px;
+	 text-align: center;
+}
+ #api_doc .api-sidebar .title {
+	 font-weight: 700;
+	 display: block;
+	 margin: 0 0 20px;
+	 padding-top: 20px;
+	 border-top: 1px solid #434645;
+}
+ #api_doc .api-sidebar .the-menu {
+	 width: 100%;
+	 display: block;
+}
+ #api_doc .api-sidebar .the-menu .nav {
+	 display: block;
+}
+ #api_doc .api-sidebar .the-menu .nav-link {
+	 color: rgba(255,255,255,0.7);
+	 font-weight: 600;
+	 padding: 0 0 12px;
+	 margin: 0 0 12px;
+	 border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+ #api_doc .api-sidebar .the-menu .nav-link:hover {
+	 color: #fff;
+}
+ #api_doc .api-sidebar .the-menu .nav-link.active {
+	 color: #ff9900;
+}
+ #api_doc .api-sidebar .the-menu .nav-link.active + .sub-menu {
+	 height: 80px;
+	 opacity: 1;
+	 visibility: visible;
+}
+ #api_doc .api-sidebar .the-menu .sub-menu {
+	 height: 0px;
+	 opacity: 0;
+	 visibility: hidden;
+	 transition: visibility 0.3s ease, opacity 0.3s ease, height 0.3s ease;
+	 padding: 0 10px;
+}
+ #api_doc .api-sidebar .the-menu .sub-menu .nav-link {
+	 padding: 0;
+	 border: 0;
+}
+ #api_doc .api-sidebar .the-menu .sub-menu .nav-link.active {
+	 color: #fff;
+}
+ #api_doc .api-content {
+	 width: calc(100% - 400px);
+	 padding: 30px;
+}
+ #api_doc .api-content .api-box {
+	 border-bottom: 4px double #ff9900;
+}
+ #api_doc .api-content h2 {
+	 color: #ff9900;
+	 font-weight: 600;
+}
+ #api_doc .api-content .api-route {
+	 margin-top: 30px;
+}
+ #api_doc .api-content .api-route h4 {
+	 color: #fff;
+}
+ #api_doc .api-content .api-route h4 + p {
+	 color: #b4b4b4;
+	 padding: 0 0 15px;
+	 margin: 0 0 15px;
+	 border-bottom: 1px solid rgba(28,28,28,0.3);
+}
+ #api_doc .api-content .api-route .code-type {
+	 margin: 0 0 30px;
+}
+ #api_doc .api-content .api-route .code-type code {
+	 color: #fff;
+	 background: #1c1c1c;
+	 padding: 5px 10px;
+	 margin-right: 15px;
+	 font-weight: 700;
+	 text-transform: uppercase;
+}
+ #api_doc .api-content .api-route .code-type .copy {
+	 margin-left: 15px;
+	 display: inline-flex;
+	 background: #b4b4b4;
+	 padding: 8px 15px;
+	 color: #1c1c1c;
+	 align-items: center;
+	 font-weight: 700;
+	 text-transform: uppercase;
+	 transition: all 0.3s ease;
+}
+ #api_doc .api-content .api-route .code-type .copy:hover, #api_doc .api-content .api-route .code-type .copy:focus {
+	 background: #fff;
+}
+ #api_doc .api-content .api-route .code-type .copy i {
+	 display: inline-block;
+	 margin-right: 10px;
+}
+ #api_doc .api-content .api-route .results {
+	 padding: 0 15px;
+}
+ #api_doc .api-content .api-route .results code {
+	 background: rgba(220,53,69,0.1);
+	 padding: 5px 10px;
+	 color: #dc3545;
+}
+ #api_doc .api-content .api-route .results h6 {
+	 color: #b4b4b4;
+	 font-weight: 700;
+	 padding: 0 0 10px;
+	 margin: 40px 0 10px;
+	 display: block;
+	 border-bottom: 1px solid rgba(28,28,28,0.3);
+}
+ #api_doc .api-content .api-route .results pre {
+	 background: #1c1c1c;
+	 color: #fff;
+	 padding: 15px;
+}
+ 
