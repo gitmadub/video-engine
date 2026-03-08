@@ -128,6 +128,33 @@ function ve_json(array $payload, int $status = 200): void
     exit;
 }
 
+function ve_h(?string $value): string
+{
+    return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function ve_origin(): string
+{
+    $scheme = 'http';
+
+    if (
+        (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (isset($_SERVER['SERVER_PORT']) && (string) $_SERVER['SERVER_PORT'] === '443')
+        || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+    ) {
+        $scheme = 'https';
+    }
+
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+
+    return $scheme . '://' . $host;
+}
+
+function ve_absolute_url(string $path = '/'): string
+{
+    return ve_origin() . ve_url($path);
+}
+
 function ve_html(string $html, int $status = 200): void
 {
     http_response_code($status);
@@ -160,8 +187,8 @@ function ve_rewrite_html_paths(string $html): string
         "href='../index.html'" => "href='" . ve_url('/') . "'",
         'action="../index.html"' => 'action="' . ve_url('/') . '"',
         "action='../index.html'" => "action='" . ve_url('/') . "'",
-        'src="../js/dood_load.js"' => 'src="' . ve_url('/js/dood_load.js') . '"',
-        "src='../js/dood_load.js'" => "src='" . ve_url('/js/dood_load.js') . "'",
+        'src="/assets/site/js/dood_load.js"' => 'src="' . ve_url('/assets/site/js/dood_load.js') . '"',
+        "src='/assets/site/js/dood_load.js'" => "src='" . ve_url('/assets/site/js/dood_load.js') . "'",
         'href="/"' => 'href="' . ve_url('/') . '"',
         "href='/'" => "href='" . ve_url('/') . "'",
         'action="/"' => 'action="' . ve_url('/') . '"',
@@ -252,6 +279,350 @@ function ve_dashboard_stats(): array
     ];
 }
 
+function ve_player_files(): array
+{
+    static $files;
+
+    if (is_array($files)) {
+        return $files;
+    }
+
+    $path = ve_root_path('api', 'player-files.json');
+
+    if (!is_file($path)) {
+        $files = [];
+        return $files;
+    }
+
+    $payload = json_decode((string) file_get_contents($path), true);
+    $files = is_array($payload) ? $payload : [];
+
+    return $files;
+}
+
+function ve_player_file(string $slug): ?array
+{
+    $files = ve_player_files();
+    $file = $files[$slug] ?? null;
+
+    return is_array($file) ? $file : null;
+}
+
+function ve_render_player_page(string $slug): void
+{
+    $file = ve_player_file($slug);
+
+    if ($file === null) {
+        ve_not_found();
+    }
+
+    $title = trim((string) ($file['title'] ?? 'Untitled video'));
+    $length = trim((string) ($file['length'] ?? ''));
+    $size = trim((string) ($file['size'] ?? ''));
+    $uploadDate = trim((string) ($file['upload_date'] ?? ''));
+    $poster = trim((string) ($file['poster'] ?? ''));
+    $downloadUrl = trim((string) ($file['download_url'] ?? ''));
+    $embedUrl = trim((string) ($file['embed_url'] ?? ''));
+    $ownFile = (bool) ($file['own_file'] ?? false);
+    $countdown = max(0, (int) ($file['countdown_seconds'] ?? 5));
+
+    $pageTitle = ve_h($title . ' - DoodStream');
+    $safeTitle = ve_h($title);
+    $safeLength = ve_h($length);
+    $safeSize = ve_h($size);
+    $safeUploadDate = ve_h($uploadDate);
+    $safePoster = ve_h($poster);
+    $safeDownloadUrl = ve_h($downloadUrl);
+    $safeEmbedUrl = ve_h($embedUrl);
+    $downloadPageUrl = ve_h(ve_absolute_url('/d/' . rawurlencode($slug)));
+    $localEmbedUrl = ve_h(ve_absolute_url('/e/' . rawurlencode($slug)));
+    $jqueryUrl = ve_h(ve_url('/assets/cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js'));
+    $bootstrapCssUrl = ve_h(ve_url('/assets/theme/css/bootstrap.min.css'));
+    $styleCssUrl = ve_h(ve_url('/assets/theme/css/style.min.css'));
+    $bootstrapJsUrl = ve_h(ve_url('/assets/cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js'));
+    $ownFileBanner = '';
+
+    if ($ownFile) {
+        $ownFileBanner = <<<HTML
+        <div class="container mt-4">
+            <div class="row">
+                <div class="col-md-12 pt-2">
+                    <p class="own-file text-center"><i class="fad fa-smile"></i><b>WoW!</b> as it is your own file we will not show any ads or adblock warnings, you can enjoy your file ad-free.</p>
+                </div>
+            </div>
+        </div>
+HTML;
+    }
+
+    ve_html(<<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>{$pageTitle}</title>
+    <meta name="og:title" content="{$safeTitle}">
+    <meta name="og:sitename" content="DoodStream.com">
+    <meta name="og:image" content="{$safePoster}">
+    <meta name="twitter:image" content="{$safePoster}">
+    <meta name="robots" content="nofollow, noindex">
+    <script src="{$jqueryUrl}"></script>
+    <link rel="stylesheet" href="{$bootstrapCssUrl}">
+    <link rel="stylesheet" href="{$styleCssUrl}">
+    <style>
+        [style*="--aspect-ratio"] > :first-child { width: 100%; }
+        [style*="--aspect-ratio"] > img { height: auto; }
+        @supports (--custom: property) {
+            [style*="--aspect-ratio"] { position: relative; }
+            [style*="--aspect-ratio"]::before {
+                content: "";
+                display: block;
+                padding-bottom: calc(100% / (var(--aspect-ratio)));
+            }
+            [style*="--aspect-ratio"] > :first-child {
+                position: absolute;
+                top: 0;
+                left: 0;
+                height: 100%;
+            }
+        }
+        .player-wrap iframe {
+            width: 100%;
+            height: 100%;
+            min-height: 260px;
+            border: 0;
+        }
+        .own-file {
+            color: #12a701;
+            border: 2px dashed #15bf00;
+            padding: 10px 0 10px 40px;
+            font-size: 15px;
+            background: transparent;
+        }
+        .own-file .fad {
+            font-size: 25px;
+            position: absolute;
+            margin-top: -1px;
+            margin-left: -30px;
+        }
+        .title-wrap { background: #1c1c1c; }
+        .nav-pills .nav-item { margin-right: 15px; }
+        .nav-pills .nav-item .nav-link.active { background: #f90; color: #fff; }
+        .nav-pills .nav-item .nav-link {
+            font-weight: 600;
+            color: #fff;
+            background: #434645;
+            border-radius: 1px;
+            transition: color .3s ease, background .3s ease;
+        }
+        .v-owner {
+            position: absolute;
+            right: 8px;
+            top: 5px;
+            font-size: 12px;
+            color: #6d6d6d;
+        }
+        .buttonInside {
+            position: relative;
+            margin-bottom: 10px;
+        }
+        .copy-in {
+            position: absolute;
+            right: 5px;
+            top: 5px;
+            border: none;
+            outline: 0;
+            text-align: center;
+            font-weight: 700;
+            padding: 2px 10px;
+        }
+        .copy-in:hover { cursor: pointer; }
+        .export-txt {
+            height: 42px !important;
+            resize: none;
+            padding-right: 68px;
+        }
+        .download-content { display: none; }
+        .download-content .btn { gap: 12px; }
+        .spinner-inline {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin .75s linear infinite;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        @media (max-width: 767.98px) {
+            .copy-in {
+                position: static;
+                width: 100%;
+                margin-top: 8px;
+            }
+            .export-txt {
+                padding-right: 12px;
+                height: 60px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    {$ownFileBanner}
+    <div class="player-wrap container">
+        <div style="--aspect-ratio: 16/9;" id="os_player">
+            <iframe src="{$safeEmbedUrl}" scrolling="no" frameborder="0" allowfullscreen="true"></iframe>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="title-wrap">
+            <div class="d-flex flex-wrap align-items-center justify-content-between">
+                <div class="info">
+                    <h4>{$safeTitle}</h4>
+                    <div class="d-flex flex-wrap align-items-center text-muted font-weight-bold">
+                        <div class="length"><i class="fad fa-clock mr-1"></i>{$safeLength}</div>
+                        <span class="mx-2"></span>
+                        <div class="size"><i class="fad fa-save mr-1"></i>{$safeSize}</div>
+                        <span class="mx-2"></span>
+                        <div class="uploadate"><i class="fad fa-calendar-alt mr-1"></i>{$safeUploadDate}</div>
+                    </div>
+                </div>
+                <a href="#lights" class="btn btn-white player_lights off">
+                    <i class="fad fa-lightbulb-on"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container my-3">
+        <div class="video-content text-center">
+            <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+                <li class="nav-item">
+                    <a class="nav-link active" id="pills-dr-tab" data-toggle="pill" href="#pills-dr" role="tab" aria-controls="pills-dr" aria-selected="true">Download link</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="pills-el-tab" data-toggle="pill" href="#pills-el" role="tab" aria-controls="pills-el" aria-selected="false">Embed link</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="pills-elc-tab" data-toggle="pill" href="#pills-elc" role="tab" aria-controls="pills-elc" aria-selected="false">Embed code</a>
+                </li>
+            </ul>
+            <div class="tab-content" id="pills-tabContent">
+                <div class="v-owner">only visible to the file owner</div>
+                <div class="tab-pane fade show active buttonInside" id="pills-dr" role="tabpanel" aria-labelledby="pills-dr-tab">
+                    <textarea id="code_txt" class="form-control export-txt">{$downloadPageUrl}</textarea>
+                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt">copy</button>
+                </div>
+                <div class="tab-pane fade buttonInside" id="pills-el" role="tabpanel" aria-labelledby="pills-el-tab">
+                    <textarea id="code_txt_e" class="form-control export-txt">{$localEmbedUrl}</textarea>
+                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt_e">copy</button>
+                </div>
+                <div class="tab-pane fade buttonInside" id="pills-elc" role="tabpanel" aria-labelledby="pills-elc-tab">
+                    <textarea id="code_txt_ec" class="form-control export-txt">&lt;iframe width="600" height="480" src="{$localEmbedUrl}" scrolling="no" frameborder="0" allowfullscreen="true"&gt;&lt;/iframe&gt;</textarea>
+                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt_ec">copy</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="video-content text-center">
+            <div class="countdown">Please wait <span id="seconds">{$countdown}</span> seconds</div>
+            <a href="#download_now" class="btn btn-primary download_vd">Download Now <i class="fad fa-arrow-right ml-2"></i></a>
+            <div class="download-content">
+                <label class="label-playlist d-block">Download video</label>
+                <a href="{$safeDownloadUrl}" class="btn btn-primary d-flex align-items-center justify-content-between">
+                    <span>Original<small class="d-block">{$safeSize}</small></span>
+                    <i class="fad fa-cloud-download"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script src="{$bootstrapJsUrl}"></script>
+    <script>
+        (function () {
+            function copyText(targetId, button) {
+                var field = document.getElementById(targetId);
+                if (!field) {
+                    return;
+                }
+
+                field.focus();
+                field.select();
+                field.setSelectionRange(0, field.value.length);
+
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(field.value);
+                } else {
+                    document.execCommand('copy');
+                }
+
+                var original = button.textContent;
+                button.textContent = 'copied';
+                window.setTimeout(function () {
+                    button.textContent = original;
+                }, 1200);
+            }
+
+            document.querySelectorAll('[data-copy-target]').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    copyText(button.getAttribute('data-copy-target'), button);
+                });
+            });
+
+            $('.download_vd').on('click', function (event) {
+                event.preventDefault();
+
+                var button = $(this);
+                var seconds = {$countdown};
+                button.prop('disabled', true)
+                    .addClass('loading disabled')
+                    .html('<span class="spinner-inline" aria-hidden="true"></span>');
+
+                var timer = window.setInterval(function () {
+                    seconds -= 1;
+                    $('.countdown').show();
+                    $('#seconds').text(Math.max(seconds, 0));
+
+                    if (seconds <= 0) {
+                        window.clearInterval(timer);
+                        $('.countdown').remove();
+                        button.remove();
+                        $('.download-content').show('slow');
+                    }
+                }, 1000);
+            });
+
+            $(document).on('click', '.player_lights', function (event) {
+                event.preventDefault();
+                var button = $(this);
+
+                if (button.hasClass('off')) {
+                    button.removeClass('off').addClass('on');
+                    button.html('<i class="fad fa-lightbulb"></i>');
+                    $('body').append('<div class="modal-backdrop fade" id="player-page-fade"></div>');
+                    $('#player-page-fade').fadeTo('slow', 0.8);
+                    return;
+                }
+
+                button.removeClass('on').addClass('off');
+                button.html('<i class="fad fa-lightbulb-on"></i>');
+                $('#player-page-fade').fadeTo('slow', 0, function () {
+                    $('#player-page-fade').remove();
+                });
+            });
+        }());
+    </script>
+</body>
+</html>
+HTML);
+}
+
 function ve_settings_panel(string $title, string $description, string $buttonLabel): string
 {
     return <<<HTML
@@ -269,7 +640,7 @@ HTML;
 function ve_payment_page(string $title): string
 {
     $backUrl = ve_url('/dashboard/premium-plans');
-    $bootstrapUrl = ve_url('/assets/i.doodcdn.io/theme_2/css/bootstrap.min.css');
+    $bootstrapUrl = ve_url('/assets/theme/css/bootstrap.min.css');
 
     return <<<HTML
 <!doctype html>
@@ -449,6 +820,20 @@ function ve_dispatch(): void
 
     if ($path === '/index.html') {
         ve_redirect('/');
+    }
+
+    if (preg_match('#^/d/([A-Za-z0-9]+)$#', $path, $matches) === 1) {
+        ve_render_player_page($matches[1]);
+    }
+
+    if (preg_match('#^/e/([A-Za-z0-9]+)$#', $path, $matches) === 1) {
+        $file = ve_player_file($matches[1]);
+
+        if ($file === null || !isset($file['embed_url']) || !is_string($file['embed_url']) || $file['embed_url'] === '') {
+            ve_not_found();
+        }
+
+        ve_redirect($file['embed_url']);
     }
 
     foreach (VE_LEGACY_DASHBOARD_ROUTES as $legacy => $target) {

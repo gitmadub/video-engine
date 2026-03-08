@@ -114,7 +114,7 @@ $(document).ready(function() {
             alerts.remove();
         }
 
-        submit.prop('disabled', true).addClass('loading disabled').html('<img src="/theme_2/img/loader.svg">');
+        submit.prop('disabled', true).addClass('loading disabled').html('<img src="/assets/theme/img/loader.svg">');
 
         $.ajax({
             type: 'get',
