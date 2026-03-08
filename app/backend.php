@@ -264,6 +264,9 @@ function ve_run_database_migrations(PDO $pdo): void
 {
     ve_add_column_if_missing($pdo, 'users', 'plan_code', "TEXT NOT NULL DEFAULT 'free'");
     ve_add_column_if_missing($pdo, 'users', 'premium_until', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'users', 'referral_code', 'TEXT COLLATE NOCASE DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'users', 'referred_by_user_id', 'INTEGER DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'users', 'referred_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'users', 'api_key_hash', "TEXT NOT NULL DEFAULT ''");
     ve_add_column_if_missing($pdo, 'users', 'api_key_last_rotated_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'users', 'api_key_last_used_at', 'TEXT DEFAULT NULL');
@@ -330,6 +333,7 @@ function ve_run_database_migrations(PDO $pdo): void
             stat_date TEXT NOT NULL,
             views INTEGER NOT NULL DEFAULT 0,
             earned_micro_usd INTEGER NOT NULL DEFAULT 0,
+            referral_earned_micro_usd INTEGER NOT NULL DEFAULT 0,
             bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -389,6 +393,7 @@ function ve_run_database_migrations(PDO $pdo): void
     ve_add_column_if_missing($pdo, 'remote_uploads', 'started_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'remote_uploads', 'completed_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'remote_uploads', 'deleted_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'user_stats_daily', 'referral_earned_micro_usd', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'playback_started_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'bandwidth_bytes_served', 'INTEGER NOT NULL DEFAULT 0');
 
@@ -427,6 +432,10 @@ function ve_run_database_migrations(PDO $pdo): void
                 ':id' => (int) $user['id'],
             ]);
         }
+    }
+
+    if (function_exists('ve_referrals_run_database_migrations')) {
+        ve_referrals_run_database_migrations($pdo);
     }
 
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash)');
@@ -927,6 +936,11 @@ function ve_create_user(string $username, string $email, string $password): arra
 
     $userId = (int) $pdo->lastInsertId();
     ve_create_default_settings($pdo, $userId);
+
+    if (function_exists('ve_referral_ensure_user_code')) {
+        ve_referral_ensure_user_code($userId);
+    }
+
     ve_add_notification($userId, 'Welcome to Video Engine', 'Your account is ready. Configure your player and payout settings from the dashboard.');
 
     $user = ve_get_user_by_id($userId);
@@ -1158,6 +1172,12 @@ function ve_dashboard_format_storage_bytes(int $bytes): string
     return number_format($bytes / (1024 ** 3), 2, '.', '') . ' GB';
 }
 
+function ve_dashboard_total_micro_usd(array $row): int
+{
+    return max(0, (int) ($row['earned_micro_usd'] ?? 0))
+        + max(0, (int) ($row['referral_earned_micro_usd'] ?? 0));
+}
+
 /**
  * @return array{from:string,to:string}
  */
@@ -1295,13 +1315,34 @@ function ve_dashboard_increment_daily_stat_row(
     }
 }
 
-function ve_dashboard_record_video_view(int $videoId, int $userId, ?string $statDate = null, ?int $earnedMicroUsd = null): void
-{
+function ve_dashboard_record_video_view(
+    int $videoId,
+    int $userId,
+    ?string $statDate = null,
+    ?int $earnedMicroUsd = null,
+    ?string $referralSourceKey = null
+): void {
     $statDate = is_string($statDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $statDate) === 1 ? $statDate : gmdate('Y-m-d');
-    $earnedMicroUsd = $earnedMicroUsd ?? ve_dashboard_earnings_per_view_micro_usd();
+    $earnedMicroUsd = max(0, $earnedMicroUsd ?? ve_dashboard_earnings_per_view_micro_usd());
 
-    ve_dashboard_increment_daily_stat_row('video_stats_daily', 'video_id', $videoId, $statDate, 1, max(0, $earnedMicroUsd), 0);
-    ve_dashboard_increment_daily_stat_row('user_stats_daily', 'user_id', $userId, $statDate, 1, max(0, $earnedMicroUsd), 0);
+    ve_dashboard_increment_daily_stat_row('video_stats_daily', 'video_id', $videoId, $statDate, 1, $earnedMicroUsd, 0);
+    ve_dashboard_increment_daily_stat_row('user_stats_daily', 'user_id', $userId, $statDate, 1, $earnedMicroUsd, 0);
+
+    if (function_exists('ve_referral_record_video_view_commission')) {
+        $sourceKey = trim((string) $referralSourceKey);
+
+        if ($sourceKey === '') {
+            $sourceKey = sprintf(
+                'video-%d-user-%d-date-%s-%s',
+                $videoId,
+                $userId,
+                $statDate,
+                bin2hex(random_bytes(6))
+            );
+        }
+
+        ve_referral_record_video_view_commission($sourceKey, $videoId, $userId, $earnedMicroUsd, $statDate);
+    }
 }
 
 function ve_dashboard_record_video_bandwidth(int $videoId, int $userId, int $bytes, ?string $statDate = null): void
@@ -1318,13 +1359,65 @@ function ve_dashboard_record_video_bandwidth(int $videoId, int $userId, int $byt
     ve_dashboard_increment_daily_stat_row('user_stats_daily', 'user_id', $userId, $statDate, 0, 0, $bytes);
 }
 
+function ve_dashboard_record_referral_earning(int $userId, int $amountMicroUsd, ?string $statDate = null): void
+{
+    $userId = max(0, $userId);
+    $amountMicroUsd = max(0, $amountMicroUsd);
+
+    if ($userId <= 0 || $amountMicroUsd <= 0) {
+        return;
+    }
+
+    $statDate = is_string($statDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $statDate) === 1 ? $statDate : gmdate('Y-m-d');
+    $pdo = ve_db();
+    $now = ve_now();
+    $update = $pdo->prepare(
+        'UPDATE user_stats_daily
+         SET referral_earned_micro_usd = referral_earned_micro_usd + :referral_earned_micro_usd,
+             updated_at = :updated_at
+         WHERE user_id = :user_id
+           AND stat_date = :stat_date'
+    );
+    $params = [
+        ':referral_earned_micro_usd' => $amountMicroUsd,
+        ':updated_at' => $now,
+        ':user_id' => $userId,
+        ':stat_date' => $statDate,
+    ];
+    $update->execute($params);
+
+    if ($update->rowCount() > 0) {
+        return;
+    }
+
+    $insert = $pdo->prepare(
+        'INSERT INTO user_stats_daily (
+            user_id, stat_date, views, earned_micro_usd, referral_earned_micro_usd, bandwidth_bytes, created_at, updated_at
+         ) VALUES (
+            :user_id, :stat_date, 0, 0, :referral_earned_micro_usd, 0, :created_at, :updated_at
+         )'
+    );
+
+    try {
+        $insert->execute([
+            ':user_id' => $userId,
+            ':stat_date' => $statDate,
+            ':referral_earned_micro_usd' => $amountMicroUsd,
+            ':created_at' => $now,
+            ':updated_at' => $now,
+        ]);
+    } catch (PDOException $exception) {
+        $update->execute($params);
+    }
+}
+
 /**
- * @return array<string, array{views:int,earned_micro_usd:int,bandwidth_bytes:int}>
+ * @return array<string, array{views:int,earned_micro_usd:int,referral_earned_micro_usd:int,bandwidth_bytes:int}>
  */
 function ve_dashboard_user_stats_map(int $userId, string $fromDate, string $toDate): array
 {
     $stmt = ve_db()->prepare(
-        'SELECT stat_date, views, earned_micro_usd, bandwidth_bytes
+        'SELECT stat_date, views, earned_micro_usd, referral_earned_micro_usd, bandwidth_bytes
          FROM user_stats_daily
          WHERE user_id = :user_id
            AND stat_date BETWEEN :from_date AND :to_date
@@ -1352,6 +1445,7 @@ function ve_dashboard_user_stats_map(int $userId, string $fromDate, string $toDa
         $map[$date] = [
             'views' => (int) ($row['views'] ?? 0),
             'earned_micro_usd' => (int) ($row['earned_micro_usd'] ?? 0),
+            'referral_earned_micro_usd' => (int) ($row['referral_earned_micro_usd'] ?? 0),
             'bandwidth_bytes' => (int) ($row['bandwidth_bytes'] ?? 0),
         ];
     }
@@ -1360,7 +1454,7 @@ function ve_dashboard_user_stats_map(int $userId, string $fromDate, string $toDa
 }
 
 /**
- * @return array<int, array{time:string,views:int,profit:string,traffic:string,earned_micro_usd:int,bandwidth_bytes:int}>
+ * @return array<int, array{time:string,views:int,profit:string,traffic:string,earned_micro_usd:int,referral_profit:string,referral_earned_micro_usd:int,total_profit:string,total_profit_micro_usd:int,bandwidth_bytes:int}>
  */
 function ve_dashboard_chart_series(int $userId, string $fromDate, string $toDate): array
 {
@@ -1371,15 +1465,23 @@ function ve_dashboard_chart_series(int $userId, string $fromDate, string $toDate
         $row = $stats[$date] ?? [
             'views' => 0,
             'earned_micro_usd' => 0,
+            'referral_earned_micro_usd' => 0,
             'bandwidth_bytes' => 0,
         ];
+        $earnedMicroUsd = (int) ($row['earned_micro_usd'] ?? 0);
+        $referralMicroUsd = (int) ($row['referral_earned_micro_usd'] ?? 0);
+        $totalMicroUsd = $earnedMicroUsd + $referralMicroUsd;
 
         $series[] = [
             'time' => $date,
             'views' => (int) $row['views'],
-            'profit' => number_format(((int) $row['earned_micro_usd']) / 1000000, 5, '.', ''),
+            'profit' => number_format($earnedMicroUsd / 1000000, 5, '.', ''),
             'traffic' => ve_dashboard_format_traffic_gb((int) $row['bandwidth_bytes']),
-            'earned_micro_usd' => (int) $row['earned_micro_usd'],
+            'earned_micro_usd' => $earnedMicroUsd,
+            'referral_profit' => number_format($referralMicroUsd / 1000000, 5, '.', ''),
+            'referral_earned_micro_usd' => $referralMicroUsd,
+            'total_profit' => number_format($totalMicroUsd / 1000000, 5, '.', ''),
+            'total_profit_micro_usd' => $totalMicroUsd,
             'bandwidth_bytes' => (int) $row['bandwidth_bytes'],
         ];
     }
@@ -1388,12 +1490,12 @@ function ve_dashboard_chart_series(int $userId, string $fromDate, string $toDate
 }
 
 /**
- * @return array{views:int,earned_micro_usd:int,bandwidth_bytes:int}
+ * @return array{views:int,earned_micro_usd:int,referral_earned_micro_usd:int,bandwidth_bytes:int}
  */
 function ve_dashboard_totals_for_date(int $userId, string $statDate): array
 {
     $stmt = ve_db()->prepare(
-        'SELECT views, earned_micro_usd, bandwidth_bytes
+        'SELECT views, earned_micro_usd, referral_earned_micro_usd, bandwidth_bytes
          FROM user_stats_daily
          WHERE user_id = :user_id AND stat_date = :stat_date
          LIMIT 1'
@@ -1408,6 +1510,7 @@ function ve_dashboard_totals_for_date(int $userId, string $statDate): array
         return [
             'views' => 0,
             'earned_micro_usd' => 0,
+            'referral_earned_micro_usd' => 0,
             'bandwidth_bytes' => 0,
         ];
     }
@@ -1415,6 +1518,7 @@ function ve_dashboard_totals_for_date(int $userId, string $statDate): array
     return [
         'views' => (int) ($row['views'] ?? 0),
         'earned_micro_usd' => (int) ($row['earned_micro_usd'] ?? 0),
+        'referral_earned_micro_usd' => (int) ($row['referral_earned_micro_usd'] ?? 0),
         'bandwidth_bytes' => (int) ($row['bandwidth_bytes'] ?? 0),
     ];
 }
@@ -1422,7 +1526,7 @@ function ve_dashboard_totals_for_date(int $userId, string $statDate): array
 function ve_dashboard_balance_micro_usd(int $userId): int
 {
     $stmt = ve_db()->prepare(
-        'SELECT COALESCE(SUM(earned_micro_usd), 0)
+        'SELECT COALESCE(SUM(earned_micro_usd + referral_earned_micro_usd), 0)
          FROM user_stats_daily
          WHERE user_id = :user_id'
     );
@@ -1540,7 +1644,7 @@ function ve_dashboard_summary(int $userId, int $lookbackDays = 7): array
         'status' => 'ok',
         'generated_at' => ve_now(),
         'online' => $online,
-        'today' => ve_dashboard_format_currency_micro_usd((int) $today['earned_micro_usd']),
+        'today' => ve_dashboard_format_currency_micro_usd(ve_dashboard_total_micro_usd($today)),
         'balance' => ve_dashboard_format_currency_micro_usd($balanceMicroUsd),
         'widgets' => [
             'online' => [
@@ -1548,12 +1652,16 @@ function ve_dashboard_summary(int $userId, int $lookbackDays = 7): array
                 'formatted' => (string) $online,
             ],
             'today_earnings' => [
-                'micro_usd' => (int) $today['earned_micro_usd'],
-                'formatted' => ve_dashboard_format_currency_micro_usd((int) $today['earned_micro_usd']),
+                'micro_usd' => ve_dashboard_total_micro_usd($today),
+                'views_micro_usd' => (int) ($today['earned_micro_usd'] ?? 0),
+                'referral_micro_usd' => (int) ($today['referral_earned_micro_usd'] ?? 0),
+                'formatted' => ve_dashboard_format_currency_micro_usd(ve_dashboard_total_micro_usd($today)),
             ],
             'yesterday_earnings' => [
-                'micro_usd' => (int) $yesterday['earned_micro_usd'],
-                'formatted' => ve_dashboard_format_currency_micro_usd((int) $yesterday['earned_micro_usd']),
+                'micro_usd' => ve_dashboard_total_micro_usd($yesterday),
+                'views_micro_usd' => (int) ($yesterday['earned_micro_usd'] ?? 0),
+                'referral_micro_usd' => (int) ($yesterday['referral_earned_micro_usd'] ?? 0),
+                'formatted' => ve_dashboard_format_currency_micro_usd(ve_dashboard_total_micro_usd($yesterday)),
             ],
             'balance' => [
                 'micro_usd' => $balanceMicroUsd,
@@ -1576,25 +1684,33 @@ function ve_dashboard_reports_snapshot(int $userId, ?string $from = null, ?strin
     $series = ve_dashboard_chart_series($userId, $range['from'], $range['to']);
     $totalViews = 0;
     $totalEarnedMicroUsd = 0;
+    $totalReferralMicroUsd = 0;
     $totalBandwidthBytes = 0;
     $rows = [];
 
     foreach ($series as $entry) {
         $views = (int) ($entry['views'] ?? 0);
         $earnedMicroUsd = (int) ($entry['earned_micro_usd'] ?? 0);
+        $referralMicroUsd = (int) ($entry['referral_earned_micro_usd'] ?? 0);
+        $totalMicroUsd = $earnedMicroUsd + $referralMicroUsd;
         $bandwidthBytes = (int) ($entry['bandwidth_bytes'] ?? 0);
 
         $totalViews += $views;
         $totalEarnedMicroUsd += $earnedMicroUsd;
+        $totalReferralMicroUsd += $referralMicroUsd;
         $totalBandwidthBytes += $bandwidthBytes;
         $rows[] = [
             'date' => (string) ($entry['time'] ?? ''),
             'views' => $views,
             'profit' => ve_dashboard_format_currency_micro_usd($earnedMicroUsd),
             'profit_micro_usd' => $earnedMicroUsd,
-            'referral_share' => ve_dashboard_format_currency_micro_usd(0),
+            'referral_share' => ve_dashboard_format_currency_micro_usd($referralMicroUsd),
+            'referral_share_micro_usd' => $referralMicroUsd,
+            'referral_micro_usd' => $referralMicroUsd,
             'traffic' => ve_human_bytes($bandwidthBytes),
             'bandwidth_bytes' => $bandwidthBytes,
+            'total' => ve_dashboard_format_currency_micro_usd($totalMicroUsd),
+            'total_micro_usd' => $totalMicroUsd,
         ];
     }
 
@@ -1607,9 +1723,13 @@ function ve_dashboard_reports_snapshot(int $userId, ?string $from = null, ?strin
             'views' => $totalViews,
             'profit' => ve_dashboard_format_currency_micro_usd($totalEarnedMicroUsd),
             'profit_micro_usd' => $totalEarnedMicroUsd,
-            'referral_share' => ve_dashboard_format_currency_micro_usd(0),
+            'referral_share' => ve_dashboard_format_currency_micro_usd($totalReferralMicroUsd),
+            'referral_share_micro_usd' => $totalReferralMicroUsd,
+            'referral_micro_usd' => $totalReferralMicroUsd,
             'traffic' => ve_human_bytes($totalBandwidthBytes),
             'bandwidth_bytes' => $totalBandwidthBytes,
+            'total' => ve_dashboard_format_currency_micro_usd($totalEarnedMicroUsd + $totalReferralMicroUsd),
+            'total_micro_usd' => $totalEarnedMicroUsd + $totalReferralMicroUsd,
         ],
     ];
 }
@@ -1931,7 +2051,11 @@ function ve_handle_registration_ajax(): void
         ]);
     }
 
-    ve_create_user($username, $email, $password);
+    $user = ve_create_user($username, $email, $password);
+
+    if (is_array($user) && function_exists('ve_referral_apply_pending_to_user')) {
+        ve_referral_apply_pending_to_user((int) $user['id']);
+    }
 
     ve_json([
         'status' => 'ok',
@@ -4413,10 +4537,114 @@ function ve_render_premium_plans_page(): void
     ve_html(ve_rewrite_html_paths($html));
 }
 
+function ve_dashboard_reports_rows_html(array $rows): string
+{
+    $htmlRows = [];
+
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $htmlRows[] = sprintf(
+            '<tr> <td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td> </tr>',
+            ve_h((string) ($row['date'] ?? '')),
+            number_format((int) ($row['views'] ?? 0)),
+            ve_h((string) ($row['profit'] ?? '$0.00000')),
+            ve_h((string) ($row['referral_share'] ?? '$0.00000')),
+            ve_h((string) ($row['traffic'] ?? '0 B')),
+            ve_h((string) ($row['total'] ?? '$0.00000'))
+        );
+    }
+
+    if ($htmlRows === []) {
+        return '<tr> <td></td> <td>0</td> <td>$0.00000</td> <td>$0.00000</td> <td>0 B</td> <td>$0.00000</td> </tr>';
+    }
+
+    return implode(' ', $htmlRows);
+}
+
+function ve_dashboard_reports_footer_html(array $totals): string
+{
+    return sprintf(
+        '<tr> <td></td> <td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td> </tr>',
+        number_format((int) ($totals['views'] ?? 0)),
+        ve_h((string) ($totals['profit'] ?? '$0.00000')),
+        ve_h((string) ($totals['referral_share'] ?? '$0.00000')),
+        ve_h((string) ($totals['traffic'] ?? '0 B')),
+        ve_h((string) ($totals['total'] ?? '$0.00000'))
+    );
+}
+
+function ve_dashboard_reports_chart_script(array $chart): string
+{
+    $points = [];
+
+    foreach ($chart as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $points[] = [
+            'time' => (string) ($entry['time'] ?? ''),
+            'views' => (int) ($entry['views'] ?? 0),
+            'refs' => round(((int) ($entry['earned_micro_usd'] ?? 0)) / 1000000, 5),
+        ];
+    }
+
+    $chartJson = json_encode($points, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+    if (!is_string($chartJson)) {
+        $chartJson = '[]';
+    }
+
+    return '<script type="text/javascript"> $(document).ready(function() { var data = ' . $chartJson
+        . '; if (!window.Morris || !Array.isArray(data)) { return; } Morris.Line({ element: \'reports_chart\', data: data, xkey: \'time\', ykeys: [\'views\', \'refs\'], labels: [\'Views \', \'Profit \'], hideHover: \'auto\', behaveLikeLine: true, resize: true, parseTime: false, pointFillColors:[\'#ff9900\',\'#42b983\'], pointStrokeColors: [\'#ff9900\',\'#42b983\'], lineColors:[\'#ff9900\',\'#42b983\'] }); }); </script>';
+}
+
+function ve_render_reports_page(): void
+{
+    $user = ve_require_auth();
+    $from = isset($_GET['from']) ? (string) $_GET['from'] : (isset($_GET['date1']) ? (string) $_GET['date1'] : null);
+    $to = isset($_GET['to']) ? (string) $_GET['to'] : (isset($_GET['date2']) ? (string) $_GET['date2'] : null);
+    $snapshot = ve_dashboard_reports_snapshot((int) $user['id'], $from, $to);
+    $range = is_array($snapshot['range'] ?? null) ? $snapshot['range'] : ['from' => gmdate('Y-m-d'), 'to' => gmdate('Y-m-d')];
+    $html = (string) file_get_contents(ve_root_path('dashboard', 'reports.html'));
+    $html = ve_runtime_html_transform($html, 'dashboard/reports.html');
+    $html = ve_html_set_input_value($html, 'date1', (string) ($range['from'] ?? ''));
+    $html = ve_html_set_input_value($html, 'date2', (string) ($range['to'] ?? ''));
+    $rowsHtml = ve_dashboard_reports_rows_html((array) ($snapshot['rows'] ?? []));
+    $footerHtml = ve_dashboard_reports_footer_html((array) ($snapshot['totals'] ?? []));
+    $html = preg_replace_callback(
+        '/(<table id="datatable"[^>]*>[\s\S]*?<tbody>)[\s\S]*?(<\/tbody>)/i',
+        static fn (array $matches): string => $matches[1] . ' ' . $rowsHtml . ' ' . $matches[2],
+        $html,
+        1
+    ) ?? $html;
+    $html = preg_replace_callback(
+        '/(<table id="datatable"[^>]*>[\s\S]*?<tfoot>)[\s\S]*?(<\/tfoot>)/i',
+        static fn (array $matches): string => $matches[1] . ' ' . $footerHtml . ' ' . $matches[2],
+        $html,
+        1
+    ) ?? $html;
+    $html = preg_replace(
+        '/<script type="text\/javascript">\s*\$\(document\)\.ready\(function\(\)\s*\{[\s\S]*?<\/script>/i',
+        ve_dashboard_reports_chart_script((array) ($snapshot['chart'] ?? [])),
+        $html,
+        1
+    ) ?? $html;
+
+    ve_html(ve_rewrite_html_paths($html));
+}
+
 function ve_render_dashboard_file(string $relativePath): void
 {
     if ($relativePath === 'dashboard/premium-plans.html') {
         ve_render_premium_plans_page();
+    }
+
+    if ($relativePath === 'dashboard/referrals.html' && function_exists('ve_render_referrals_page')) {
+        ve_render_referrals_page();
     }
 
     $html = (string) file_get_contents(ve_root_path($relativePath));

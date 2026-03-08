@@ -2718,7 +2718,7 @@ function ve_video_mark_playback_started(array $video, array $session): void
     ]);
 
     if ($stmt->rowCount() > 0) {
-        ve_dashboard_record_video_view($videoId, $userId);
+        ve_dashboard_record_video_view($videoId, $userId, null, null, 'playback-session-' . $sessionId);
     }
 }
 

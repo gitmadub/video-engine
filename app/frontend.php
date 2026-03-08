@@ -265,6 +265,7 @@ function ve_not_found(): void
 }
 
 require __DIR__ . '/backend.php';
+require __DIR__ . '/referrals.php';
 require __DIR__ . '/video.php';
 require __DIR__ . '/remote_upload.php';
 
@@ -805,8 +806,26 @@ function ve_handle_op(string $op, string $path): bool
         case 'my_account':
             ve_legacy_endpoint_removed($op === 'register_save' ? '/register' : '/account/settings', ['POST']);
 
-        case 'forgot_pass':
         case 'my_reports':
+            $query = [];
+
+            if (isset($_GET['date1']) && is_string($_GET['date1']) && trim($_GET['date1']) !== '') {
+                $query['from'] = trim($_GET['date1']);
+            }
+
+            if (isset($_GET['date2']) && is_string($_GET['date2']) && trim($_GET['date2']) !== '') {
+                $query['to'] = trim($_GET['date2']);
+            }
+
+            $target = ve_url('/dashboard/reports');
+
+            if ($query !== []) {
+                $target .= '?' . http_build_query($query);
+            }
+
+            ve_redirect($target);
+
+        case 'forgot_pass':
         case 'request_money':
             ve_back_redirect($path === '/' ? ve_url('/dashboard') : ve_url($path));
 
@@ -942,9 +961,26 @@ function ve_dispatch(): void
 
         ve_json(ve_dashboard_reports_snapshot(
             (int) $user['id'],
-            isset($_GET['from']) ? (string) $_GET['from'] : null,
-            isset($_GET['to']) ? (string) $_GET['to'] : null
+            isset($_GET['from']) ? (string) $_GET['from'] : (isset($_GET['date1']) ? (string) $_GET['date1'] : null),
+            isset($_GET['to']) ? (string) $_GET['to'] : (isset($_GET['date2']) ? (string) $_GET['date2'] : null)
         ));
+    }
+
+    if ($path === '/api/dashboard/referrals') {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        $user = ve_current_user();
+
+        if (!is_array($user)) {
+            ve_json([
+                'status' => 'fail',
+                'message' => 'Authentication required.',
+            ], 401);
+        }
+
+        ve_json(ve_referral_snapshot((int) $user['id']));
     }
 
     if ($path === '/api/videos') {
@@ -1212,6 +1248,14 @@ function ve_dispatch(): void
 
     if (preg_match('#^/stream/([A-Za-z0-9_-]+)/segment/([^/]+)$#', $path, $matches) === 1) {
         ve_video_stream_segment($matches[1], rawurldecode($matches[2]));
+    }
+
+    if (preg_match('#^/join/([A-Za-z0-9_-]+)(?:\.html)?$#', $path, $matches) === 1) {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        ve_referral_handle_join($matches[1]);
     }
 
     if ($path === '/premium-plans' || $path === '/premium-plans.html') {

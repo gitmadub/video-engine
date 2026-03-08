@@ -6,6 +6,9 @@ CREATE TABLE IF NOT EXISTS users (
     status TEXT NOT NULL DEFAULT 'active',
     plan_code TEXT NOT NULL DEFAULT 'free',
     premium_until TEXT DEFAULT NULL,
+    referral_code TEXT COLLATE NOCASE DEFAULT NULL,
+    referred_by_user_id INTEGER DEFAULT NULL,
+    referred_at TEXT DEFAULT NULL,
     api_key_encrypted TEXT NOT NULL,
     api_key_hash TEXT NOT NULL,
     api_key_last_rotated_at TEXT DEFAULT NULL,
@@ -16,6 +19,20 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS referral_earnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    referrer_user_id INTEGER NOT NULL,
+    referred_user_id INTEGER NOT NULL,
+    source_type TEXT NOT NULL,
+    source_key TEXT NOT NULL UNIQUE,
+    amount_micro_usd INTEGER NOT NULL DEFAULT 0,
+    stat_date TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (referrer_user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (referred_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS user_settings (
@@ -109,6 +126,44 @@ CREATE TABLE IF NOT EXISTS api_request_logs (
     client_ip TEXT NOT NULL DEFAULT '',
     user_agent TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS account_balance_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    entry_type TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    amount_micro_usd INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS premium_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_code TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL,
+    purchase_type TEXT NOT NULL,
+    package_id TEXT NOT NULL,
+    package_title TEXT NOT NULL,
+    payment_method TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    amount_micro_usd INTEGER NOT NULL,
+    bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
+    plan_interval_spec TEXT NOT NULL DEFAULT '',
+    crypto_currency_code TEXT NOT NULL DEFAULT '',
+    crypto_currency_name TEXT NOT NULL DEFAULT '',
+    crypto_amount TEXT NOT NULL DEFAULT '',
+    crypto_address TEXT NOT NULL DEFAULT '',
+    payment_uri TEXT NOT NULL DEFAULT '',
+    qr_url TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT DEFAULT NULL,
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
@@ -208,8 +263,16 @@ CREATE INDEX IF NOT EXISTS idx_videos_status_created ON videos(status, created_a
 CREATE INDEX IF NOT EXISTS idx_remote_uploads_user_created ON remote_uploads(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_remote_uploads_status_created ON remote_uploads(status, created_at ASC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code);
+CREATE INDEX IF NOT EXISTS idx_users_referred_by_created ON users(referred_by_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_created ON api_request_logs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_kind_created ON api_request_logs(user_id, request_kind, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_account_balance_ledger_user_created ON account_balance_ledger(user_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_account_balance_ledger_source_entry ON account_balance_ledger(source_type, source_key, entry_type);
+CREATE INDEX IF NOT EXISTS idx_premium_orders_user_created ON premium_orders(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_premium_orders_status_created ON premium_orders(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_referral_earnings_referrer_date ON referral_earnings(referrer_user_id, stat_date DESC);
+CREATE INDEX IF NOT EXISTS idx_referral_earnings_referred_created ON referral_earnings(referred_user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS video_playback_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -236,6 +299,7 @@ CREATE TABLE IF NOT EXISTS user_stats_daily (
     stat_date TEXT NOT NULL,
     views INTEGER NOT NULL DEFAULT 0,
     earned_micro_usd INTEGER NOT NULL DEFAULT 0,
+    referral_earned_micro_usd INTEGER NOT NULL DEFAULT 0,
     bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -248,6 +312,7 @@ CREATE TABLE IF NOT EXISTS video_stats_daily (
     stat_date TEXT NOT NULL,
     views INTEGER NOT NULL DEFAULT 0,
     earned_micro_usd INTEGER NOT NULL DEFAULT 0,
+    referral_earned_micro_usd INTEGER NOT NULL DEFAULT 0,
     bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
