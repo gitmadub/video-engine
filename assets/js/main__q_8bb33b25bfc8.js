@@ -1,3 +1,21 @@
+function veAppUrl(path) {
+    var basePath = window.VE_BASE_PATH || '';
+
+    if (!path) {
+        return basePath || '/';
+    }
+
+    if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(path)) {
+        return path;
+    }
+
+    if (path.charAt(0) !== '/') {
+        path = '/' + path;
+    }
+
+    return basePath + path;
+}
+
 $(document).ready(function() {
     var pathname = window.location.pathname;
     var l_first = true;
@@ -55,7 +73,7 @@ $(document).ready(function() {
         }
 
         if (op == 'login_ajax') {
-            url = '/?op=login_ajax';
+            url = veAppUrl('/?op=login_ajax');
             formData = {
                 'login': login,
                 'password': password,
@@ -63,7 +81,7 @@ $(document).ready(function() {
             };
             button = 'Login <i class="fad fa-arrow-right ml-2"></i>';
         } else if (op == 'register_save') {
-            url = '/?op=registration_ajax';
+            url = veAppUrl('/?op=registration_ajax');
             formData = {
                 'usr_login': _form.find('input[name="usr_login"]').val(),
                 'usr_email': _form.find('input[name="usr_email"]').val(),
@@ -72,13 +90,13 @@ $(document).ready(function() {
             };
             button = 'Sign up <i class="fad fa-arrow-right ml-2"></i>';
         } else if (op == 'forgot_pass') {
-            url = '/?op=forgot_pass_ajax';
+            url = veAppUrl('/?op=forgot_pass_ajax');
             formData = {
                 'usr_login': _form.find('input[name="usr_login"]').val()
             };
             button = 'Send me instructions <i class="fad fa-arrow-right ml-2"></i>';
         } else if (op == 'reset_pass') {
-            url = '/?op=forgot_pass_ajax';
+            url = veAppUrl('/?op=forgot_pass_ajax');
             formData = {
                 'sess_id': _form.find('input[name="sess_id"]').val(),
                 'password': _form.find('input[name="password"]').val(),
@@ -109,7 +127,7 @@ $(document).ready(function() {
                 }
 
                 if (response.status == 'otp_sent') {
-                    _form.prepend('<div class="alert alert-success mb-3">' + response.message + ' </br> If you did not receive OTP <a href="/contact" style="color:#ff9a00;">Contact us</a></div>');
+                    _form.prepend('<div class="alert alert-success mb-3">' + response.message + ' </br> If you did not receive OTP <a href="' + veAppUrl('/contact') + '" style="color:#ff9a00;">Contact us</a></div>');
                     $('.reqOTP').show();
                     l_first = false;
                 }
@@ -131,7 +149,7 @@ $(document).ready(function() {
             },
             error: function(xhr) {
                 if (xhr.readyState == 4) {
-                    window.location.href = '/dashboard';
+                    window.location.href = veAppUrl('/dashboard');
                 }
             }
         });
@@ -179,7 +197,7 @@ function getNotifications(open_msg = '') {
     $('.dropdown.notifications #notifications .count, .dropdown.notifications .notifications-box .empty').remove();
     $('.dropdown.notifications .notifications-list').html('');
 
-    var url = '/?op=notifications',
+    var url = veAppUrl('/?op=notifications'),
         formData = {
             'open': open_msg
         };

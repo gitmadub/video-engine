@@ -246,7 +246,7 @@ function ve_render_file(string $relativePath, int $status = 200): void
 
     http_response_code($status);
     header('Content-Type: text/html; charset=UTF-8');
-    echo ve_rewrite_html_paths((string) file_get_contents($fullPath));
+    echo ve_rewrite_html_paths(ve_runtime_html_transform((string) file_get_contents($fullPath), $relativePath));
     exit;
 }
 
@@ -257,6 +257,8 @@ function ve_not_found(): void
         404
     );
 }
+
+require __DIR__ . '/backend.php';
 
 function ve_dashboard_stats(): array
 {
@@ -677,40 +679,49 @@ function ve_handle_op(string $op, string $path): bool
 {
     switch ($op) {
         case 'notifications':
-            ve_json([]);
+            $user = ve_current_user();
+            ve_json(is_array($user) ? ve_fetch_notifications((int) $user['id'], isset($_GET['open']) ? (int) $_GET['open'] : null) : []);
 
         case 'login_ajax':
-            ve_json([
-                'status' => 'redirect',
-                'message' => ve_url('/dashboard'),
-            ]);
+            ve_handle_login_ajax();
 
         case 'registration_ajax':
-            ve_json([
-                'status' => 'ok',
-                'message' => 'Frontend registration stub completed. Continue in the dashboard.',
-            ]);
+            ve_handle_registration_ajax();
 
         case 'forgot_pass_ajax':
-            ve_json([
-                'status' => 'ok',
-                'message' => 'Password reset is not wired yet. Backend endpoint is stubbed for frontend testing.',
-            ]);
+            ve_handle_forgot_password_ajax();
 
         case 'logout':
+            ve_logout_current_user();
             ve_redirect('/');
 
         case 'my_password':
-            ve_html(ve_settings_panel('Change password', 'Stubbed response for the settings drawer.', 'Save password'));
+            $user = ve_require_auth();
+            ve_save_password((int) $user['id']);
 
         case 'my_email':
-            ve_html(ve_settings_panel('Change email', 'Stubbed response for the settings drawer.', 'Save email'));
+            $user = ve_require_auth();
+            ve_save_email((int) $user['id']);
 
         case 'upload_logo':
-            ve_html(ve_settings_panel('Player settings', 'Upload handling is not implemented yet, but the UI endpoint is live.', 'Save player settings'));
+            $user = ve_require_auth();
+            ve_save_player_settings((int) $user['id']);
 
         case 'premium_settings':
-            ve_html(ve_settings_panel('Own adverts', 'Premium advert settings will be backed by a real API later.', 'Save advert settings'));
+            $user = ve_require_auth();
+            ve_save_ad_settings((int) $user['id']);
+
+        case 'custom_domain_list':
+            ve_handle_custom_domain_list();
+
+        case 'custom_domain_add':
+            ve_handle_custom_domain_add();
+
+        case 'custom_domain_delete':
+            ve_handle_custom_domain_delete();
+
+        case 'delete_account':
+            ve_handle_delete_account();
 
         case 'dmca_manager':
             if (isset($_GET['loadmore'])) {
@@ -775,8 +786,11 @@ function ve_handle_op(string $op, string $path): bool
             ]);
 
         case 'register_save':
-        case 'forgot_pass':
         case 'my_account':
+            $user = ve_require_auth();
+            ve_save_account_settings((int) $user['id']);
+
+        case 'forgot_pass':
         case 'my_reports':
         case 'request_money':
             ve_back_redirect($path === '/' ? ve_url('/dashboard') : ve_url($path));
@@ -788,6 +802,7 @@ function ve_handle_op(string $op, string $path): bool
 
 function ve_dispatch(): void
 {
+    ve_bootstrap();
     $path = ve_request_path();
     $op = $_REQUEST['op'] ?? null;
 
@@ -804,6 +819,16 @@ function ve_dispatch(): void
     }
 
     if ($path === '/genrate-api/' || $path === '/genrate-api') {
+        $user = ve_require_auth();
+        $token = $_GET['token'] ?? null;
+
+        if (!is_string($token) || !hash_equals(ve_csrf_token(), $token)) {
+            ve_flash('danger', 'Your session token is invalid. Refresh the settings page and try again.');
+            ve_redirect('/dashboard/settings');
+        }
+
+        ve_regenerate_api_key_for_user((int) $user['id']);
+        ve_flash('success', 'API key regenerated successfully.');
         ve_redirect('/dashboard/settings');
     }
 
@@ -820,6 +845,11 @@ function ve_dispatch(): void
 
     if ($path === '/index.html') {
         ve_redirect('/');
+    }
+
+    if ($path === '/reset-password') {
+        $token = trim((string) ($_GET['token'] ?? ''));
+        ve_render_reset_password_page($token);
     }
 
     if (preg_match('#^/d/([A-Za-z0-9]+)$#', $path, $matches) === 1) {
@@ -849,15 +879,21 @@ function ve_dispatch(): void
     }
 
     if ($path === '/dashboard' || $path === '/dashboard/' || $path === '/dashboard/index.html') {
-        ve_render_file(VE_DASHBOARD_PAGES['']);
+        ve_require_auth();
+        ve_render_dashboard_file(VE_DASHBOARD_PAGES['']);
     }
 
     if (str_starts_with($path, '/dashboard/')) {
+        ve_require_auth();
         $slug = trim(substr($path, strlen('/dashboard/')), '/');
         $slug = preg_replace('/\.html$/', '', $slug ?? '');
 
         if (is_string($slug) && array_key_exists($slug, VE_DASHBOARD_PAGES)) {
-            ve_render_file(VE_DASHBOARD_PAGES[$slug]);
+            if ($slug === 'settings') {
+                ve_render_settings_page();
+            }
+
+            ve_render_dashboard_file(VE_DASHBOARD_PAGES[$slug]);
         }
     }
 
