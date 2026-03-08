@@ -2264,12 +2264,12 @@ function ve_html_append_class_attribute(string $attributes, string $className): 
             $classes[] = $className;
         }
 
-        return (string) preg_replace(
+        return (string) (preg_replace(
             '/\bclass="[^"]*"/i',
             'class="' . ve_h(implode(' ', $classes)) . '"',
             $attributes,
             1
-        );
+        ) ?? $attributes);
     }
 
     return rtrim($attributes) . ' class="' . ve_h($className) . '"';
@@ -2406,6 +2406,10 @@ function ve_settings_script(): string
                 return path;
             }
 
+            if (basePath && (path === basePath || path.indexOf(basePath + '/') === 0)) {
+                return path;
+            }
+
             if (path.charAt(0) !== '/') {
                 path = '/' + path;
             }
@@ -2429,36 +2433,58 @@ function ve_settings_script(): string
             $('.details.settings_data > .alert').remove();
         }
 
-        function ensurePanelFeedback(\$panel) {
-            var \$feedback = \$panel.find('.js-panel-feedback').first();
+        function ensureFormFeedback(\$form) {
+            var \$feedback = \$form.children('.js-form-feedback').first();
 
             if (!\$feedback.length) {
-                \$feedback = $('<div class="settings-inline-feedback alert d-none js-panel-feedback" role="alert"></div>');
-                var \$subtitle = \$panel.find('.settings-panel-subtitle').first();
+                \$feedback = $('<div class="settings-inline-feedback alert d-none js-form-feedback" role="alert"></div>');
+                var \$firstVisibleField = \$form.children().not('input[type="hidden"]').first();
 
-                if (\$subtitle.length) {
-                    \$subtitle.after(\$feedback);
+                if (\$firstVisibleField.length) {
+                    \$firstVisibleField.before(\$feedback);
                 } else {
-                    \$panel.prepend(\$feedback);
+                    \$form.prepend(\$feedback);
                 }
             }
 
             return \$feedback;
         }
 
+        function showFormFeedback(\$form, type, message) {
+            var \$feedback = ensureFormFeedback(\$form);
+            \$feedback.removeClass('d-none alert-success alert-danger').addClass(type === 'success' ? 'alert-success' : 'alert-danger').text(message || '');
+        }
+
+        function ensureSidebarFeedback() {
+            var \$container = $('.settings-page .form-group').first();
+            var \$feedback = \$container.children('.js-sidebar-feedback').first();
+
+            if (!\$feedback.length) {
+                \$feedback = $('<div class="settings-inline-feedback alert d-none js-sidebar-feedback mt-3" role="alert"></div>');
+                \$container.append(\$feedback);
+            }
+
+            return \$feedback;
+        }
+
+        function showSidebarFeedback(type, message) {
+            var \$feedback = ensureSidebarFeedback();
+            \$feedback.removeClass('d-none alert-success alert-danger').addClass(type === 'success' ? 'alert-success' : 'alert-danger').text(message || '');
+        }
+
         function clearPanelFeedback(\$scope) {
-            \$scope.find('.js-panel-feedback').addClass('d-none').removeClass('alert-success alert-danger').text('');
+            \$scope.find('.js-form-feedback, .js-sidebar-feedback').addClass('d-none').removeClass('alert-success alert-danger').text('');
             \$scope.find('#response, #delete-account-feedback').text('').removeAttr('style');
         }
 
         function clearAllPanelFeedback() {
             clearLegacyFlash();
             clearPanelFeedback($('.settings_data'));
+            clearPanelFeedback($('.settings-page'));
         }
 
-        function showFormFeedback(\$panel, type, message) {
-            var \$feedback = ensurePanelFeedback(\$panel);
-            \$feedback.removeClass('d-none alert-success alert-danger').addClass(type === 'success' ? 'alert-success' : 'alert-danger').text(message || '');
+        function isManagedSettingsAction(action) {
+            return /^\/account\/(settings|password|email|player|advertising|api-settings)$/.test(action || '');
         }
 
         function handleAjaxError(xhr, fallbackMessage) {
@@ -2618,6 +2644,8 @@ function ve_settings_script(): string
         }
 
         function loadApiUsage(successMessage) {
+            var \$apiForm = $('#api_access form').first();
+
             $.ajax({
                 type: 'GET',
                 url: appUrl('/api/account/api-usage'),
@@ -2625,17 +2653,17 @@ function ve_settings_script(): string
                 headers: ajaxHeaders
             }).done(function (response) {
                 if (response.status !== 'ok' || !response.api) {
-                    showFormFeedback($('#api_access'), 'danger', response.message || 'Unable to load API usage.');
+                    showFormFeedback(\$apiForm, 'danger', response.message || 'Unable to load API usage.');
                     return;
                 }
 
                 applyApiSnapshot(response.api);
 
                 if (successMessage) {
-                    showFormFeedback($('#api_access'), 'success', successMessage);
+                    showFormFeedback(\$apiForm, 'success', successMessage);
                 }
             }).fail(function (xhr) {
-                showFormFeedback($('#api_access'), 'danger', handleAjaxError(xhr, 'Unable to load API usage right now.'));
+                showFormFeedback(\$apiForm, 'danger', handleAjaxError(xhr, 'Unable to load API usage right now.'));
             });
         }
 
@@ -2724,24 +2752,22 @@ function ve_settings_script(): string
             }
         });
 
-        $(document).on('submit', '.settings-panel form[action]', function (event) {
-            var action = $(this).attr('action') || '';
+        function submitSettingsForm(form) {
+            var \$form = $(form);
+            var action = \$form.attr('action') || '';
 
-            if (!/^\\/account\\/(settings|password|email|player|advertising|api-settings)$/.test(action)) {
-                return;
+            if (!isManagedSettingsAction(action) || \$form.data('ajaxSubmitting')) {
+                return false;
             }
 
-            event.preventDefault();
             clearAllPanelFeedback();
+            \$form.data('ajaxSubmitting', true);
 
-            var \$form = $(this);
-            var \$panel = \$form.closest('.settings-panel');
             var \$submit = \$form.find('button[type="submit"]').first();
             var originalLabel = \$submit.html();
-            var formData = new FormData(this);
+            var formData = new FormData(form);
 
             formData.set('token', csrfToken);
-
             \$submit.prop('disabled', true);
 
             $.ajax({
@@ -2754,18 +2780,18 @@ function ve_settings_script(): string
                 headers: csrfAjaxHeaders()
             }).done(function (response) {
                 if (response.status !== 'ok') {
-                    showFormFeedback(\$panel, 'danger', response.message || 'Unable to save settings.');
+                    showFormFeedback(\$form, 'danger', response.message || 'Unable to save settings.');
                     return;
                 }
 
-                showFormFeedback(\$panel, 'success', response.message || 'Saved successfully.');
+                showFormFeedback(\$form, 'success', response.message || 'Saved successfully.');
 
                 if (action === '/account/password') {
                     \$form.trigger('reset');
                 }
 
                 if (action === '/account/email' && response.email) {
-                    \$panel.find('p.mb-4').html('Current email: <b>' + escapeHtml(response.email) + '</b>');
+                    \$form.closest('.settings-panel').find('p.mb-4').html('Current email: <b>' + escapeHtml(response.email) + '</b>');
                     \$form.find('input[name="usr_email"], input[name="usr_email2"]').val('');
                 }
 
@@ -2778,18 +2804,31 @@ function ve_settings_script(): string
                     applyApiSnapshot(response.api);
                 }
             }).fail(function (xhr) {
-                showFormFeedback(\$panel, 'danger', handleAjaxError(xhr, 'Unable to save settings right now.'));
+                showFormFeedback(\$form, 'danger', handleAjaxError(xhr, 'Unable to save settings right now.'));
             }).always(function () {
                 \$submit.prop('disabled', false).html(originalLabel);
+                \$form.data('ajaxSubmitting', false);
             });
-        });
 
-        $(document).on('submit', '.delete-account-form', function (event) {
-            event.preventDefault();
+            return true;
+        }
+
+        function submitDeleteAccountForm(form) {
+            var \$form = $(form);
+
+            if (\$form.data('ajaxSubmitting')) {
+                return false;
+            }
+
             clearAllPanelFeedback();
+            \$form.data('ajaxSubmitting', true);
 
-            var payload = $(this).serializeArray();
+            var payload = \$form.serializeArray();
             payload.push({ name: 'token', value: csrfToken });
+            var \$submit = \$form.find('button[type="submit"]').first();
+            var originalLabel = \$submit.html();
+
+            \$submit.prop('disabled', true);
 
             $.ajax({
                 type: 'POST',
@@ -2803,11 +2842,42 @@ function ve_settings_script(): string
                     return;
                 }
 
-                $('#delete-account-feedback').text(response.message || 'Unable to delete account.').css('color', response.status === 'ok' ? '#42b983' : '#dc3545');
+                showFormFeedback(\$form, response.status === 'ok' ? 'success' : 'danger', response.message || 'Unable to delete account.');
             }).fail(function (xhr) {
-                $('#delete-account-feedback').text(handleAjaxError(xhr, 'Unable to delete account right now.')).css('color', '#dc3545');
+                showFormFeedback(\$form, 'danger', handleAjaxError(xhr, 'Unable to delete account right now.'));
+            }).always(function () {
+                \$submit.prop('disabled', false).html(originalLabel);
+                \$form.data('ajaxSubmitting', false);
             });
-        });
+
+            return true;
+        }
+
+        document.addEventListener('submit', function (event) {
+            var form = event.target;
+
+            if (!(form instanceof HTMLFormElement)) {
+                return;
+            }
+
+            if (!form.matches('form.js-settings-form, form.delete-account-form')) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            if (typeof event.stopImmediatePropagation === 'function') {
+                event.stopImmediatePropagation();
+            }
+
+            if (form.matches('form.delete-account-form')) {
+                submitDeleteAccountForm(form);
+                return;
+            }
+
+            submitSettingsForm(form);
+        }, true);
 
         $(document).on('click', '.regenerate-key', function (event) {
             event.preventDefault();
@@ -2827,10 +2897,8 @@ function ve_settings_script(): string
                     token: csrfToken
                 }
             }).done(function (response) {
-                var \$sidebar = $('.settings-page');
-
                 if (response.status !== 'ok' || !response.api_key) {
-                    showFormFeedback(\$sidebar, 'danger', response.message || 'Unable to regenerate the API key.');
+                    showSidebarFeedback('danger', response.message || 'Unable to regenerate the API key.');
                     return;
                 }
 
@@ -2838,9 +2906,9 @@ function ve_settings_script(): string
                 if (response.api) {
                     applyApiSnapshot(response.api);
                 }
-                showFormFeedback(\$sidebar, 'success', response.message || 'API key regenerated successfully.');
+                showSidebarFeedback('success', response.message || 'API key regenerated successfully.');
             }).fail(function (xhr) {
-                showFormFeedback($('.settings-page'), 'danger', handleAjaxError(xhr, 'Unable to regenerate the API key right now.'));
+                showSidebarFeedback('danger', handleAjaxError(xhr, 'Unable to regenerate the API key right now.'));
             });
         });
 
@@ -2859,7 +2927,7 @@ function ve_render_settings_page(): void
     $user = ve_require_auth();
     $settings = $user['settings'];
     $api = ve_api_usage_snapshot((int) $user['id']);
-    $flash = ve_pull_flash();
+    ve_pull_flash();
     $splashPreviewHtml = '<div class="text-muted small">No splash image uploaded yet.</div>';
     $splashPath = ve_storage_relative_path_to_absolute((string) ($settings['splash_image_path'] ?? ''));
 
@@ -2896,6 +2964,7 @@ function ve_render_settings_page(): void
     $html = ve_settings_bind_form($html, 'premium_settings', '/account/advertising');
     $html = ve_settings_bind_form($html, 'api_settings', '/account/api-settings');
     $html = ve_settings_bind_delete_account_form($html);
+    $html = str_replace('<div id="delete-account-feedback" class="settings-inline-feedback"></div>', '', $html);
     $html = preg_replace('/\sdisabled(?:="disabled")?/i', '', $html) ?? $html;
 
     $html = ve_html_set_select_value($html, 'usr_pay_type', (string) ($settings['payment_method'] ?? 'Webmoney'));
@@ -2937,11 +3006,6 @@ function ve_render_settings_page(): void
         $html,
         1
     ) ?? $html;
-
-    if ($flash !== null) {
-        $flashHtml = '<div class="alert alert-' . ve_h($flash['type']) . ' mb-4">' . ve_h($flash['message']) . '</div>';
-        $html = str_replace('<div class="details settings_data">', '<div class="details settings_data">' . $flashHtml, $html);
-    }
 
     $html = preg_replace('/<script type="text\/javascript">[\s\S]*?<\/script>\s*<\/body>/i', ve_settings_script() . "\n</body>", $html, 1) ?? $html;
 

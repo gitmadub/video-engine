@@ -1043,18 +1043,12 @@ function ve_dispatch(): void
         $user = ve_require_auth();
         ve_require_csrf(ve_request_csrf_token());
         $apiKey = ve_regenerate_api_key_for_user((int) $user['id']);
-
-        if (ve_request_expects_json()) {
-            ve_json([
-                'status' => 'ok',
-                'message' => 'API key regenerated successfully.',
-                'api_key' => $apiKey,
-                'api' => ve_api_usage_snapshot((int) $user['id']),
-            ]);
-        }
-
-        ve_flash('success', 'API key regenerated successfully.');
-        ve_redirect('/dashboard/settings');
+        ve_json([
+            'status' => 'ok',
+            'message' => 'API key regenerated successfully.',
+            'api_key' => $apiKey,
+            'api' => ve_api_usage_snapshot((int) $user['id']),
+        ]);
     }
 
     if (is_string($op) && $op !== '' && ve_handle_op($op, $path)) {

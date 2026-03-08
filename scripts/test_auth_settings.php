@@ -153,6 +153,51 @@ function assert_settings_panel_structure(string $html): void
     }
 }
 
+function assert_settings_forms_bound(string $html): void
+{
+    $previous = libxml_use_internal_errors(true);
+    $dom = new DOMDocument();
+    $loaded = $dom->loadHTML($html);
+    libxml_clear_errors();
+    libxml_use_internal_errors($previous);
+    assert_true($loaded, 'Settings HTML should be parseable.');
+
+    $xpath = new DOMXPath($dom);
+    $expectedForms = [
+        'details' => '/account/settings',
+        'password_settings' => '/account/password',
+        'email_settings' => '/account/email',
+        'player_settings' => '/account/player',
+        'premium_settings' => '/account/advertising',
+        'api_access' => '/account/api-settings',
+        'delete_account' => '/account/delete',
+    ];
+
+    foreach ($expectedForms as $panelId => $action) {
+        $panel = $xpath->query('//*[@id="' . $panelId . '"]')->item(0);
+        assert_true($panel instanceof DOMElement, 'Missing settings panel #' . $panelId . '.');
+
+        $form = $xpath->query('.//form', $panel)->item(0);
+        assert_true($form instanceof DOMElement, 'Settings panel #' . $panelId . ' should render a form.');
+        assert_true(
+            str_contains(' ' . trim((string) $form->getAttribute('class')) . ' ', ' js-settings-form '),
+            'Settings panel #' . $panelId . ' should use the managed settings form class.'
+        );
+        assert_true($form->getAttribute('action') === $action, 'Settings panel #' . $panelId . ' should post to ' . $action . '.');
+
+        $feedback = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " js-form-feedback ")]', $form)->item(0);
+        assert_true($feedback instanceof DOMElement, 'Settings panel #' . $panelId . ' should render an in-form feedback alert.');
+    }
+
+    assert_true($xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " js-panel-feedback ")]')->length === 0, 'Settings page should not render panel-level feedback alerts.');
+}
+
+function assert_json_content_type(array $response, string $message): void
+{
+    $contentType = strtolower((string) ($response['headers']['content-type'] ?? ''));
+    assert_true(str_contains($contentType, 'application/json'), $message . ' Expected JSON content type, got: ' . $contentType);
+}
+
 function create_test_png(string $path): void
 {
     $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO1ZzWQAAAAASUVORK5CYII=', true);
@@ -366,6 +411,7 @@ try {
     assert_true(str_contains($settingsPage['body'], '/account/api-settings'), 'Settings page should expose the API policy form.');
     assert_true(str_contains($settingsPage['body'], 'data-api-status'), 'Settings page should render the API usage summary.');
     assert_settings_panel_structure($settingsPage['body']);
+    assert_settings_forms_bound($settingsPage['body']);
     $runtimeCsrf = extract_runtime_token($settingsPage['body']);
     $hiddenTokens = extract_hidden_tokens($settingsPage['body']);
     assert_true(count($hiddenTokens) >= 6, 'Every settings form should render a hidden CSRF token.');
@@ -379,8 +425,7 @@ try {
     $csrf = extract_hidden_token($settingsPage['body']);
     $oldApiKey = extract_api_key($settingsPage['body']);
 
-    $accountSave = json_response($client->request('POST', '/account/settings', [
-        'headers' => $ajaxHeaders,
+    $accountSaveResponse = $client->request('POST', '/account/settings', [
         'form' => [
             'token' => $csrf,
             'usr_pay_type' => 'Bitcoin',
@@ -393,13 +438,14 @@ try {
             'usr_disable_adb' => '1',
             'usr_srt_burn' => '1',
         ],
-    ]));
+    ]);
+    assert_json_content_type($accountSaveResponse, 'Saving account settings should return JSON.');
+    $accountSave = json_response($accountSaveResponse);
     assert_true(($accountSave['status'] ?? null) === 'ok', 'Saving account settings should return success JSON.');
     echo "account settings ok\n";
 
     create_test_png($logoPath);
-    $playerSave = json_response($client->request('POST', '/account/player', [
-        'headers' => $ajaxHeaders,
+    $playerSaveResponse = $client->request('POST', '/account/player', [
         'form' => [
             'token' => $csrf,
             'logo_mode' => 'image',
@@ -411,12 +457,13 @@ try {
             'embedcode_height' => '405',
             'logo_image' => new CURLFile($logoPath, 'image/png', 'logo.png'),
         ],
-    ]));
+    ]);
+    assert_json_content_type($playerSaveResponse, 'Saving player settings should return JSON.');
+    $playerSave = json_response($playerSaveResponse);
     assert_true(($playerSave['status'] ?? null) === 'ok', 'Saving player settings should return success JSON.');
     echo "player settings ok\n";
 
-    $adsSave = json_response($client->request('POST', '/account/advertising', [
-        'headers' => $ajaxHeaders,
+    $adsSaveResponse = $client->request('POST', '/account/advertising', [
         'form' => [
             'token' => $csrf,
             'vast_url' => 'https://ads.example.com/vast.xml',
@@ -424,30 +471,34 @@ try {
             'pop_url' => 'https://ads.example.com/popup.js',
             'pop_cap' => '45',
         ],
-    ]));
+    ]);
+    assert_json_content_type($adsSaveResponse, 'Saving advert settings should return JSON.');
+    $adsSave = json_response($adsSaveResponse);
     assert_true(($adsSave['status'] ?? null) === 'ok', 'Saving advert settings should return success JSON.');
     echo "ad settings ok\n";
 
-    $passwordSave = json_response($client->request('POST', '/account/password', [
-        'headers' => $ajaxHeaders,
+    $passwordSaveResponse = $client->request('POST', '/account/password', [
         'form' => [
             'token' => $csrf,
             'password_current' => 'Start123',
             'password_new' => 'NewPass456',
             'password_new2' => 'NewPass456',
         ],
-    ]));
+    ]);
+    assert_json_content_type($passwordSaveResponse, 'Changing password should return JSON.');
+    $passwordSave = json_response($passwordSaveResponse);
     assert_true(($passwordSave['status'] ?? null) === 'ok', 'Changing password should return success JSON.');
     echo "password change ok\n";
 
-    $emailSave = json_response($client->request('POST', '/account/email', [
-        'headers' => $ajaxHeaders,
+    $emailSaveResponse = $client->request('POST', '/account/email', [
         'form' => [
             'token' => $csrf,
             'usr_email' => 'alice+updated@example.com',
             'usr_email2' => 'alice+updated@example.com',
         ],
-    ]));
+    ]);
+    assert_json_content_type($emailSaveResponse, 'Changing email should return JSON.');
+    $emailSave = json_response($emailSaveResponse);
     assert_true(($emailSave['status'] ?? null) === 'ok', 'Changing email should return success JSON.');
     echo "email change ok\n";
 
@@ -460,14 +511,16 @@ try {
     assert_true(str_contains($settingsPage['body'], 'https://ads.example.com/vast.xml'), 'Updated VAST URL should render.');
     assert_true(str_contains($settingsPage['body'], 'https://ads.example.com/popup.js'), 'Updated popup URL should render.');
     assert_settings_panel_structure($settingsPage['body']);
+    assert_settings_forms_bound($settingsPage['body']);
     $csrf = extract_hidden_token($settingsPage['body']);
 
-    $apiRotate = json_response($client->request('POST', '/account/api-key/regenerate', [
-        'headers' => $ajaxHeaders,
+    $apiRotateResponse = $client->request('POST', '/account/api-key/regenerate', [
         'form' => [
             'token' => $csrf,
         ],
-    ]));
+    ]);
+    assert_json_content_type($apiRotateResponse, 'API key regeneration should return JSON.');
+    $apiRotate = json_response($apiRotateResponse);
     assert_true(($apiRotate['status'] ?? null) === 'ok', 'API key regeneration should return success JSON.');
     assert_true(is_string($apiRotate['api_key'] ?? null) && $apiRotate['api_key'] !== '', 'API key regeneration should return a new API key.');
 
@@ -520,10 +573,7 @@ try {
     assert_true(count($apiUsageAfterTraffic['api']['recent_activity'] ?? []) >= 3, 'API usage should expose recent activity.');
 
     $requestsLastHour = (int) ($apiUsageAfterTraffic['api']['usage']['requests_last_hour'] ?? 0);
-    $apiPolicy = json_response($client->request('POST', '/account/api-settings', [
-        'headers' => array_merge($ajaxHeaders, [
-            'X-CSRF-Token' => $csrf,
-        ]),
+    $apiPolicyResponse = $client->request('POST', '/account/api-settings', [
         'form' => [
             'token' => $csrf,
             'api_enabled' => '1',
@@ -531,7 +581,9 @@ try {
             'api_requests_per_day' => (string) ($requestsLastHour + 3),
             'api_uploads_per_day' => '1',
         ],
-    ]));
+    ]);
+    assert_json_content_type($apiPolicyResponse, 'Saving API policy should return JSON.');
+    $apiPolicy = json_response($apiPolicyResponse);
     assert_true(($apiPolicy['status'] ?? null) === 'ok', 'Saving API policy should return success JSON.');
     assert_true(($apiPolicy['api']['limits']['uploads_per_day'] ?? null) === 1, 'API policy response should reflect the saved upload limit.');
 
@@ -754,14 +806,16 @@ try {
 
     $aliceSettings = $client->request('GET', '/dashboard/settings');
     $csrf = extract_hidden_token($aliceSettings['body']);
-    $deleteAccount = json_response($client->request('POST', '/account/delete', [
+    $deleteAccountResponse = $client->request('POST', '/account/delete', [
         'form' => [
             'token' => $csrf,
             'reason_code' => 'other',
             'reason' => 'End-to-end test cleanup',
             'password_confirmation' => 'NewPass456',
         ],
-    ]));
+    ]);
+    assert_json_content_type($deleteAccountResponse, 'Deleting the account should return JSON.');
+    $deleteAccount = json_response($deleteAccountResponse);
     assert_true(($deleteAccount['status'] ?? null) === 'redirect', 'Delete-account endpoint should return a redirect payload.');
     echo "delete account ok\n";
 
