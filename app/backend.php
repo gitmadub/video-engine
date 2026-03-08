@@ -162,6 +162,35 @@ function ve_seed_ftp_servers(PDO $pdo): void
     }
 }
 
+function ve_list_ftp_servers(): array
+{
+    $stmt = ve_db()->query('SELECT hostname, location_name, flag_code, status FROM ftp_servers ORDER BY id ASC');
+    $servers = $stmt->fetchAll();
+
+    return is_array($servers) ? $servers : [];
+}
+
+function ve_render_ftp_servers_rows(): string
+{
+    $rows = [];
+
+    foreach (ve_list_ftp_servers() as $server) {
+        $isOnline = (string) ($server['status'] ?? '') === 'online';
+        $flagCode = strtoupper((string) ($server['flag_code'] ?? 'WW'));
+        $flagPath = ve_url('/assets/img/flags/' . rawurlencode($flagCode) . '.svg');
+
+        $rows[] = sprintf(
+            '<tr><td><i class="fad fa-circle" style="color:%s;"></i></td><td>%s</td><td><img src="%s" class="country">%s</td></tr>',
+            $isOnline ? '#019001' : '#dc3545',
+            ve_h((string) ($server['hostname'] ?? '')),
+            ve_h($flagPath),
+            ve_h((string) ($server['location_name'] ?? ''))
+        );
+    }
+
+    return implode("\n", $rows);
+}
+
 function ve_app_secret(): string
 {
     static $secret;
@@ -1109,6 +1138,27 @@ function ve_mark_notification_read(int $userId, int $notificationId): void
     ]);
 }
 
+function ve_delete_notification(int $userId, int $notificationId): bool
+{
+    $stmt = ve_db()->prepare('DELETE FROM notifications WHERE id = :id AND user_id = :user_id');
+    $stmt->execute([
+        ':id' => $notificationId,
+        ':user_id' => $userId,
+    ]);
+
+    return $stmt->rowCount() > 0;
+}
+
+function ve_clear_notifications(int $userId): int
+{
+    $stmt = ve_db()->prepare('DELETE FROM notifications WHERE user_id = :user_id');
+    $stmt->execute([
+        ':user_id' => $userId,
+    ]);
+
+    return (int) $stmt->rowCount();
+}
+
 function ve_fetch_notifications(int $userId): array
 {
     $stmt = ve_db()->prepare('SELECT id, subject, message, is_read, created_at FROM notifications WHERE user_id = :user_id ORDER BY id DESC LIMIT 20');
@@ -1681,6 +1731,7 @@ function ve_render_settings_page(): void
     $html = str_replace('Current email: <b>lzcoeyhl@telegmail.com</b>', 'Current email: <b>' . ve_h((string) $user['email']) . '</b>', $html);
     $html = str_replace('value="559348grlz3u7np0z0hccb"', 'value="' . ve_h(ve_user_api_key($user)) . '"', $html);
     $html = str_replace('value="8wmdu9ngch"', 'value="' . ve_h(ve_user_ftp_password($user)) . '"', $html);
+    $html = str_replace('208.73.202.233', ve_h((string) ve_config()['custom_domain_target']), $html);
     $html = str_replace('href="/?op=logout"', 'href="/logout"', $html);
     $html = str_replace(
         'Just purchase a domain and point the DNS as shown below. This frontend preview stores domains in the current browser only.',
@@ -1741,6 +1792,12 @@ function ve_render_settings_page(): void
     $html = ve_html_set_select_value($html, 'pop_type', (string) ($settings['pop_type'] ?? '1'));
     $html = ve_html_set_input_value($html, 'pop_url', (string) ($settings['pop_url'] ?? ''));
     $html = ve_html_set_input_value($html, 'pop_cap', (string) ($settings['pop_cap'] ?? 0));
+    $html = preg_replace(
+        '/(<div class="data settings-panel" id="ftp_servers">[\s\S]*?<tbody>)[\s\S]*?(<\/tbody>)/',
+        '$1' . "\n" . ve_render_ftp_servers_rows() . "\n" . '$2',
+        $html,
+        1
+    ) ?? $html;
 
     if ($flash !== null) {
         $flashHtml = '<div class="alert alert-' . ve_h($flash['type']) . ' mb-4">' . ve_h($flash['message']) . '</div>';

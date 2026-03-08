@@ -163,28 +163,48 @@ $(document).ready(function() {
     });
 
     getNotifications();
-    $(document).on('click', '#openNotification', function(e) {
+    $(document).on('click', '.open-notification', function(e) {
         e.preventDefault();
         var subject = $(this).data('subject'),
             message = $(this).data('message'),
             date = $(this).data('date'),
-            id = $(this).data('id');
+            id = $(this).data('id'),
+            isRead = Number($(this).data('read')) === 1;
 
         $('#notifications .modal-content').html('<div class="modal-header">\n' +
-            '                    <h5 class="modal-title" id="notificationsLabel">' + subject + '</h5>\n' +
+            '                    <h5 class="modal-title" id="notificationsLabel">' + escapeHtml(subject) + '</h5>\n' +
             '                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">\n' +
             '                        <span aria-hidden="true">&times;</span>\n' +
             '                    </button>\n' +
             '                </div>\n' +
             '                <div class="modal-body text-dark"><p>\n' +
-            message +
+            escapeHtml(message) +
             '                    </p><small class="d-block font-weight-bold text-muted">\n' +
-            date +
+            escapeHtml(date) +
             '                        </small>\n' +
+            '                </div>\n' +
+            '                <div class="modal-footer justify-content-between">\n' +
+            '                    <button type="button" class="btn btn-outline-danger notification-delete" data-id="' + id + '">\n' +
+            '                        <i class="fad fa-trash-alt mr-2"></i>Delete\n' +
+            '                    </button>\n' +
+            '                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>\n' +
             '                </div>');
         $('#notifications').modal('show');
 
-        getNotifications(id);
+        if (!isRead) {
+            markNotificationRead(id);
+        }
+    });
+
+    $(document).on('click', '.notification-delete', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        deleteNotification($(this).data('id'), true);
+    });
+
+    $(document).on('click', '.notification-clear-all', function(e) {
+        e.preventDefault();
+        clearNotifications();
     });
 
     $(document).on('click', 'a.logout', function(e) {
@@ -201,6 +221,18 @@ function removeTags(value) {
     return value.replace(/(<([^>]+)>)/ig, '');
 }
 
+function escapeHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, function(character) {
+        return {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[character];
+    });
+}
+
 function truncateText(value, limit) {
     if (value.length > limit) {
         value = value.substring(0, limit - 3) + '...';
@@ -209,61 +241,109 @@ function truncateText(value, limit) {
     return value;
 }
 
-function getNotifications(open_msg = '') {
-    $('.dropdown.notifications #notifications .count, .dropdown.notifications .notifications-box .empty').remove();
-    $('.dropdown.notifications .notifications-list').html('');
+function renderNotifications(response) {
+    var items = Array.isArray(response) ? response : [];
+    var totalUnread = items.filter(function(item) {
+        return item.read == 0;
+    }).length;
+    var headerHtml = '<div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span>';
 
-    var url = veAppUrl('/api/notifications');
-    var loadNotifications = function() {
-        $.ajax({
-            type: 'get',
-            url: url,
-            dataType: 'json',
-            success: function(response) {
-                if (response.length > 0) {
-                    $.each(response, function(i) {
-                        var _class;
-                        var _readIcon;
-
-                        if (response[i].read == 0) {
-                            _class = 'position-relative new';
-                            _readIcon = '<i class="fad fa-envelope"></i> Unread';
-                        } else {
-                            _class = 'position-relative';
-                            _readIcon = '<i class="fad fa-envelope-open"></i> Read';
-                        }
-
-                        $('.dropdown.notifications .notifications-list').append('<li class="' + _class + '"><a href="#" id="openNotification" class="description" data-date="' + response[i].cr + '" data-message="' + response[i].message + '" data-subject="' + response[i].subject + '" data-id="' + response[i].id + '"><strong>' + response[i].subject + '</strong><p class="mb-1">' + truncateText(removeTags(response[i].message), 65) + '</p><span><i class="fad fa-clock"></i> ' + response[i].cr + '<i class="d-inline-block mx-2"></i>' + _readIcon + '</span></a></li>');
-                    });
-                } else {
-                    $('.dropdown.notifications .notifications-box').html('<div class="empty p-3 text-center text-muted font-weight-bold">No notifications</div>');
-                }
-
-                var total_unread = response.filter(function(item) {
-                    return item.read == 0;
-                });
-
-                if (total_unread.length > 0) {
-                    $('.dropdown.notifications #notifications').append('<span class="count">' + total_unread.length + '</span>');
-                }
-            }
-        });
-    };
-
-    if (open_msg) {
-        $.ajax({
-            type: 'post',
-            url: veAppUrl('/api/notifications/' + encodeURIComponent(open_msg) + '/read'),
-            dataType: 'json',
-            data: {
-                token: veCsrfToken()
-            },
-            complete: function() {
-                loadNotifications();
-            }
-        });
-        return;
+    if (items.length > 0) {
+        headerHtml += '<button type="button" class="btn btn-link p-0 text-muted notification-clear-all">Clear all</button>';
     }
 
-    loadNotifications();
+    headerHtml += '</div>';
+
+    $('.dropdown.notifications .count').remove();
+
+    $('.dropdown.notifications .notifications-box').each(function() {
+        var boxHtml = headerHtml;
+
+        if (items.length > 0) {
+            var listHtml = '<ul class="notifications-list m-0 p-0">';
+
+            $.each(items, function(i) {
+                var notification = items[i];
+                var itemClass = notification.read == 0 ? 'position-relative new' : 'position-relative';
+                var readIcon = notification.read == 0 ? '<i class="fad fa-envelope"></i> Unread' : '<i class="fad fa-envelope-open"></i> Read';
+
+                listHtml += '<li class="' + itemClass + '"><div class="d-flex align-items-start justify-content-between"><a href="#" class="description open-notification flex-grow-1 mr-3" data-date="' + escapeHtml(notification.cr) + '" data-message="' + escapeHtml(notification.message) + '" data-subject="' + escapeHtml(notification.subject) + '" data-id="' + notification.id + '" data-read="' + notification.read + '"><strong>' + escapeHtml(notification.subject) + '</strong><p class="mb-1">' + escapeHtml(truncateText(removeTags(String(notification.message || '')), 65)) + '</p><span><i class="fad fa-clock"></i> ' + escapeHtml(notification.cr) + '<i class="d-inline-block mx-2"></i>' + readIcon + '</span></a><button type="button" class="btn btn-link text-danger p-0 notification-delete" data-id="' + notification.id + '" aria-label="Delete notification"><i class="fad fa-trash-alt"></i></button></div></li>';
+            });
+
+            listHtml += '</ul>';
+            boxHtml += listHtml;
+        } else {
+            boxHtml += '<div class="empty p-3 text-center text-muted font-weight-bold">No notifications</div>';
+        }
+
+        $(this).html(boxHtml);
+    });
+
+    if (totalUnread > 0) {
+        $('.dropdown.notifications .nav-link.dropdown-toggle').append('<span class="count">' + totalUnread + '</span>');
+    }
+}
+
+function getNotifications() {
+    $.ajax({
+        type: 'get',
+        url: veAppUrl('/api/notifications'),
+        dataType: 'json',
+        success: function(response) {
+            renderNotifications(response);
+        }
+    });
+}
+
+function markNotificationRead(notificationId) {
+    return $.ajax({
+        type: 'post',
+        url: veAppUrl('/api/notifications/' + encodeURIComponent(notificationId) + '/read'),
+        dataType: 'json',
+        data: {
+            token: veCsrfToken()
+        },
+        complete: function() {
+            getNotifications();
+        }
+    });
+}
+
+function deleteNotification(notificationId, closeModal) {
+    return $.ajax({
+        type: 'DELETE',
+        url: veAppUrl('/api/notifications/' + encodeURIComponent(notificationId)),
+        dataType: 'json',
+        data: {
+            token: veCsrfToken()
+        },
+        headers: {
+            'X-CSRF-Token': veCsrfToken()
+        },
+        complete: function() {
+            if (closeModal) {
+                $('#notifications').modal('hide');
+            }
+
+            getNotifications();
+        }
+    });
+}
+
+function clearNotifications() {
+    return $.ajax({
+        type: 'DELETE',
+        url: veAppUrl('/api/notifications'),
+        dataType: 'json',
+        data: {
+            token: veCsrfToken()
+        },
+        headers: {
+            'X-CSRF-Token': veCsrfToken()
+        },
+        complete: function() {
+            $('#notifications').modal('hide');
+            getNotifications();
+        }
+    });
 }

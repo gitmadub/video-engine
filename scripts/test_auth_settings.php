@@ -197,6 +197,9 @@ $env = array_merge($_ENV, [
     'VE_APP_KEY' => 'test-suite-app-key',
     'VE_CUSTOM_DOMAIN_TARGET' => '127.0.0.1',
 ]);
+$expectedDomainTarget = $managedServer
+    ? (string) ($env['VE_CUSTOM_DOMAIN_TARGET'] ?? '')
+    : (string) (getenv('VE_CUSTOM_DOMAIN_TARGET') ?: '');
 $serverPid = null;
 $serverProcess = null;
 
@@ -292,6 +295,10 @@ try {
     $settingsPage = $client->request('GET', '/dashboard/settings');
     assert_true($settingsPage['status'] === 200, 'Authenticated settings page should load.');
     assert_true(str_contains($settingsPage['body'], 'alice@example.com'), 'Settings page should render the current email.');
+    assert_true(str_contains($settingsPage['body'], 'ftp.doodstream.com'), 'Settings page should render FTP servers from the database.');
+    if ($expectedDomainTarget !== '') {
+        assert_true(str_contains($settingsPage['body'], $expectedDomainTarget), 'Settings page should render the configured custom-domain DNS target.');
+    }
     $csrf = extract_hidden_token($settingsPage['body']);
     $oldApiKey = extract_api_key($settingsPage['body']);
 
@@ -409,12 +416,45 @@ try {
     $legacyNotifications = $client->request('GET', '/?op=notifications');
     assert_true($legacyNotifications['status'] === 410, 'Legacy notifications endpoint should be disabled.');
 
+    $notificationId = (int) $notifications[0]['id'];
     $markNotification = json_response($client->request('POST', '/api/notifications/' . (int) $notifications[0]['id'] . '/read', [
         'form' => [
             'token' => $csrf,
         ],
     ]));
     assert_true(($markNotification['status'] ?? null) === 'ok', 'Notification read endpoint should succeed.');
+
+    $notificationsAfterRead = json_response($client->request('GET', '/api/notifications'));
+    $markedNotification = null;
+
+    foreach ($notificationsAfterRead as $notification) {
+        if ((int) ($notification['id'] ?? 0) === $notificationId) {
+            $markedNotification = $notification;
+            break;
+        }
+    }
+
+    assert_true(is_array($markedNotification) && (int) ($markedNotification['read'] ?? 0) === 1, 'Notification should remain marked as read.');
+
+    $deleteNotification = json_response($client->request('DELETE', '/api/notifications/' . $notificationId, [
+        'headers' => [
+            'X-CSRF-Token' => $csrf,
+        ],
+    ]));
+    assert_true(($deleteNotification['status'] ?? null) === 'ok', 'Notification delete endpoint should succeed.');
+
+    $notificationsAfterDelete = json_response($client->request('GET', '/api/notifications'));
+    foreach ($notificationsAfterDelete as $notification) {
+        assert_true((int) ($notification['id'] ?? 0) !== $notificationId, 'Deleted notification should disappear from the list.');
+    }
+
+    $clearNotifications = json_response($client->request('DELETE', '/api/notifications', [
+        'headers' => [
+            'X-CSRF-Token' => $csrf,
+        ],
+    ]));
+    assert_true(($clearNotifications['status'] ?? null) === 'ok', 'Clear-all notifications endpoint should succeed.');
+    assert_true(count(json_response($client->request('GET', '/api/notifications'))) === 0, 'All notifications should be removable.');
 
     $client->request('POST', '/logout', [
         'form' => [

@@ -866,12 +866,22 @@ function ve_dispatch(): void
     }
 
     if ($path === '/api/notifications') {
-        if (!ve_is_method('GET')) {
-            ve_method_not_allowed(['GET']);
+        if (ve_is_method('GET')) {
+            $user = ve_current_user();
+            ve_json(is_array($user) ? ve_fetch_notifications((int) $user['id']) : []);
         }
 
-        $user = ve_current_user();
-        ve_json(is_array($user) ? ve_fetch_notifications((int) $user['id']) : []);
+        if (ve_is_method('DELETE')) {
+            $user = ve_require_auth();
+            ve_require_csrf(ve_request_csrf_token());
+            $deletedCount = ve_clear_notifications((int) $user['id']);
+            ve_json([
+                'status' => 'ok',
+                'message' => $deletedCount > 0 ? 'All notifications deleted.' : 'There were no notifications to delete.',
+            ]);
+        }
+
+        ve_method_not_allowed(['GET', 'DELETE']);
     }
 
     if (preg_match('#^/api/notifications/(\d+)/read$#', $path, $matches) === 1) {
@@ -885,6 +895,20 @@ function ve_dispatch(): void
         ve_json([
             'status' => 'ok',
         ]);
+    }
+
+    if (preg_match('#^/api/notifications/(\d+)$#', $path, $matches) === 1) {
+        if (!ve_is_method('DELETE')) {
+            ve_method_not_allowed(['DELETE']);
+        }
+
+        $user = ve_require_auth();
+        ve_require_csrf(ve_request_csrf_token());
+        $deleted = ve_delete_notification((int) $user['id'], (int) $matches[1]);
+        ve_json([
+            'status' => $deleted ? 'ok' : 'fail',
+            'message' => $deleted ? 'Notification deleted.' : 'Notification not found.',
+        ], $deleted ? 200 : 404);
     }
 
     if ($path === '/api/domains') {
