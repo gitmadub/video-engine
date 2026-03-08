@@ -36,8 +36,8 @@ function verify_route(string $path): array
                 'has_iframe' => str_contains((string) $output, '<iframe src="https://myvidplay.com/e/vvr9qyou7zyi"'),
                 'has_download_url' => str_contains((string) $output, 'https://myvidplay.com/download/623g0tbgd6jj4c4f1az7e8or/o/250726470-23-234-1772986664-515867180bbecaf238d58b8b6c36f5c4'),
                 'has_local_embed_url' => str_contains((string) $output, 'http://127.0.0.1:8765/e/vvr9qyou7zyi'),
-                'has_local_assets' => in_array('/assets/theme/css/style.min.css', $assets, true)
-                    && in_array('/assets/theme/css/bootstrap.min.css', $assets, true),
+                'has_local_assets' => in_array('/assets/css/style.min.css', $assets, true)
+                    && in_array('/assets/css/bootstrap.min.css', $assets, true),
             ];
             $payload['assets'] = $assets;
         } else {

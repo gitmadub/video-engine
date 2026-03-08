@@ -187,8 +187,8 @@ function ve_rewrite_html_paths(string $html): string
         "href='../index.html'" => "href='" . ve_url('/') . "'",
         'action="../index.html"' => 'action="' . ve_url('/') . '"',
         "action='../index.html'" => "action='" . ve_url('/') . "'",
-        'src="/assets/site/js/dood_load.js"' => 'src="' . ve_url('/assets/site/js/dood_load.js') . '"',
-        "src='/assets/site/js/dood_load.js'" => "src='" . ve_url('/assets/site/js/dood_load.js') . "'",
+        'src="/assets/js/dood_load.js"' => 'src="' . ve_url('/assets/js/dood_load.js') . '"',
+        "src='/assets/js/dood_load.js'" => "src='" . ve_url('/assets/js/dood_load.js') . "'",
         'href="/"' => 'href="' . ve_url('/') . '"',
         "href='/'" => "href='" . ve_url('/') . "'",
         'action="/"' => 'action="' . ve_url('/') . '"',
@@ -336,10 +336,10 @@ function ve_render_player_page(string $slug): void
     $safeEmbedUrl = ve_h($embedUrl);
     $downloadPageUrl = ve_h(ve_absolute_url('/d/' . rawurlencode($slug)));
     $localEmbedUrl = ve_h(ve_absolute_url('/e/' . rawurlencode($slug)));
-    $jqueryUrl = ve_h(ve_url('/assets/cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js'));
-    $bootstrapCssUrl = ve_h(ve_url('/assets/theme/css/bootstrap.min.css'));
-    $styleCssUrl = ve_h(ve_url('/assets/theme/css/style.min.css'));
-    $bootstrapJsUrl = ve_h(ve_url('/assets/cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js'));
+    $jqueryUrl = ve_h('https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js');
+    $bootstrapCssUrl = ve_h(ve_url('/assets/css/bootstrap.min.css'));
+    $styleCssUrl = ve_h(ve_url('/assets/css/style.min.css'));
+    $bootstrapJsUrl = ve_h('https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js');
     $ownFileBanner = '';
 
     if ($ownFile) {
@@ -640,7 +640,7 @@ HTML;
 function ve_payment_page(string $title): string
 {
     $backUrl = ve_url('/dashboard/premium-plans');
-    $bootstrapUrl = ve_url('/assets/theme/css/bootstrap.min.css');
+    $bootstrapUrl = ve_url('/assets/css/bootstrap.min.css');
 
     return <<<HTML
 <!doctype html>

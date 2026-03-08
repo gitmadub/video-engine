@@ -1,1 +1,1011 @@
-<!doctype html><html lang="en"><head> <meta charset="utf-8"> <title>Settings - DoodStream</title> <link rel="preconnect" href="//cdnjs.cloudflare.com"> <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"> <link rel="stylesheet" href="/assets/theme/css/bootstrap.min.css"> <meta name="description" content="DoodStream - Free file upload service"> <meta name="keywords" content="file upload,share files,free upload"> <script src="/assets/cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script> <link rel="stylesheet" type="text/css" href="/assets/cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/css/iziToast.min.css"> <link rel="stylesheet" type="text/css" href="/assets/theme/css/panel.min__q_e2207d238712.css" /> </head><body><div class="modal fade" id="notifications" tabindex="-1" role="dialog" aria-labelledby="notificationsLabel" aria-hidden="true"> <div class="modal-dialog" role="document"> <div class="modal-content"> </div> </div></div><nav class="navbar navbar-expand-lg main-menu"> <div class="container-fluid"> <a href="/" class="navbar-brand"> <img src="/assets/theme/img/logo-s.png" height="30" alt="" class="d-inline-block align-top"> </a> <ul class="notifications-mobile d-block d-sm-none m-0 p-0 ml-auto"> <li class="nav-item dropdown notifications"> <a href="#" id="notifications" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle"> <i class="fad fa-bell"></i> </a> <div aria-labelledby="notifications" class="dropdown-menu dropdown-menu-right notifications-box"> <div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div> <ul class="notifications-list m-0 p-0"></ul> </div> </li> </ul> <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation"> <i class="fad fa-bars"></i> </button> <ul class="navbar-nav px-3 ml-auto d-none d-sm-flex"><!-- <div onclick="window.open('/earn-money', '_blank');" style="cursor:pointer;border-radius:7px;padding:10px;background:linear-gradient(312deg, rgb(234 109 2) 0%, rgba(249,150,1,1) 100%);color:white;font-weight:600;font-size:14px;text-shadow: 2px 1px 2px #e96e03;"> Double Rates until 00:00 UTC, 08 January 2024 </div> --> <li class="nav-item dropdown notifications"> <a href="#" id="notifications" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle"> <i class="fad fa-bell"></i> </a> <div aria-labelledby="notifications" class="dropdown-menu dropdown-menu-right notifications-box"> <div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div> <ul class="notifications-list m-0 p-0"></ul> </div> </li> <li class="nav-item dropdown"> <a href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle"> <i class="fad fa-user-circle"></i> videoengine <span class="far fa-chevron-down arrow"></span> </a> <div aria-labelledby="navbarDropdown" class="dropdown-menu dropdown-menu-right"> <a href="/dmca-manager" class="dropdown-item"><i class="fad fa-folder-times"></i>DMCA Manager</a> <a href="/api-docs" class="dropdown-item"><i class="fad fa-brackets-curly"></i>API</a> <a href="/referrals" class="dropdown-item"><i class="fad fa-solar-system"></i>Refferal</a> <a href="/settings" class="dropdown-item"><i class="fad fa-cog"></i>Settings</a> <div class="dropdown-divider"></div> <a href="/?op=logout" class="dropdown-item logout"><i class="fad fa-power-off text-danger"></i>Logout</a> </div> </li> </ul> </div></nav><nav class="sidebar collapse" id="menu"> <button class="navbar-toggler d-block d-sm-none" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation"> <i class="fad fa-times"></i> </button> <div class="container-fluid"> <ul class="nav justify-content-center"> <li class="nav-item"> <a href="/dashboard" class="nav-link"><i class="fad fa-shapes"></i></i>Dashboard</a> </li> <li class="nav-item"> <a href="/remote-upload" class="nav-link"><i class="fad fa-globe"></i>Remote Upload</a> </li> <li class="nav-item"> <a href="/videos" class="nav-link"><i class="fad fa-camera-movie"></i>Videos</a> </li> <li class="nav-item"> <a href="/reports" class="nav-link"><i class="fad fa-chart-line"></i>Reports</a> </li> <li class="nav-item"> <a href="/premium-plans" class="nav-link"><i class="fad fa-gem"></i>Premium</a> </li> <li class="nav-item d-block d-sm-none"><a href="/dmca-manager" class="nav-link"><i class="fad fa-folder-times"></i>DMCA Manager</a></li> <li class="nav-item d-block d-sm-none"><a href="/api-docs" class="nav-link"><i class="fad fa-brackets-curly"></i>API</a></li> <li class="nav-item d-block d-sm-none"><a href="/referrals" class="nav-link"><i class="fad fa-solar-system"></i>Refferal</a></li> <li class="nav-item d-block d-sm-none"><a href="/settings" class="nav-link"><i class="fad fa-cog"></i>Settings</a></li> <li class="nav-item d-block d-sm-none"><a href="/?op=logout" class="nav-link"><i class="fad fa-power-off text-danger"></i>Logout</a></li> </ul> </div></nav><div class="container-fluid pt-3 pt-sm-5 mt-sm-5"> <div class="d-flex widget_area justify-content-between flex-wrap"> <div class="widget_box d-flex justify-content-between flex-wrap align-items-center"> <div class="info"> <span class="money d-block"> $0 </span> <span class="d-block"> Account balance </span> <a href="/request-payout"> Request payout <i class="fad fa-arrow-to-right"></i> </a> </div> <div class="icon"> <i class="fad fa-sack-dollar"></i> </div> </div> <div class="widget_box d-flex justify-content-between flex-wrap align-items-center"> <div class="info"> <span class="money d-block"> Unlimited </span> <span class="d-block"> Availabe Storage </span> <a href="/premium"> Get more <i class="fad fa-arrow-to-right"></i> </a> </div> <div class="icon"> <i class="fad fa-server"></i> </div> </div> <div class="widget_box d-flex justify-content-between flex-wrap align-items-center"> <div class="info"> <span class="money d-block"> 0 </span> <span class="d-block"> Total videos </span> <a href="/videos"> Manage <i class="fad fa-arrow-to-right"></i> </a> </div> <div class="icon"> <i class="fad fa-copy"></i> </div> </div> <div class="widget_box d-flex justify-content-between flex-wrap align-items-center"> <div class="info"> <span class="money d-block"> 0 </span> <span class="d-block"> Referrals </span> <a href="/referrals"> Check them <i class="fad fa-arrow-to-right"></i> </a> </div> <div class="icon"> <i class="fad fa-users"></i> </div> </div> </div> <div class="d-flex justify-content-between flex-wrap the_box mb-4"> <div class="sidebar settings-page"> <div class="status-block d-flex align-items-center mb-4"> <i class="fad fa-frown-open"></i> <div class="info ml-3"> <h4 class="m-0">Free account</h4> <a href="/premium"> Upgrade <i class="fad fa-arrow-to-right"></i> </a> </div> </div> <!-- <form method="POST"> <input type="hidden" name="op" value="my_account"> <input type="hidden" name="token" value="d2962e12ae5c8dd99e407a98bd38d3b5"> <div class="add-key d-flex align-items-center flex-wrap"> <input type="text" name="premium_key" value="" class="form-control" placeholder="Premium key here ..."> <button class="btn btn-primary btn-block" type="submit" name="premium_key_apply" value=""> <i class="fad fa-arrow-to-right"></i> </button> </div> </form> --> <hr> <div class="menu settings_menu"> <ul class="p-0 m-0 mb-4"> <li> <a href="#details" class="d-flex flex-wrap align-items-center active"> <i class="fad fa-user"></i> <span>Account details</span> </a> </li> <li> <a href="#password_settings" data-url="/?op=my_password" data-ajax="true" class="d-flex flex-wrap align-items-center"> <i class="fad fa-lock"></i> <span>Change password</span> </a> </li> <li> <a href="#email_settings" data-url="/?op=my_email" data-ajax="true" class="d-flex flex-wrap align-items-center"> <i class="fad fa-envelope"></i> <span>Change email</span> </a> </li> <li> <a href="#player_settings" data-url="/?op=upload_logo" data-ajax="true" class="d-flex flex-wrap align-items-center"> <i class="fad fa-video"></i> <span>Player settings</span> </a> </li> <li> <a href="#premium_settings" data-url="/?op=premium_settings" data-ajax="true" class="d-flex flex-wrap align-items-center"> <i class="fad fa-sparkles"></i> <span>Own adverts</span> </a> </li> <li> <a href="#ftp_servers" class="d-flex flex-wrap align-items-center"> <i class="fad fa-network-wired"></i> <span>FTP servers</span> </a> </li> </ul> </div> <hr> <div class="form-group"> <label>API key</label> <div class="add-key d-flex align-items-center flex-wrap"> <input type="text" onClick="this.select();" value="559348grlz3u7np0z0hccb" readonly class="form-control"> <button class="btn btn-primary btn-block regenerate-key" > <i class="fad fa-redo"></i> </button> </div> </div> </div> <div class="details settings_data"> <div class="data active" id="details"> <form method="POST"> <input type="hidden" name="op" value="my_account"> <input type="hidden" name="token" value="d2962e12ae5c8dd99e407a98bd38d3b5"> <div class="form-group row"> <div class="col-md-6"> <label>Payment method</label> <div class="sel-per-page w-100"> <select name="usr_pay_type" class="form-control" > <option value="Webmoney">Webmoney</option> <option value="Payeer">Payeer</option> <option value="Capitalist">Capitalist</option> <option value="AdvCash">AdvCash</option> <option value="PerfectMoney">PerfectMoney</option> <option value="Bitcoin">Bitcoin</option> <option value="Ethereum">Ethereum</option> <option value="Bitcoin Cash">Bitcoin Cash</option> <option value="Litecoin">Litecoin</option> <option value="USDT TRC20">USDT TRC20</option> </select> </div> </div> <div class="col-md-6"> <label>Payment ID</label> <input type="text" name="usr_pay_email" value="" class="form-control" placeholder="E-mail / payment address"> </div> </div> <div class="form-group row"> <div class="col-md-6"> <label>Player ads mode <i class="badge badge-danger">NEW</i></label> <div class="sel-per-page w-100"> <select name="dood_ads_mode" class="form-control"> <option value="" selected>Max ads - 100% earnings (pops + Native Notification)</option> <option value="4" >Full ads - 75% earnings</option> <option value="3" >Medium ads - 50% earnings</option> <option value="2" >Little ads - 25% earnings</option> <option value="1" >Low ads - 0% earnings</option> </select> </div> </div> <div class="col-md-6"> <label>Uploader type <small>(Helps for better earnings, based on this ads will be displayed)</small></label> <div class="sel-per-page w-100"> <select name="usr_content_type" class="form-control"> <option value="0" selected>Select uploader type</option> <option value="1" >Non adult</option> <option value="2" >Adult (18+)</option> <option value="3" >Both adult & non adult</option> </select> </div> </div> </div> <div class="form-group row"> </div> <div class="form-group row"> <div class="col-md-12"> <label>Allowed embed domains <small>(Comma seperated)</small></label> <input type="text" name="embed_domain_allowed" value="" class="form-control" placeholder="ex: example.com"> </div> </div> <div class="mt-4"></div> <hr> <div class="form-group row mt-4"> <div class="col-md-4"> <label class="d-block">Block direct access</label> <div class="custom-control custom-checkbox m-0"> <input type="checkbox" class="custom-control-input" name="usr_embed_access_only" id="usr_embed_access_only" value="1" id="usr_embed_access_only"> <label class="custom-control-label" for="usr_embed_access_only"><span>Allow embeds only</span></label> <br><small style="margin-left:-25px"><i class="fad fa-info-circle mr-1" style="color:#f90;"></i> May show file not found if you open the direct link</small> </div> </div> <div class="col-md-4"> <label class="d-block">Hide download button</label> <div class="custom-control custom-checkbox m-0"> <input type="checkbox" class="custom-control-input" id="usr_disable_download" name="usr_disable_download" value="1" > <label class="custom-control-label" for="usr_disable_download"><span>Hide</span></label> </div> </div> <div class="col-md-4"> <label class="d-block">Force to disable ADB <i class="text-danger">(Recomended)</i></label> <div class="custom-control custom-checkbox m-0"> <input type="checkbox" class="custom-control-input" id="usr_disable_adb" name="usr_disable_adb" value="1" > <label class="custom-control-label" for="usr_disable_adb"><span>Yes</span></label> </div> </div> </div> <div class="form-group row"> <div class="col-md-4"> <label class="d-block">Extract subtitles from .mkv videos</label> <div class="custom-control custom-checkbox m-0"> <input type="checkbox" class="custom-control-input" id="usr_srt_burn" name="usr_srt_burn" value="1" > <label class="custom-control-label" for="usr_srt_burn"><span>Enable</span></label> </div> </div> </div> <div class="col-md-12 text-right"> <button type="submit" name="settings_save" value="Save Settings" class="btn btn-primary"> Save Settings <i class="fad fa-check ml-2"></i> </button> </div> </form> <p style="color: #7f7f7f;float: right;margin-top: 30px;">Some settings could take few mins to get updated.</p> </div> <div class="data" id="email_settings"></div> <div class="data" id="password_settings"></div> <div class="data" id="player_settings"></div> <div class="data" id="premium_settings"></div><style type="text/css">.ftp-login{ padding: 25px 20px 0px 20px; border: 1px solid #434645; height: 230px; border-radius: 4px;}.country{ height: 20px; margin-right: 7px; display: inline-block;}</style> <div class="data" id="ftp_servers"> <div class="container" style="margin-top: 30px;"> <div class="row"> <div class="col-4 ftp-login"> <div class="form-group"> <label>FTP Login Details</label> </div> <div class="form-group position-relative"> <i class="fad fa-user position-absolute"></i> <input type="text" onClick="this.select();" value="videoengine" readonly class="form-control pl-5"> </div> <div class="form-group position-relative"> <i class="fad fa-lock position-absolute"></i> <input type="text" onClick="this.select();" value="8wmdu9ngch" readonly class="form-control pl-5"> </div> </div> <div class="col-8"> <div style="padding:0px;background:#434645;border-radius:3px;margin-bottom:30px;width:100%;text-align:;"> <table class="table is-fullwidth"> <thead> <tr> <th>Status</th> <th>FTP Server</th> <th>Location</th> </tr> </thead> <tbody> <tr> <td><i class="fad fa-circle" style="color:#019001;"></i></td> <td>ftp.doodstream.com</td> <td><img src="/assets/theme/img/flags/WW.svg" class="country">Global</td> </tr> <tr> <td><i class="fad fa-circle" style="color:#019001;"></i></td> <td>ftp-uk-eri-1.doodstream.com</td> <td><img src="/assets/theme/img/flags/UK.svg" class="country">United Kingdom (Erith)</td> </tr> <tr> <td><i class="fad fa-circle" style="color:#019001;"></i></td> <td>ftp-fr-sbg-1.doodstream.com</td> <td><img src="/assets/theme/img/flags/FR.svg" class="country">France (Strasbourg)</td> </tr> <tr> <td><i class="fad fa-circle" style="color:#019001;"></i></td> <td>ftp-fr-gra-1.doodstream.com</td> <td><img src="/assets/theme/img/flags/FR.svg" class="country">France (Gravelines)</td> </tr> <tr> <td><i class="fad fa-circle" style="color:#019001;"></i></td> <td>ftp-fr-rbx-1.doodstream.com</td> <td><img src="/assets/theme/img/flags/FR.svg" class="country">France (Roubaix)</td> </tr> <tr> <td><i class="fad fa-circle" style="color:#019001;"></i></td> <td>ftp-pol-waw-1.doodstream.com</td> <td><img src="/assets/theme/img/flags/PL.svg" class="country">Poland (Warsaw)</td> </tr> </tbody> </table> </div> </div> </div> </div> </div> </div> </div> <script type="text/javascript"> $(document).ready(function() { $( ".player_image" ).val( "" ); $('.regenerate-key').click(function(e){ if (confirm("Are you sure want to regenerate API key.?")){ window.location.href = "/genrate-api/&amp;token=d2962e12ae5c8dd99e407a98bd38d3b5"; }else{ e.preventDefault(); } }); }); </script></div><footer class="footer mt-4"> <div class="container"> <div class="row"> <div class="col-md-2"> <img class="logo" src="/assets/theme/img/logo-s.png"> </div> <div class="col-md-10 text-right"> <ul class="menu m-0 p-0 d-flex align-items-center justify-content-center justify-content-sm-end flex-wrap"> <li> <a href="/">Home</a> </li> <li> <a href="/copyright">Copyright policy</a> </li> <li> <a href="/terms-and-conditions">Terms & conditions</a> </li> <li> <a target="_blank" href="https://help.doodstream.com/">Help center</a> </li> <li> <a href="/contact">Contact Us</a> </li> </ul> </div> </div> </div></footer> <script src="/assets/cdnjs.cloudflare.com/ajax/libs/popper.js/1.15.0/umd/popper.min.js" type="text/javascript"></script> <script src="/assets/cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js" type="text/javascript"></script> <script src="/assets/theme/js/main__q_8bb33b25bfc8.js" type="text/javascript"></script> <script src="/assets/cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js" type="text/javascript"></script> <script type="text/javascript">window.$crisp=[];window.CRISP_WEBSITE_ID="a048e736-b92c-49a8-b2b2-970b429ff6d3";(function(){d=document;s=d.createElement("script");s.src="/assets/client.crisp.chat/l.js";s.async=1;d.getElementsByTagName("head")[0].appendChild(s);})();$crisp.push(["set", "user:email", "lzcoeyhl@telegmail.com"],["set", "user:nickname", "videoengine"],["set", "session:data", [[["UserID", "559348"],["Info", "https://doodstream.co/open-user/559348"]]]]);</script><script src="/assets/site/js/dood_load.js" type="module" defer></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Settings - DoodStream</title>
+    <link rel="preconnect" href="//cdnjs.cloudflare.com">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="stylesheet" href="/assets/css/bootstrap.min.css">
+    <meta name="description" content="DoodStream - Free file upload service">
+    <meta name="keywords" content="file upload,share files,free upload">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/css/iziToast.min.css">
+    <link rel="stylesheet" type="text/css" href="/assets/css/panel.min__q_e2207d238712.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jscolor/2.0.4/jscolor.min.js"></script>
+    <style type="text/css">
+        .settings-panel {
+            padding-right: 10px;
+        }
+
+        .settings-panel-title {
+            font-size: 1.2857142857rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .settings-panel-subtitle {
+            color: #7f7f7f;
+            margin-bottom: 24px;
+        }
+
+        .settings-note {
+            color: #7f7f7f;
+            float: right;
+            margin-top: 30px;
+        }
+
+        .settings-table-wrap {
+            padding: 0;
+            background: #434645;
+            border-radius: 3px;
+            margin-bottom: 30px;
+        }
+
+        .settings-table-wrap .table {
+            margin-bottom: 0;
+        }
+
+        .settings-table-wrap .table > tbody > tr:first-child > td {
+            border-top: 0;
+        }
+
+        .ftp-login {
+            padding: 25px 20px 0 20px;
+            border: 1px solid #434645;
+            height: 230px;
+            border-radius: 4px;
+        }
+
+        .country {
+            height: 20px;
+            margin-right: 7px;
+            display: inline-block;
+        }
+
+        .settings-inline-feedback {
+            min-height: 24px;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
+        .domain-list-table td p {
+            margin: 6px 0 0;
+            color: #7f7f7f;
+            font-size: 0.8571428571rem;
+        }
+
+        .dns-config pre {
+            margin-top: 12px;
+            margin-bottom: 0;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="modal fade" id="notifications" tabindex="-1" role="dialog" aria-labelledby="notificationsLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content"></div>
+        </div>
+    </div>
+
+    <nav class="navbar navbar-expand-lg main-menu">
+        <div class="container-fluid">
+            <a href="/" class="navbar-brand">
+                <img src="/assets/img/logo-s.png" height="30" alt="" class="d-inline-block align-top">
+            </a>
+
+            <ul class="notifications-mobile d-block d-sm-none m-0 p-0 ml-auto">
+                <li class="nav-item dropdown notifications">
+                    <a href="#" id="notifications-mobile-toggle" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+                        <i class="fad fa-bell"></i>
+                    </a>
+                    <div aria-labelledby="notifications-mobile-toggle" class="dropdown-menu dropdown-menu-right notifications-box">
+                        <div class="title d-flex flex-wrap align-items-center justify-content-between">
+                            <span>Notifications</span>
+                        </div>
+                        <ul class="notifications-list m-0 p-0"></ul>
+                    </div>
+                </li>
+            </ul>
+
+            <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation">
+                <i class="fad fa-bars"></i>
+            </button>
+
+            <ul class="navbar-nav px-3 ml-auto d-none d-sm-flex">
+                <li class="nav-item dropdown notifications">
+                    <a href="#" id="notifications-desktop-toggle" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+                        <i class="fad fa-bell"></i>
+                    </a>
+                    <div aria-labelledby="notifications-desktop-toggle" class="dropdown-menu dropdown-menu-right notifications-box">
+                        <div class="title d-flex flex-wrap align-items-center justify-content-between">
+                            <span>Notifications</span>
+                        </div>
+                        <ul class="notifications-list m-0 p-0"></ul>
+                    </div>
+                </li>
+
+                <li class="nav-item dropdown">
+                    <a href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+                        <i class="fad fa-user-circle"></i> videoengine <span class="far fa-chevron-down arrow"></span>
+                    </a>
+                    <div aria-labelledby="navbarDropdown" class="dropdown-menu dropdown-menu-right">
+                        <a href="/dmca-manager" class="dropdown-item"><i class="fad fa-folder-times"></i>DMCA Manager</a>
+                        <a href="/api-docs" class="dropdown-item"><i class="fad fa-brackets-curly"></i>API</a>
+                        <a href="/referrals" class="dropdown-item"><i class="fad fa-solar-system"></i>Refferal</a>
+                        <a href="/settings" class="dropdown-item"><i class="fad fa-cog"></i>Settings</a>
+                        <div class="dropdown-divider"></div>
+                        <a href="/?op=logout" class="dropdown-item logout"><i class="fad fa-power-off text-danger"></i>Logout</a>
+                    </div>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <nav class="sidebar collapse" id="menu">
+        <button class="navbar-toggler d-block d-sm-none" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation">
+            <i class="fad fa-times"></i>
+        </button>
+        <div class="container-fluid">
+            <ul class="nav justify-content-center">
+                <li class="nav-item">
+                    <a href="/dashboard" class="nav-link"><i class="fad fa-shapes"></i>Dashboard</a>
+                </li>
+                <li class="nav-item">
+                    <a href="/remote-upload" class="nav-link"><i class="fad fa-globe"></i>Remote Upload</a>
+                </li>
+                <li class="nav-item">
+                    <a href="/videos" class="nav-link"><i class="fad fa-camera-movie"></i>Videos</a>
+                </li>
+                <li class="nav-item">
+                    <a href="/reports" class="nav-link"><i class="fad fa-chart-line"></i>Reports</a>
+                </li>
+                <li class="nav-item">
+                    <a href="/premium-plans" class="nav-link"><i class="fad fa-gem"></i>Premium</a>
+                </li>
+                <li class="nav-item d-block d-sm-none">
+                    <a href="/dmca-manager" class="nav-link"><i class="fad fa-folder-times"></i>DMCA Manager</a>
+                </li>
+                <li class="nav-item d-block d-sm-none">
+                    <a href="/api-docs" class="nav-link"><i class="fad fa-brackets-curly"></i>API</a>
+                </li>
+                <li class="nav-item d-block d-sm-none">
+                    <a href="/referrals" class="nav-link"><i class="fad fa-solar-system"></i>Refferal</a>
+                </li>
+                <li class="nav-item d-block d-sm-none">
+                    <a href="/settings" class="nav-link"><i class="fad fa-cog"></i>Settings</a>
+                </li>
+                <li class="nav-item d-block d-sm-none">
+                    <a href="/?op=logout" class="nav-link"><i class="fad fa-power-off text-danger"></i>Logout</a>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container-fluid pt-3 pt-sm-5 mt-sm-5">
+        <div class="d-flex widget_area justify-content-between flex-wrap">
+            <div class="widget_box d-flex justify-content-between flex-wrap align-items-center">
+                <div class="info">
+                    <span class="money d-block">$0</span>
+                    <span class="d-block">Account balance</span>
+                    <a href="/request-payout">Request payout <i class="fad fa-arrow-to-right"></i></a>
+                </div>
+                <div class="icon">
+                    <i class="fad fa-sack-dollar"></i>
+                </div>
+            </div>
+
+            <div class="widget_box d-flex justify-content-between flex-wrap align-items-center">
+                <div class="info">
+                    <span class="money d-block">Unlimited</span>
+                    <span class="d-block">Availabe Storage</span>
+                    <a href="/premium">Get more <i class="fad fa-arrow-to-right"></i></a>
+                </div>
+                <div class="icon">
+                    <i class="fad fa-server"></i>
+                </div>
+            </div>
+
+            <div class="widget_box d-flex justify-content-between flex-wrap align-items-center">
+                <div class="info">
+                    <span class="money d-block">0</span>
+                    <span class="d-block">Total videos</span>
+                    <a href="/videos">Manage <i class="fad fa-arrow-to-right"></i></a>
+                </div>
+                <div class="icon">
+                    <i class="fad fa-copy"></i>
+                </div>
+            </div>
+
+            <div class="widget_box d-flex justify-content-between flex-wrap align-items-center">
+                <div class="info">
+                    <span class="money d-block">0</span>
+                    <span class="d-block">Referrals</span>
+                    <a href="/referrals">Check them <i class="fad fa-arrow-to-right"></i></a>
+                </div>
+                <div class="icon">
+                    <i class="fad fa-users"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between flex-wrap the_box mb-4">
+            <div class="sidebar settings-page">
+                <div class="status-block d-flex align-items-center mb-4">
+                    <i class="fad fa-frown-open"></i>
+                    <div class="info ml-3">
+                        <h4 class="m-0">Free account</h4>
+                        <a href="/premium">Upgrade <i class="fad fa-arrow-to-right"></i></a>
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="menu settings_menu">
+                    <ul class="p-0 m-0 mb-4">
+                        <li>
+                            <a href="#details" class="d-flex flex-wrap align-items-center active">
+                                <i class="fad fa-user"></i>
+                                <span>Account details</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#password_settings" class="d-flex flex-wrap align-items-center">
+                                <i class="fad fa-lock"></i>
+                                <span>Change password</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#email_settings" class="d-flex flex-wrap align-items-center">
+                                <i class="fad fa-envelope"></i>
+                                <span>Change email</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#player_settings" class="d-flex flex-wrap align-items-center">
+                                <i class="fad fa-video"></i>
+                                <span>Player settings</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#premium_settings" class="d-flex flex-wrap align-items-center">
+                                <i class="fad fa-sparkles"></i>
+                                <span>Own adverts</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#ftp_servers" class="d-flex flex-wrap align-items-center">
+                                <i class="fad fa-network-wired"></i>
+                                <span>FTP servers</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#custom_domain" class="d-flex flex-wrap align-items-center">
+                                <i class="fad fa-globe"></i>
+                                <span>Custom Domain</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#delete_account" class="d-flex flex-wrap align-items-center">
+                                <i class="fad fa-trash-alt"></i>
+                                <span>Delete Account</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+                <hr>
+
+                <div class="form-group">
+                    <label>API key</label>
+                    <div class="add-key d-flex align-items-center flex-wrap">
+                        <input type="text" onclick="this.select();" value="559348grlz3u7np0z0hccb" readonly class="form-control">
+                        <button class="btn btn-primary btn-block regenerate-key">
+                            <i class="fad fa-redo"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="details settings_data">
+                <div class="data active settings-panel" id="details">
+                    <div class="settings-panel-title">Account details</div>
+                    <p class="settings-panel-subtitle">Configure payout, player monetization, embed permissions, and playback defaults for your account.</p>
+
+                    <form method="POST">
+                        <input type="hidden" name="op" value="my_account">
+                        <input type="hidden" name="token" value="d2962e12ae5c8dd99e407a98bd38d3b5">
+
+                        <div class="form-group row">
+                            <div class="col-md-6">
+                                <label>Payment method</label>
+                                <div class="sel-per-page w-100">
+                                    <select name="usr_pay_type" class="form-control">
+                                        <option value="Webmoney">Webmoney</option>
+                                        <option value="Payeer">Payeer</option>
+                                        <option value="Capitalist">Capitalist</option>
+                                        <option value="AdvCash">AdvCash</option>
+                                        <option value="PerfectMoney">PerfectMoney</option>
+                                        <option value="Bitcoin">Bitcoin</option>
+                                        <option value="Ethereum">Ethereum</option>
+                                        <option value="Bitcoin Cash">Bitcoin Cash</option>
+                                        <option value="Litecoin">Litecoin</option>
+                                        <option value="USDT TRC20">USDT TRC20</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label>Payment ID</label>
+                                <input type="text" name="usr_pay_email" value="" class="form-control" placeholder="E-mail / payment address">
+                            </div>
+                        </div>
+
+                        <div class="form-group row">
+                            <div class="col-md-6">
+                                <label>Player ads mode <i class="badge badge-danger">NEW</i></label>
+                                <div class="sel-per-page w-100">
+                                    <select name="dood_ads_mode" class="form-control">
+                                        <option value="" selected>Max ads - 100% earnings (pops + Native Notification)</option>
+                                        <option value="4">Full ads - 75% earnings</option>
+                                        <option value="3">Medium ads - 50% earnings</option>
+                                        <option value="2">Little ads - 25% earnings</option>
+                                        <option value="1">Low ads - 0% earnings</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label>Uploader type <small>(Helps for better earnings, based on this ads will be displayed)</small></label>
+                                <div class="sel-per-page w-100">
+                                    <select name="usr_content_type" class="form-control">
+                                        <option value="0" selected>Select uploader type</option>
+                                        <option value="1">Non adult</option>
+                                        <option value="2">Adult (18+)</option>
+                                        <option value="3">Both adult &amp; non adult</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group row">
+                            <div class="col-md-12">
+                                <label>Allowed embed domains <small>(Comma seperated)</small></label>
+                                <input type="text" name="embed_domain_allowed" value="" class="form-control" placeholder="ex: example.com">
+                            </div>
+                        </div>
+
+                        <div class="mt-4"></div>
+                        <hr>
+
+                        <div class="form-group row mt-4">
+                            <div class="col-md-4">
+                                <label class="d-block">Block direct access</label>
+                                <div class="custom-control custom-checkbox m-0">
+                                    <input type="checkbox" class="custom-control-input" name="usr_embed_access_only" id="usr_embed_access_only" value="1">
+                                    <label class="custom-control-label" for="usr_embed_access_only"><span>Allow embeds only</span></label>
+                                    <br>
+                                    <small style="margin-left:-25px"><i class="fad fa-info-circle mr-1" style="color:#f90;"></i> May show file not found if you open the direct link</small>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label class="d-block">Hide download button</label>
+                                <div class="custom-control custom-checkbox m-0">
+                                    <input type="checkbox" class="custom-control-input" id="usr_disable_download" name="usr_disable_download" value="1">
+                                    <label class="custom-control-label" for="usr_disable_download"><span>Hide</span></label>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label class="d-block">Force to disable ADB <i class="text-danger">(Recomended)</i></label>
+                                <div class="custom-control custom-checkbox m-0">
+                                    <input type="checkbox" class="custom-control-input" id="usr_disable_adb" name="usr_disable_adb" value="1">
+                                    <label class="custom-control-label" for="usr_disable_adb"><span>Yes</span></label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group row">
+                            <div class="col-md-4">
+                                <label class="d-block">Extract subtitles from .mkv videos</label>
+                                <div class="custom-control custom-checkbox m-0">
+                                    <input type="checkbox" class="custom-control-input" id="usr_srt_burn" name="usr_srt_burn" value="1">
+                                    <label class="custom-control-label" for="usr_srt_burn"><span>Enable</span></label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-12 text-right px-0">
+                            <button type="submit" name="settings_save" value="Save Settings" class="btn btn-primary">
+                                Save Settings <i class="fad fa-check ml-2"></i>
+                            </button>
+                        </div>
+                    </form>
+
+                    <p class="settings-note">Some settings could take few mins to get updated.</p>
+                </div>
+
+                <div class="data settings-panel" id="password_settings">
+                    <div class="settings-panel-title">Change password</div>
+                    <p class="settings-panel-subtitle">Update your login credentials for the dashboard account.</p>
+
+                    <form method="POST">
+                        <input type="hidden" name="op" value="my_password">
+                        <input type="hidden" name="token" value="8fad7266f3dfc503ae5cfce49aecd469">
+
+                        <div class="form-group">
+                            <label>Current password</label>
+                            <input type="password" name="password_current" class="form-control">
+                        </div>
+
+                        <div class="form-group">
+                            <label>New password</label>
+                            <input type="password" name="password_new" class="form-control">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Confirm new password</label>
+                            <input type="password" name="password_new2" class="form-control">
+                        </div>
+
+                        <div class="mt-2 text-right">
+                            <button type="submit" name="change" value="Change password" class="btn btn-primary">
+                                Update Password <i class="fad fa-check ml-2"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="data settings-panel" id="email_settings">
+                    <div class="settings-panel-title">Change email</div>
+                    <p class="settings-panel-subtitle">Replace the current dashboard email address used for account communication.</p>
+
+                    <form method="POST">
+                        <input type="hidden" name="op" value="my_email">
+                        <input type="hidden" name="token" value="8fad7266f3dfc503ae5cfce49aecd469">
+
+                        <p class="mb-4">Current email: <b>lzcoeyhl@telegmail.com</b></p>
+
+                        <div class="form-group">
+                            <label>New email</label>
+                            <input type="text" name="usr_email" class="form-control">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Retype new email</label>
+                            <input type="text" name="usr_email2" class="form-control">
+                        </div>
+
+                        <div class="mt-2 text-right">
+                            <button type="submit" name="change" value="Change email address" class="btn btn-primary">
+                                Update Email <i class="fad fa-check ml-2"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="data settings-panel" id="player_settings">
+                    <div class="settings-panel-title">Player settings</div>
+                    <p class="settings-panel-subtitle">Customize the embed player experience, branding, and default embed dimensions.</p>
+
+                    <form method="POST" enctype="multipart/form-data" class="mb-4">
+                        <input type="hidden" name="op" value="upload_logo">
+                        <input type="hidden" name="logo_mode" value="image">
+
+                        <div class="form-group row">
+                            <div class="col-md-4">
+                                <label class="d-block">Video title in embeds</label>
+                                <div class="custom-control custom-checkbox m-0">
+                                    <input type="checkbox" class="custom-control-input" id="usr_embed_title" name="usr_embed_title" value="1">
+                                    <label class="custom-control-label" for="usr_embed_title"><span>Show</span></label>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label class="d-block">Auto start subtitles</label>
+                                <div class="custom-control custom-checkbox m-0">
+                                    <input type="checkbox" class="custom-control-input" id="usr_sub_auto_start" name="usr_sub_auto_start" value="1">
+                                    <label class="custom-control-label" for="usr_sub_auto_start"><span>Yes</span></label>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <label for="inputPlayerImage" class="d-block">Video player image <i style="color:grey;">(takes few mins to update)</i></label>
+                                <div class="sel-per-page w-100">
+                                    <select id="inputPlayerImage" class="player_image form-control" name="usr_player_image">
+                                        <option value="">Select image mode</option>
+                                        <option value="splash">Splash image</option>
+                                        <option value="single">Single image</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group row">
+                            <div class="col-md-4">
+                                <label>Player colour <i class="badge badge-danger">NEW</i> <i style="color:grey;">(requires premium)</i></label>
+                                <input type="text" name="usr_player_colour" value="" class="form-control jscolor {value:'ff9900', backgroundColor:'#4346454d', borderColor:'#434645'}" autocomplete="off">
+                            </div>
+
+                            <div class="col-md-4">
+                                <label>Upload logo</label>
+                                <div class="custom-file">
+                                    <input type="file" accept="image/*" name="logo_image" class="custom-file-input" id="logo_image">
+                                    <label class="custom-file-label" for="logo_image">Choose logo</label>
+                                </div>
+                                <p class="m-0 mt-2 text-muted">Max upload size: 300x300 pixels</p>
+                            </div>
+
+                            <div class="col-md-4"></div>
+                        </div>
+
+                        <div class="form-group row">
+                            <div class="col-md-2">
+                                <label>Embed width <small>(px)</small></label>
+                                <input type="text" name="embedcode_width" value="600" class="form-control" placeholder="600">
+                            </div>
+
+                            <div class="col-md-2">
+                                <label>Embed height <small>(px)</small></label>
+                                <input type="text" name="embedcode_height" value="480" class="form-control" placeholder="480">
+                            </div>
+                        </div>
+
+                        <div class="form-group text-right">
+                            <button type="submit" class="btn btn-primary">
+                                Save Settings <i class="fad fa-check ml-2"></i>
+                            </button>
+                        </div>
+
+                        <p class="settings-note">Some settings could take few mins to get updated.</p>
+                    </form>
+                </div>
+
+                <div class="data settings-panel" id="premium_settings">
+                    <div class="settings-panel-title">Own adverts</div>
+                    <p class="settings-panel-subtitle">Manage custom VAST and popup ad placements for your player embeds.</p>
+
+                    <div class="alert alert-warning mt-4" style="width: 100%;">
+                        <p style="font-size: 15px; margin-bottom: 3px;"><b>Premium Bandwidth</b> is required to place your own ads on the video player.</p>
+                    </div>
+
+                    <h4>Tracking tokens for Vast &amp; Popup ads</h4>
+                    <div class="settings-table-wrap">
+                        <table class="table is-fullwidth">
+                            <tbody>
+                                <tr>
+                                    <td>[domain]</td>
+                                    <td>The domain name the player is embedded on.</td>
+                                </tr>
+                                <tr>
+                                    <td>[player-height]</td>
+                                    <td>The height of the video player on the page in pixels.</td>
+                                </tr>
+                                <tr>
+                                    <td>[player-width]</td>
+                                    <td>The width of the video player on the page in pixels.</td>
+                                </tr>
+                                <tr>
+                                    <td>[random]</td>
+                                    <td>Typically used as a cache-buster, to ensure there is no local caching of the VAST response.</td>
+                                </tr>
+                                <tr>
+                                    <td>[page-url]</td>
+                                    <td>The URL of the current page (the one the video is embedded in).</td>
+                                </tr>
+                                <tr>
+                                    <td>[timestamp]</td>
+                                    <td>The current time of the user's computer, as a UNIX timestamp.</td>
+                                </tr>
+                                <tr>
+                                    <td>[referrer]</td>
+                                    <td>The URL of the page that brought the viewer to the current player.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <form method="POST">
+                        <input type="hidden" name="op" value="premium_settings">
+                        <input type="hidden" name="token" value="8fad7266f3dfc503ae5cfce49aecd469">
+
+                        <div class="form-group">
+                            <label>VAST url</label>
+                            <input type="text" name="vast_url" value="" class="form-control" disabled="disabled">
+                        </div>
+
+                        <hr class="mt-4">
+
+                        <div class="form-group row">
+                            <div class="col-md-2">
+                                <label>Type</label>
+                                <div class="sel-per-page w-100">
+                                    <select name="pop_type" class="form-control pop_type">
+                                        <option value="1">Direct url</option>
+                                        <option value="2">Javascript url</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="col-md-8 dlink">
+                                <label class="pop_text">Popup direct url</label>
+                                <input type="text" name="pop_url" value="" class="form-control" disabled="disabled">
+                            </div>
+
+                            <div class="col-md-2 delay-s">
+                                <label>Capping (seconds)</label>
+                                <input type="text" name="pop_cap" value="" class="form-control" disabled="disabled">
+                            </div>
+                        </div>
+
+                        <div class="mt-5 text-right">
+                            <button type="submit" name="update_prem" value="update_prem" class="btn btn-primary" disabled>
+                                Save <i class="fad fa-check ml-2"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="data settings-panel" id="ftp_servers">
+                    <div class="settings-panel-title">FTP servers</div>
+                    <p class="settings-panel-subtitle">Use these FTP credentials and endpoints for direct uploads into your account.</p>
+
+                    <div class="container px-0" style="margin-top: 30px;">
+                        <div class="row">
+                            <div class="col-12 col-lg-4 mb-4 mb-lg-0">
+                                <div class="ftp-login">
+                                    <div class="form-group">
+                                        <label>FTP Login Details</label>
+                                    </div>
+
+                                    <div class="form-group position-relative">
+                                        <i class="fad fa-user position-absolute"></i>
+                                        <input type="text" onclick="this.select();" value="videoengine" readonly class="form-control pl-5">
+                                    </div>
+
+                                    <div class="form-group position-relative">
+                                        <i class="fad fa-lock position-absolute"></i>
+                                        <input type="text" onclick="this.select();" value="8wmdu9ngch" readonly class="form-control pl-5">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-12 col-lg-8">
+                                <div class="settings-table-wrap">
+                                    <table class="table is-fullwidth">
+                                        <thead>
+                                            <tr>
+                                                <th>Status</th>
+                                                <th>FTP Server</th>
+                                                <th>Location</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td><i class="fad fa-circle" style="color:#019001;"></i></td>
+                                                <td>ftp.doodstream.com</td>
+                                                <td><img src="/assets/img/flags/WW.svg" class="country">Global</td>
+                                            </tr>
+                                            <tr>
+                                                <td><i class="fad fa-circle" style="color:#019001;"></i></td>
+                                                <td>ftp-uk-eri-1.doodstream.com</td>
+                                                <td><img src="/assets/img/flags/UK.svg" class="country">United Kingdom (Erith)</td>
+                                            </tr>
+                                            <tr>
+                                                <td><i class="fad fa-circle" style="color:#019001;"></i></td>
+                                                <td>ftp-fr-sbg-1.doodstream.com</td>
+                                                <td><img src="/assets/img/flags/FR.svg" class="country">France (Strasbourg)</td>
+                                            </tr>
+                                            <tr>
+                                                <td><i class="fad fa-circle" style="color:#019001;"></i></td>
+                                                <td>ftp-fr-gra-1.doodstream.com</td>
+                                                <td><img src="/assets/img/flags/FR.svg" class="country">France (Gravelines)</td>
+                                            </tr>
+                                            <tr>
+                                                <td><i class="fad fa-circle" style="color:#019001;"></i></td>
+                                                <td>ftp-fr-rbx-1.doodstream.com</td>
+                                                <td><img src="/assets/img/flags/FR.svg" class="country">France (Roubaix)</td>
+                                            </tr>
+                                            <tr>
+                                                <td><i class="fad fa-circle" style="color:#019001;"></i></td>
+                                                <td>ftp-pol-waw-1.doodstream.com</td>
+                                                <td><img src="/assets/img/flags/PL.svg" class="country">Poland (Warsaw)</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="data settings-panel" id="custom_domain">
+                    <div class="settings-panel-title">Custom Domain Redirect</div>
+                    <p class="settings-panel-subtitle" id="info-domain">Just purchase a domain and point the DNS as shown below. This frontend preview stores domains in the current browser only.</p>
+
+                    <p id="response" class="settings-inline-feedback"></p>
+
+                    <div class="mt-3 mb-3">
+                        <input type="text" id="domainInput" class="form-control mb-2" placeholder="example.com">
+                        <div class="text-right">
+                            <button class="btn btn-primary" id="addBtn" type="button">Add Domain</button>
+                            <button class="btn btn-secondary" id="listDomain" type="button">List Domain</button>
+                        </div>
+                    </div>
+
+                    <div id="domainWrapper"></div>
+
+                    <div class="alert alert-info dns-config">
+                        To add domain, set your DNS to:
+                        <pre>+------+-------+-----------------+
+| Type | Host  | Content/Value   |
++------+-------+-----------------+
+| A    | @     | 208.73.202.233  |
+| A    | www   | 208.73.202.233  |
++------+-------+-----------------+</pre>
+                    </div>
+                </div>
+
+                <div class="data settings-panel" id="delete_account">
+                    <div class="settings-panel-title">Delete account</div>
+                    <p class="settings-panel-subtitle">Review this carefully before continuing. This panel is frontend-only for now and does not execute a live deletion.</p>
+
+                    <div class="alert alert-warning mb-4">
+                        Are you sure you want to delete your account? <strong>This action is permanent and cannot be undone.</strong>
+                    </div>
+
+                    <form class="delete-account-form" method="POST">
+                        <label>Reason</label>
+                        <div class="w-100 mb-3">
+                            <select name="reason_code" class="form-control" required>
+                                <option value="" selected>-- Reason --</option>
+                                <option value="not_satisfied">Not satisfied with the service</option>
+                                <option value="privacy_concerns">Privacy concerns</option>
+                                <option value="found_alternative">Found a better alternative</option>
+                                <option value="nope">I don't want to say</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+
+                        <label>Tell us more</label>
+                        <div class="w-100 mb-3">
+                            <textarea
+                                name="reason"
+                                class="form-control"
+                                rows="4"
+                                placeholder="Explain why you want to delete your account"
+                                required
+                            ></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Enter password for confirmation</label>
+                            <input type="password" name="password_confirmation" placeholder="Current Password" class="form-control" required>
+                        </div>
+
+                        <div id="delete-account-feedback" class="settings-inline-feedback"></div>
+
+                        <div class="mt-2 text-right">
+                            <button type="submit" value="Delete" class="btn btn-danger">
+                                <i class="fad fa-trash-alt mr-2"></i>Delete Account
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer mt-4">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-2">
+                    <img class="logo" src="/assets/img/logo-s.png">
+                </div>
+                <div class="col-md-10 text-right">
+                    <ul class="menu m-0 p-0 d-flex align-items-center justify-content-center justify-content-sm-end flex-wrap">
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/copyright">Copyright policy</a></li>
+                        <li><a href="/terms-and-conditions">Terms &amp; conditions</a></li>
+                        <li><a target="_blank" href="https://help.doodstream.com/">Help center</a></li>
+                        <li><a href="/contact">Contact Us</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.15.0/umd/popper.min.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js" type="text/javascript"></script>
+    <script src="/assets/js/main__q_8bb33b25bfc8.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js" type="text/javascript"></script>
+    <script src="/assets/js/dood_load.js" type="module" defer></script>
+    <script type="text/javascript">
+        $(document).ready(function () {
+            var customDomainsStorageKey = 've-custom-domains';
+
+            function activateSettingsPanel(hash) {
+                if (!hash || !$(hash).length) {
+                    return;
+                }
+
+                var $link = $('.settings_menu a[href="' + hash + '"]');
+
+                if ($link.length) {
+                    $link.trigger('click');
+                }
+            }
+
+            function syncPopupMode() {
+                if ($('.pop_type').val() === '2') {
+                    $('.delay-s').attr('style', 'display: none !important');
+                    $('.dlink').removeClass('col-md-8').addClass('col-md-10');
+                    $('.pop_text').text('Popup javascript url');
+                    return;
+                }
+
+                $('.delay-s').attr('style', 'display: block !important');
+                $('.dlink').removeClass('col-md-10').addClass('col-md-8');
+                $('.pop_text').text('Popup direct url');
+            }
+
+            function showDomainMessage(message, color) {
+                $('#response').text(message).css('color', color || '');
+            }
+
+            function readCustomDomains() {
+                try {
+                    var raw = window.localStorage.getItem(customDomainsStorageKey);
+
+                    if (!raw) {
+                        return [];
+                    }
+
+                    var parsed = JSON.parse(raw);
+                    return Array.isArray(parsed) ? parsed : [];
+                } catch (error) {
+                    return [];
+                }
+            }
+
+            function saveCustomDomains(domains) {
+                window.localStorage.setItem(customDomainsStorageKey, JSON.stringify(domains));
+            }
+
+            function renderCustomDomains() {
+                var domains = readCustomDomains();
+
+                if (!domains.length) {
+                    $('#info-domain').text('No active domain. Add one to preview the management UI.');
+                    $('#domainWrapper').html('');
+                    return;
+                }
+
+                $('#info-domain').html('You have <b>' + domains.length + '</b> active domain' + (domains.length > 1 ? 's' : '') + '.');
+
+                var rows = domains.map(function (domain) {
+                    return [
+                        '<tr>',
+                        '<td>',
+                        '<span class="text-success"><i class="fad fa-globe mr-2"></i></span>' + domain.domain,
+                        '<p>Redirect preview: ' + domain.redirect + '</p>',
+                        '</td>',
+                        '<td class="text-center">',
+                        '<button class="btn btn-sm btn-danger deleteBtn" data-domain="' + domain.domain + '" type="button">',
+                        '<i class="fad fa-trash-alt"></i>',
+                        '</button>',
+                        '</td>',
+                        '</tr>'
+                    ].join('');
+                }).join('');
+
+                $('#domainWrapper').html(
+                    '<table class="table domain-list-table">' +
+                    '<thead><tr><th>Domain</th><th>Action</th></tr></thead>' +
+                    '<tbody>' + rows + '</tbody>' +
+                    '</table>'
+                );
+            }
+
+            function isValidDomain(domain) {
+                return /^(?!:\/\/)([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$/.test(domain);
+            }
+
+            $('.pop_type').on('change', syncPopupMode);
+            syncPopupMode();
+            renderCustomDomains();
+
+            $('.custom-file-input').on('change', function () {
+                var fileName = $(this).val().split('\\').pop();
+                $(this).next('.custom-file-label').text(fileName || 'Choose logo');
+            });
+
+            $(document).on('click', '#listDomain', function () {
+                renderCustomDomains();
+                showDomainMessage('Domain list refreshed.', '#42b983');
+            });
+
+            $(document).on('click', '#addBtn', function () {
+                var domain = $('#domainInput').val().trim().toLowerCase();
+                var domains = readCustomDomains();
+
+                if (!domain) {
+                    showDomainMessage('Please enter a domain.', '#dc3545');
+                    return;
+                }
+
+                if (!isValidDomain(domain)) {
+                    showDomainMessage('Enter a valid domain like example.com.', '#dc3545');
+                    return;
+                }
+
+                if (domains.some(function (entry) { return entry.domain === domain; })) {
+                    showDomainMessage('That domain is already in the list.', '#dc3545');
+                    return;
+                }
+
+                domains.push({
+                    domain: domain,
+                    redirect: 'Streaming redirect preview ready'
+                });
+
+                saveCustomDomains(domains);
+                renderCustomDomains();
+                $('#domainInput').val('');
+                showDomainMessage('Domain added to the frontend preview.', '#42b983');
+            });
+
+            $(document).on('click', '.deleteBtn', function () {
+                var domain = $(this).data('domain');
+                var domains = readCustomDomains().filter(function (entry) {
+                    return entry.domain !== domain;
+                });
+
+                saveCustomDomains(domains);
+                renderCustomDomains();
+                showDomainMessage('Domain removed from the frontend preview.', '#42b983');
+            });
+
+            activateSettingsPanel(window.location.hash);
+
+            $(window).on('hashchange', function () {
+                activateSettingsPanel(window.location.hash);
+            });
+
+            $('.settings_menu a').on('click', function () {
+                if (history.replaceState) {
+                    history.replaceState(null, '', this.hash);
+                } else {
+                    window.location.hash = this.hash;
+                }
+            });
+
+            $('.delete-account-form').on('submit', function (event) {
+                event.preventDefault();
+
+                var reasonCode = $(this).find('select[name="reason_code"]').val();
+                var reason = $(this).find('textarea[name="reason"]').val().trim();
+                var password = $(this).find('input[name="password_confirmation"]').val();
+
+                if (!reasonCode || !reason || !password) {
+                    $('#delete-account-feedback').text('Select a reason, add written details, and enter your current password.').css('color', '#dc3545');
+                    return;
+                }
+
+                $('#delete-account-feedback')
+                    .text('Frontend preview only. Account deletion is not connected to a backend workflow yet.')
+                    .css('color', '#f90');
+            });
+
+            $('.regenerate-key').on('click', function (e) {
+                if (confirm('Are you sure want to regenerate API key.?')) {
+                    window.location.href = '/genrate-api/&token=d2962e12ae5c8dd99e407a98bd38d3b5';
+                } else {
+                    e.preventDefault();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
