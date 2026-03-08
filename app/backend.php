@@ -2244,11 +2244,41 @@ function ve_settings_bind_delete_account_form(string $html): string
 function ve_html_replace_element_contents_by_id(string $html, string $id, string $content): string
 {
     $quotedId = preg_quote($id, '/');
-    $pattern = '/(<(?P<tag>[A-Za-z0-9]+)\b[^>]*\bid="' . $quotedId . '"[^>]*>)(.*?)(<\/(?P=tag)>)/is';
+    $openPattern = '/<(?P<tag>[A-Za-z0-9]+)\b(?=[^>]*\bid=(["\'])' . $quotedId . '\2)[^>]*>/i';
 
-    return (string) preg_replace_callback($pattern, static function (array $matches) use ($content): string {
-        return $matches[1] . $content . $matches[4];
-    }, $html, 1);
+    if (preg_match($openPattern, $html, $openMatches, PREG_OFFSET_CAPTURE) !== 1) {
+        return $html;
+    }
+
+    $openingTag = $openMatches[0][0];
+    $openingTagStart = (int) $openMatches[0][1];
+    $openingTagEnd = $openingTagStart + strlen($openingTag);
+    $tagName = strtolower((string) $openMatches['tag'][0]);
+    $tokenPattern = '/<\/?' . preg_quote($tagName, '/') . '\b[^>]*>/i';
+    $depth = 1;
+    $offset = $openingTagEnd;
+
+    while (preg_match($tokenPattern, $html, $tokenMatches, PREG_OFFSET_CAPTURE, $offset) === 1) {
+        $token = $tokenMatches[0][0];
+        $tokenStart = (int) $tokenMatches[0][1];
+        $offset = $tokenStart + strlen($token);
+
+        if (str_starts_with($token, '</')) {
+            $depth--;
+
+            if ($depth === 0) {
+                return substr($html, 0, $openingTagEnd) . $content . substr($html, $tokenStart);
+            }
+
+            continue;
+        }
+
+        if (!preg_match('/\/\s*>$/', $token)) {
+            $depth++;
+        }
+    }
+
+    return $html;
 }
 
 function ve_render_api_activity_rows_html(array $activity): string

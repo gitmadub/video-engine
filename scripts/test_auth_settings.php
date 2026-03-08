@@ -130,6 +130,29 @@ function extract_runtime_token(string $html): string
     return $decoded;
 }
 
+function assert_settings_panel_structure(string $html): void
+{
+    $previous = libxml_use_internal_errors(true);
+    $dom = new DOMDocument();
+    $loaded = $dom->loadHTML($html);
+    libxml_clear_errors();
+    libxml_use_internal_errors($previous);
+    assert_true($loaded, 'Settings HTML should be parseable.');
+
+    $xpath = new DOMXPath($dom);
+    $settingsData = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " details ") and contains(concat(" ", normalize-space(@class), " "), " settings_data ")]')->item(0);
+    assert_true($settingsData instanceof DOMElement, 'Settings page should contain the settings data container.');
+
+    foreach (['details', 'password_settings', 'email_settings', 'player_settings', 'premium_settings', 'ftp_servers', 'custom_domain', 'api_access', 'delete_account'] as $panelId) {
+        $panel = $xpath->query('//*[@id="' . $panelId . '"]')->item(0);
+        assert_true($panel instanceof DOMElement, 'Missing settings panel #' . $panelId . '.');
+        assert_true(
+            $panel->parentNode instanceof DOMNode && $panel->parentNode->isSameNode($settingsData),
+            'Settings panel #' . $panelId . ' should remain a direct child of the settings container.'
+        );
+    }
+}
+
 function create_test_png(string $path): void
 {
     $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO1ZzWQAAAAASUVORK5CYII=', true);
@@ -181,12 +204,26 @@ function find_listening_pid(int $port): ?int
             continue;
         }
 
-        if (!str_contains($line, 'LISTENING')) {
+        $columns = preg_split('/\s+/', trim($line));
+
+        if (!is_array($columns) || count($columns) < 5) {
             continue;
         }
 
-        if (preg_match('/\s(\d+)\s*$/', trim($line), $matches) === 1) {
-            return (int) $matches[1];
+        $localAddress = (string) ($columns[1] ?? '');
+        $foreignAddress = (string) ($columns[2] ?? '');
+        $pid = (string) ($columns[4] ?? '');
+
+        if (!preg_match('/:' . preg_quote((string) $port, '/') . '$/', $localAddress)) {
+            continue;
+        }
+
+        if (!preg_match('/:0$/', $foreignAddress)) {
+            continue;
+        }
+
+        if (ctype_digit($pid) && (int) $pid > 0) {
+            return (int) $pid;
         }
     }
 
@@ -328,6 +365,7 @@ try {
     assert_true(!str_contains($settingsPage['body'], 'href="/premium"'), 'Settings page should not use the guest premium route.');
     assert_true(str_contains($settingsPage['body'], '/account/api-settings'), 'Settings page should expose the API policy form.');
     assert_true(str_contains($settingsPage['body'], 'data-api-status'), 'Settings page should render the API usage summary.');
+    assert_settings_panel_structure($settingsPage['body']);
     $runtimeCsrf = extract_runtime_token($settingsPage['body']);
     $hiddenTokens = extract_hidden_tokens($settingsPage['body']);
     assert_true(count($hiddenTokens) >= 6, 'Every settings form should render a hidden CSRF token.');
@@ -421,6 +459,7 @@ try {
     assert_true(str_contains($settingsPage['body'], 'value="405"'), 'Updated embed height should render.');
     assert_true(str_contains($settingsPage['body'], 'https://ads.example.com/vast.xml'), 'Updated VAST URL should render.');
     assert_true(str_contains($settingsPage['body'], 'https://ads.example.com/popup.js'), 'Updated popup URL should render.');
+    assert_settings_panel_structure($settingsPage['body']);
     $csrf = extract_hidden_token($settingsPage['body']);
 
     $apiRotate = json_response($client->request('POST', '/account/api-key/regenerate', [
