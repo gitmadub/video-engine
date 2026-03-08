@@ -3,6 +3,7 @@ DirectoryIndex index.php
 RewriteEngine On
 
 RewriteRule ^(?:\.git|docs|resources|tools)(?:/|$) - [F,L,NC]
+RewriteRule ^storage/private(?:/|$) - [F,L,NC]
 
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d

@@ -2244,9 +2244,11 @@ function ve_settings_bind_delete_account_form(string $html): string
 function ve_html_replace_element_contents_by_id(string $html, string $id, string $content): string
 {
     $quotedId = preg_quote($id, '/');
-    $pattern = '/(<[^>]+\bid="' . $quotedId . '"[^>]*>)(.*?)(<\/[^>]+>)/is';
+    $pattern = '/(<(?P<tag>[A-Za-z0-9]+)\b[^>]*\bid="' . $quotedId . '"[^>]*>)(.*?)(<\/(?P=tag)>)/is';
 
-    return (string) preg_replace($pattern, '$1' . $content . '$3', $html, 1);
+    return (string) preg_replace_callback($pattern, static function (array $matches) use ($content): string {
+        return $matches[1] . $content . $matches[4];
+    }, $html, 1);
 }
 
 function ve_render_api_activity_rows_html(array $activity): string

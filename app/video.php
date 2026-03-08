@@ -87,6 +87,30 @@ function ve_video_find_binary(array $candidates): ?string
     return null;
 }
 
+function ve_video_find_php_binary(): string
+{
+    static $binary;
+
+    if (is_string($binary) && $binary !== '') {
+        return $binary;
+    }
+
+    $currentBinary = defined('PHP_BINARY') ? (string) PHP_BINARY : '';
+    $candidates = array_filter([
+        getenv('VE_PHP_BINARY') ?: null,
+        $currentBinary !== '' ? $currentBinary : null,
+        $currentBinary !== '' ? dirname($currentBinary) . DIRECTORY_SEPARATOR . (ve_video_is_windows() ? 'php.exe' : 'php') : null,
+        ve_video_is_windows() ? 'C:\\xampp\\php\\php.exe' : null,
+        'php',
+        '/usr/bin/php',
+        '/usr/local/bin/php',
+    ]);
+
+    $binary = ve_video_find_binary($candidates) ?? ($currentBinary !== '' ? $currentBinary : 'php');
+
+    return $binary;
+}
+
 function ve_video_config(): array
 {
     static $config;
@@ -129,7 +153,7 @@ function ve_video_config(): array
         'tmp' => ve_video_storage_path('tmp'),
         'ffmpeg' => ve_video_find_binary($ffmpegCandidates),
         'ffprobe' => ve_video_find_binary($ffprobeCandidates),
-        'php_binary' => getenv('VE_PHP_BINARY') ?: (defined('PHP_BINARY') ? PHP_BINARY : 'php'),
+        'php_binary' => ve_video_find_php_binary(),
         'encode_threads' => max(1, (int) (getenv('VE_VIDEO_THREADS') ?: 2)),
         'session_ttl' => max(300, (int) (getenv('VE_VIDEO_PLAY_TTL') ?: 900)),
         'worker_stale_after' => max(1800, (int) (getenv('VE_VIDEO_STALE_AFTER') ?: 7200)),
@@ -494,19 +518,23 @@ function ve_video_upload_error_message(int $error): string
     };
 }
 
-function ve_video_validate_file(array $file): array
+function ve_video_detect_local_file(string $path, string $filename = '', ?int $knownSize = null): array
 {
-    $filename = trim((string) ($file['name'] ?? ''));
-    $tmpName = (string) ($file['tmp_name'] ?? '');
-    $size = (int) ($file['size'] ?? 0);
-    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $filename = trim($filename);
+
+    if ($path === '' || !is_file($path)) {
+        throw new RuntimeException('The source file is missing.');
+    }
+
+    $size = $knownSize ?? (int) (filesize($path) ?: 0);
+    $extension = strtolower(pathinfo($filename !== '' ? $filename : basename($path), PATHINFO_EXTENSION));
     $mime = '';
 
-    if ($tmpName !== '' && is_file($tmpName) && function_exists('finfo_open')) {
+    if (function_exists('finfo_open')) {
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
 
         if ($finfo !== false) {
-            $detected = finfo_file($finfo, $tmpName);
+            $detected = finfo_file($finfo, $path);
             finfo_close($finfo);
 
             if (is_string($detected)) {
@@ -520,26 +548,17 @@ function ve_video_validate_file(array $file): array
         || in_array($mime, ['application/ogg', 'application/octet-stream'], true);
 
     if (!$isKnownExtension && !$isLikelyVideoMime) {
-        ve_json([
-            'status' => 'fail',
-            'message' => 'Only video files can be uploaded.',
-        ], 422);
+        throw new RuntimeException('Only video files can be uploaded.');
     }
 
     if ($size <= 0) {
-        ve_json([
-            'status' => 'fail',
-            'message' => 'The selected file is empty.',
-        ], 422);
+        throw new RuntimeException('The selected file is empty.');
     }
 
     $limit = ve_video_upload_limit_bytes();
 
     if ($limit > 0 && $size > $limit) {
-        ve_json([
-            'status' => 'fail',
-            'message' => 'This file exceeds the current upload limit of ' . ve_video_format_bytes($limit) . '.',
-        ], 422);
+        throw new RuntimeException('This file exceeds the current upload limit of ' . ve_video_format_bytes($limit) . '.');
     }
 
     if ($extension === '') {
@@ -547,11 +566,130 @@ function ve_video_validate_file(array $file): array
     }
 
     return [
-        'filename' => $filename !== '' ? $filename : 'video.' . $extension,
+        'filename' => $filename !== '' ? $filename : basename($path),
         'extension' => $extension,
         'size' => $size,
         'mime' => $mime,
     ];
+}
+
+function ve_video_validate_file(array $file): array
+{
+    try {
+        return ve_video_detect_local_file(
+            (string) ($file['tmp_name'] ?? ''),
+            trim((string) ($file['name'] ?? '')),
+            isset($file['size']) ? (int) $file['size'] : null
+        );
+    } catch (RuntimeException $exception) {
+        ve_json([
+            'status' => 'fail',
+            'message' => $exception->getMessage(),
+        ], 422);
+    }
+}
+
+function ve_video_store_input_file(string $incomingPath, string $destinationPath, bool $isUploadedFile): bool
+{
+    if ($isUploadedFile) {
+        return move_uploaded_file($incomingPath, $destinationPath);
+    }
+
+    if (@rename($incomingPath, $destinationPath)) {
+        return true;
+    }
+
+    if (@copy($incomingPath, $destinationPath)) {
+        @unlink($incomingPath);
+        return true;
+    }
+
+    return false;
+}
+
+function ve_video_insert_queued_record(int $userId, array $validated, string $title): ?array
+{
+    $title = trim($title);
+
+    if ($title === '') {
+        $title = ve_video_title_from_filename((string) ($validated['filename'] ?? 'video.' . ($validated['extension'] ?? 'mp4')));
+    }
+
+    $title = mb_substr($title, 0, 180);
+    $publicId = ve_video_generate_public_id();
+    $now = ve_now();
+
+    $stmt = ve_db()->prepare(
+        'INSERT INTO videos (
+            user_id, public_id, title, original_filename, source_extension, status, status_message,
+            duration_seconds, width, height, video_codec, audio_codec,
+            original_size_bytes, processed_size_bytes, compression_ratio,
+            processing_error, created_at, updated_at, queued_at, processing_started_at, ready_at, deleted_at
+        ) VALUES (
+            :user_id, :public_id, :title, :original_filename, :source_extension, :status, :status_message,
+            NULL, NULL, NULL, "", "",
+            :original_size_bytes, 0, NULL,
+            "", :created_at, :updated_at, :queued_at, NULL, NULL, NULL
+        )'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':public_id' => $publicId,
+        ':title' => $title,
+        ':original_filename' => (string) ($validated['filename'] ?? ''),
+        ':source_extension' => (string) ($validated['extension'] ?? 'mp4'),
+        ':status' => VE_VIDEO_STATUS_QUEUED,
+        ':status_message' => 'Queued for compression and secure stream packaging.',
+        ':original_size_bytes' => (int) ($validated['size'] ?? 0),
+        ':created_at' => $now,
+        ':updated_at' => $now,
+        ':queued_at' => $now,
+    ]);
+
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video)) {
+        return null;
+    }
+
+    ve_add_notification($userId, 'Video queued', '"' . $title . '" is queued for compression.');
+    ve_video_maybe_spawn_worker();
+
+    return $video;
+}
+
+function ve_video_queue_local_source(
+    int $userId,
+    string $incomingPath,
+    string $originalFilename,
+    ?string $title = null,
+    bool $isUploadedFile = false
+): array {
+    $validated = ve_video_detect_local_file($incomingPath, $originalFilename);
+    $videoTitle = is_string($title) ? $title : '';
+    $video = ve_video_insert_queued_record($userId, $validated, $videoTitle);
+
+    if (!is_array($video)) {
+        throw new RuntimeException('The video record could not be created.');
+    }
+
+    $directory = ve_video_library_directory((string) $video['public_id']);
+    ve_ensure_directory($directory);
+
+    $sourcePath = $directory . DIRECTORY_SEPARATOR . 'source.' . (string) $validated['extension'];
+
+    if (!ve_video_store_input_file($incomingPath, $sourcePath, $isUploadedFile)) {
+        ve_db()->prepare('DELETE FROM videos WHERE id = :id')->execute([':id' => (int) $video['id']]);
+        throw new RuntimeException('The uploaded video could not be stored on the server.');
+    }
+
+    $storedVideo = ve_video_get_by_id((int) $video['id']);
+
+    if (!is_array($storedVideo)) {
+        throw new RuntimeException('The stored video could not be loaded again.');
+    }
+
+    return $storedVideo;
 }
 
 function ve_video_to_api_payload(array $video): array
@@ -643,66 +781,23 @@ function ve_handle_video_upload_api(): void
         ], 422);
     }
 
-    $validated = ve_video_validate_file($file);
     $title = trim((string) ($_POST['title'] ?? ''));
+    $validated = ve_video_validate_file($file);
 
-    if ($title === '') {
-        $title = ve_video_title_from_filename($validated['filename']);
-    }
-
-    $title = mb_substr($title, 0, 180);
-    $publicId = ve_video_generate_public_id();
-    $directory = ve_video_library_directory($publicId);
-    ve_ensure_directory($directory);
-
-    $sourcePath = $directory . DIRECTORY_SEPARATOR . 'source.' . $validated['extension'];
-
-    if (!move_uploaded_file((string) $file['tmp_name'], $sourcePath)) {
+    try {
+        $video = ve_video_queue_local_source(
+            (int) $user['id'],
+            (string) $file['tmp_name'],
+            (string) ($validated['filename'] ?? (string) ($file['name'] ?? '')),
+            $title,
+            true
+        );
+    } catch (RuntimeException $exception) {
         ve_video_api_respond($auth, [
             'status' => 'fail',
-            'message' => 'The uploaded video could not be stored on the server.',
+            'message' => $exception->getMessage(),
         ], 500);
     }
-
-    $now = ve_now();
-    $stmt = ve_db()->prepare(
-        'INSERT INTO videos (
-            user_id, public_id, title, original_filename, source_extension, status, status_message,
-            duration_seconds, width, height, video_codec, audio_codec,
-            original_size_bytes, processed_size_bytes, compression_ratio,
-            processing_error, created_at, updated_at, queued_at, processing_started_at, ready_at, deleted_at
-        ) VALUES (
-            :user_id, :public_id, :title, :original_filename, :source_extension, :status, :status_message,
-            NULL, NULL, NULL, "", "",
-            :original_size_bytes, 0, NULL,
-            "", :created_at, :updated_at, :queued_at, NULL, NULL, NULL
-        )'
-    );
-    $stmt->execute([
-        ':user_id' => (int) $user['id'],
-        ':public_id' => $publicId,
-        ':title' => $title,
-        ':original_filename' => $validated['filename'],
-        ':source_extension' => $validated['extension'],
-        ':status' => VE_VIDEO_STATUS_QUEUED,
-        ':status_message' => 'Queued for compression and secure stream packaging.',
-        ':original_size_bytes' => $validated['size'],
-        ':created_at' => $now,
-        ':updated_at' => $now,
-        ':queued_at' => $now,
-    ]);
-
-    $video = ve_video_get_by_public_id($publicId);
-
-    if (!is_array($video)) {
-        ve_video_api_respond($auth, [
-            'status' => 'fail',
-            'message' => 'The upload was stored, but the video record could not be created.',
-        ], 500);
-    }
-
-    ve_add_notification((int) $user['id'], 'Video queued', '"' . $title . '" is queued for compression.');
-    ve_video_maybe_spawn_worker();
 
     ve_video_api_respond($auth, [
         'status' => 'ok',
@@ -1138,6 +1233,157 @@ function ve_video_probe(string $sourcePath): ?array
     ];
 }
 
+function ve_video_preview_frame_count(): int
+{
+    return VE_VIDEO_PREVIEW_COLUMNS * VE_VIDEO_PREVIEW_ROWS;
+}
+
+function ve_video_format_webvtt_time(float $seconds): string
+{
+    $seconds = max(0, $seconds);
+    $hours = (int) floor($seconds / 3600);
+    $minutes = (int) floor(($seconds % 3600) / 60);
+    $wholeSeconds = (int) floor($seconds % 60);
+    $milliseconds = (int) round(($seconds - floor($seconds)) * 1000);
+
+    if ($milliseconds === 1000) {
+        $milliseconds = 0;
+        $wholeSeconds++;
+    }
+
+    if ($wholeSeconds >= 60) {
+        $wholeSeconds -= 60;
+        $minutes++;
+    }
+
+    if ($minutes >= 60) {
+        $minutes -= 60;
+        $hours++;
+    }
+
+    return sprintf('%02d:%02d:%02d.%03d', $hours, $minutes, $wholeSeconds, $milliseconds);
+}
+
+function ve_video_write_preview_vtt(array $video, float $duration): bool
+{
+    $frameCount = ve_video_preview_frame_count();
+    $segmentDuration = $duration > 0 ? max($duration / $frameCount, 0.5) : 1.0;
+    $lines = ['WEBVTT', ''];
+
+    for ($index = 0; $index < $frameCount; $index++) {
+        $start = $index * $segmentDuration;
+        $end = min(max($duration, $start + $segmentDuration), ($index + 1) * $segmentDuration);
+
+        if ($end <= $start) {
+            $end = $start + 0.5;
+        }
+
+        $x = ($index % VE_VIDEO_PREVIEW_COLUMNS) * VE_VIDEO_PREVIEW_TILE_WIDTH;
+        $y = intdiv($index, VE_VIDEO_PREVIEW_COLUMNS) * VE_VIDEO_PREVIEW_TILE_HEIGHT;
+
+        $lines[] = ve_video_format_webvtt_time($start) . ' --> ' . ve_video_format_webvtt_time($end);
+        $lines[] = 'preview-sprite.jpg#xywh=' . $x . ',' . $y . ',' . VE_VIDEO_PREVIEW_TILE_WIDTH . ',' . VE_VIDEO_PREVIEW_TILE_HEIGHT;
+        $lines[] = '';
+    }
+
+    return file_put_contents(ve_video_preview_vtt_path($video), implode("\n", $lines)) !== false;
+}
+
+function ve_video_generate_preview_assets(array $video, string $sourcePath, array $metadata): void
+{
+    $duration = max(0.0, (float) ($metadata['duration'] ?? 0.0));
+    $posterOffset = $duration > 0 ? min(max($duration * 0.18, 1.0), max(1.0, $duration - 0.5)) : 1.0;
+    $posterPath = ve_video_poster_path($video);
+    $spritePath = ve_video_preview_sprite_path($video);
+    $previewVttPath = ve_video_preview_vtt_path($video);
+    $frameCount = ve_video_preview_frame_count();
+    $fps = max($frameCount / max($duration, 1.0), 0.25);
+    $fpsLabel = rtrim(rtrim(sprintf('%.6F', $fps), '0'), '.');
+
+    [$posterExitCode] = ve_video_run_command([
+        (string) ve_video_config()['ffmpeg'],
+        '-y',
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-ss',
+        sprintf('%.3F', $posterOffset),
+        '-i',
+        $sourcePath,
+        '-frames:v',
+        '1',
+        '-vf',
+        'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black',
+        '-q:v',
+        '4',
+        $posterPath,
+    ]);
+
+    if ($posterExitCode !== 0 || !is_file($posterPath)) {
+        @unlink($posterPath);
+    }
+
+    [$spriteExitCode] = ve_video_run_command([
+        (string) ve_video_config()['ffmpeg'],
+        '-y',
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-i',
+        $sourcePath,
+        '-frames:v',
+        '1',
+        '-vf',
+        'fps=' . $fpsLabel .
+            ',scale=' . VE_VIDEO_PREVIEW_TILE_WIDTH . ':' . VE_VIDEO_PREVIEW_TILE_HEIGHT .
+            ':force_original_aspect_ratio=decrease,pad=' . VE_VIDEO_PREVIEW_TILE_WIDTH . ':' . VE_VIDEO_PREVIEW_TILE_HEIGHT .
+            ':(ow-iw)/2:(oh-ih)/2:black,tile=' . VE_VIDEO_PREVIEW_COLUMNS . 'x' . VE_VIDEO_PREVIEW_ROWS,
+        '-q:v',
+        '6',
+        $spritePath,
+    ]);
+
+    if ($spriteExitCode !== 0 || !is_file($spritePath) || !ve_video_write_preview_vtt($video, $duration)) {
+        @unlink($spritePath);
+        @unlink($previewVttPath);
+    }
+}
+
+function ve_video_owner_settings(array $video): array
+{
+    return ve_get_user_settings((int) ($video['user_id'] ?? 0));
+}
+
+function ve_video_resolve_poster_asset(array $video): ?array
+{
+    $settings = ve_video_owner_settings($video);
+    $mode = trim((string) ($settings['player_image_mode'] ?? ''));
+
+    if ($mode === 'splash') {
+        $splashPath = ve_storage_relative_path_to_absolute((string) ($settings['splash_image_path'] ?? ''));
+
+        if ($splashPath !== '' && is_file($splashPath)) {
+            return [
+                'path' => $splashPath,
+                'mime' => ve_detect_file_mime_type($splashPath),
+            ];
+        }
+    }
+
+    if ($mode === 'single' || $mode === 'splash') {
+        $posterPath = ve_video_poster_path($video);
+
+        if (is_file($posterPath)) {
+            return [
+                'path' => $posterPath,
+                'mime' => 'image/jpeg',
+            ];
+        }
+    }
+
+    return null;
+}
+
 function ve_video_process_job(int $videoId): void
 {
     $video = ve_video_get_by_id($videoId);
@@ -1241,6 +1487,8 @@ function ve_video_process_job(int $videoId): void
         ve_video_mark_failed((int) $video['id'], 'FFmpeg failed while compressing the video.', $output);
         return;
     }
+
+    ve_video_generate_preview_assets($video, $sourcePath, $metadata);
 
     @unlink($sourcePath);
 
@@ -1505,21 +1753,113 @@ function ve_video_stream_segment(string $publicId, string $filename): void
     exit;
 }
 
-function ve_video_secure_player_script(array $session): string
+function ve_video_stream_poster(string $publicId): void
+{
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || (string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        ve_not_found();
+    }
+
+    $token = isset($_GET['token']) ? (string) $_GET['token'] : '';
+
+    if (ve_video_validate_playback_session($video, $token) === null) {
+        ve_video_stream_access_denied();
+    }
+
+    $asset = ve_video_resolve_poster_asset($video);
+
+    if (!is_array($asset) || !is_file((string) ($asset['path'] ?? ''))) {
+        ve_not_found();
+    }
+
+    header('Content-Type: ' . (string) ($asset['mime'] ?? 'image/jpeg'));
+    header('Content-Length: ' . (string) filesize((string) $asset['path']));
+    header('Cache-Control: private, max-age=300');
+    header('X-Content-Type-Options: nosniff');
+    readfile((string) $asset['path']);
+    exit;
+}
+
+function ve_video_stream_preview_sprite(string $publicId): void
+{
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || (string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        ve_not_found();
+    }
+
+    $token = isset($_GET['token']) ? (string) $_GET['token'] : '';
+
+    if (ve_video_validate_playback_session($video, $token) === null) {
+        ve_video_stream_access_denied();
+    }
+
+    $path = ve_video_preview_sprite_path($video);
+
+    if (!is_file($path)) {
+        ve_not_found();
+    }
+
+    header('Content-Type: image/jpeg');
+    header('Content-Length: ' . (string) filesize($path));
+    header('Cache-Control: private, max-age=300');
+    header('X-Content-Type-Options: nosniff');
+    readfile($path);
+    exit;
+}
+
+function ve_video_stream_preview_vtt(string $publicId): void
+{
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || (string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        ve_not_found();
+    }
+
+    $token = isset($_GET['token']) ? (string) $_GET['token'] : '';
+
+    if (ve_video_validate_playback_session($video, $token) === null) {
+        ve_video_stream_access_denied();
+    }
+
+    $path = ve_video_preview_vtt_path($video);
+
+    if (!is_file($path)) {
+        ve_not_found();
+    }
+
+    $spriteUrl = ve_url('/stream/' . rawurlencode($publicId) . '/preview.jpg?token=' . rawurlencode($token));
+    $payload = (string) file_get_contents($path);
+    $payload = str_replace('preview-sprite.jpg', $spriteUrl, $payload);
+
+    header('Content-Type: text/vtt; charset=UTF-8');
+    header('Cache-Control: private, no-store, no-cache, must-revalidate');
+    header('X-Content-Type-Options: nosniff');
+    echo $payload;
+    exit;
+}
+
+function ve_video_secure_player_script(array $session, ?string $previewVttUrl = null): string
 {
     $manifestUrl = json_encode(ve_absolute_url((string) $session['manifest_url']), JSON_UNESCAPED_SLASHES);
     $token = json_encode((string) $session['token'], JSON_UNESCAPED_SLASHES);
     $homeUrl = json_encode(ve_absolute_url('/'), JSON_UNESCAPED_SLASHES);
+    $previewUrl = json_encode($previewVttUrl !== null ? ve_absolute_url($previewVttUrl) : '', JSON_UNESCAPED_SLASHES);
 
     return <<<HTML
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<script src="https://cdn.jsdelivr.net/npm/plyr@3/dist/plyr.polyfilled.min.js"></script>
 <script>
     (function () {
         var manifestUrl = {$manifestUrl};
         var token = {$token};
+        var previewUrl = {$previewUrl};
         var fallbackUrl = {$homeUrl};
         var video = document.getElementById('ve-secure-player');
+        var stage = document.querySelector('.ve-stage');
         var state = document.getElementById('ve-player-state');
+        var player = null;
 
         function setState(message, isError) {
             if (!state) {
@@ -1530,10 +1870,33 @@ function ve_video_secure_player_script(array $session): string
             state.className = isError ? 've-player-state is-error' : 've-player-state';
         }
 
+        function attemptAutoplay() {
+            var playPromise = video.play();
+
+            if (playPromise && typeof playPromise.catch === 'function') {
+                playPromise.catch(function () {});
+            }
+        }
+
+        function bootUi() {
+            if (!video || !window.Plyr || player) {
+                return;
+            }
+
+            player = new window.Plyr(video, {
+                controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'settings', 'pip', 'fullscreen'],
+                settings: ['speed'],
+                keyboard: { focused: true, global: false },
+                disableContextMenu: true,
+                previewThumbnails: previewUrl ? { enabled: true, src: previewUrl } : { enabled: false }
+            });
+        }
+
         function attachNative() {
             video.src = manifestUrl;
             video.addEventListener('loadedmetadata', function () {
                 setState('');
+                attemptAutoplay();
             }, { once: true });
             video.addEventListener('error', function () {
                 setState('Secure playback could not be started in this browser.', true);
@@ -1544,6 +1907,13 @@ function ve_video_secure_player_script(array $session): string
             return;
         }
 
+        if (stage) {
+            stage.addEventListener('contextmenu', function (event) {
+                event.preventDefault();
+            });
+        }
+
+        bootUi();
         setState('Securing playback session...');
 
         if (window.Hls && window.Hls.isSupported()) {
@@ -1561,11 +1931,7 @@ function ve_video_secure_player_script(array $session): string
 
             hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
                 setState('');
-                var playPromise = video.play();
-
-                if (playPromise && typeof playPromise.catch === 'function') {
-                    playPromise.catch(function () {});
-                }
+                attemptAutoplay();
             });
 
             hls.on(window.Hls.Events.ERROR, function (event, data) {
@@ -1640,16 +2006,43 @@ function ve_render_secure_video_page(string $publicId, bool $embed = false): voi
 HTML);
     }
 
+    $ownerSettings = ve_video_owner_settings($video);
     $session = ve_video_issue_playback_session($video);
     $duration = (float) ($video['duration_seconds'] ?? 0);
     $durationLabel = $duration > 0 ? gmdate($duration >= 3600 ? 'H:i:s' : 'i:s', (int) round($duration)) : 'Ready';
-    $script = ve_video_secure_player_script($session);
+    $previewVttUrl = is_file(ve_video_preview_vtt_path($video))
+        ? '/stream/' . rawurlencode($publicId) . '/preview.vtt?token=' . rawurlencode((string) $session['token'])
+        : null;
+    $script = ve_video_secure_player_script($session, $previewVttUrl);
     $watchUrl = ve_h(ve_absolute_url('/d/' . rawurlencode($publicId)));
     $embedUrl = ve_h(ve_absolute_url('/e/' . rawurlencode($publicId)));
+    $showEmbedTitle = !$embed || (bool) ($ownerSettings['show_embed_title'] ?? false);
+    $playerColour = strtolower(trim((string) ($ownerSettings['player_colour'] ?? 'ff9900')));
+
+    if (!preg_match('/^[a-f0-9]{6}$/', $playerColour)) {
+        $playerColour = 'ff9900';
+    }
+
+    $posterAsset = ve_video_resolve_poster_asset($video);
+    $posterAttribute = '';
+
+    if (is_array($posterAsset)) {
+        $posterUrl = ve_h(ve_url('/stream/' . rawurlencode($publicId) . '/poster.jpg?token=' . rawurlencode((string) $session['token'])));
+        $posterAttribute = ' poster="' . $posterUrl . '"';
+    }
+
+    $logoPath = trim((string) ($ownerSettings['logo_path'] ?? ''));
+    $logoBadge = '';
+
+    if ($logoPath !== '') {
+        $logoBadgeUrl = ve_h(ve_url('/' . ltrim($logoPath, '/')));
+        $logoBadge = '<img class="ve-logo-badge" src="' . $logoBadgeUrl . '" alt="Player logo">';
+    }
+
     $bodyPadding = $embed ? '0' : '32px 20px 48px';
     $cardRadius = $embed ? '0' : '24px';
     $boxShadow = $embed ? 'none' : '0 30px 80px rgba(0,0,0,0.45)';
-    $bodyPanelPadding = $embed ? '0' : '24px';
+    $bodyPanelPadding = $embed ? ($showEmbedTitle ? '16px 18px 18px' : '0') : '24px';
     $titleSize = $embed ? '1rem' : '1.8rem';
 
     $playerMeta = '';
@@ -1668,6 +2061,8 @@ HTML);
 HTML;
     }
 
+    $titleMarkup = $showEmbedTitle ? '<h1>' . $title . '</h1>' : '';
+
     ve_html(<<<HTML
 <!doctype html>
 <html lang="en">
@@ -1676,6 +2071,7 @@ HTML;
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{$title}</title>
     <meta name="robots" content="noindex,nofollow">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/plyr@3/dist/plyr.css">
     <style>
         :root {
             --ve-bg: #040404;
@@ -1683,7 +2079,8 @@ HTML;
             --ve-border: rgba(255, 255, 255, 0.08);
             --ve-text: #f5f5f5;
             --ve-muted: #a8a8a8;
-            --ve-accent: #ff9900;
+            --ve-accent: #{$playerColour};
+            --plyr-color-main: #{$playerColour};
         }
         * { box-sizing: border-box; }
         body {
@@ -1712,11 +2109,26 @@ HTML;
             aspect-ratio: 16 / 9;
             background: #000;
         }
+        .ve-stage .plyr,
         .ve-stage video {
             width: 100%;
             height: 100%;
             display: block;
             background: #000;
+        }
+        .ve-stage .plyr--full-ui input[type=range] {
+            color: var(--ve-accent);
+        }
+        .ve-logo-badge {
+            position: absolute;
+            top: 18px;
+            left: 18px;
+            z-index: 5;
+            max-width: min(22%, 150px);
+            max-height: 72px;
+            object-fit: contain;
+            pointer-events: none;
+            filter: drop-shadow(0 10px 22px rgba(0,0,0,0.45));
         }
         .ve-body {
             padding: {$bodyPanelPadding};
@@ -1774,6 +2186,7 @@ HTML;
     <div class="ve-shell">
         <div class="ve-card">
             <div class="ve-stage">
+                {$logoBadge}
                 <video
                     id="ve-secure-player"
                     controls
@@ -1781,14 +2194,11 @@ HTML;
                     preload="metadata"
                     controlsList="nodownload noplaybackrate"
                     disablepictureinpicture
+                    crossorigin="use-credentials"{$posterAttribute}
                 ></video>
                 <div id="ve-player-state" class="ve-player-state"></div>
             </div>
-            <div class="ve-body">
-                <h1>{$title}</h1>
-                {$playerMeta}
-                {$sharePanel}
-            </div>
+            <div class="ve-body">{$titleMarkup}{$playerMeta}{$sharePanel}</div>
         </div>
     </div>
     {$script}

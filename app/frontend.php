@@ -1132,6 +1132,18 @@ function ve_dispatch(): void
         ve_video_stream_key($matches[1]);
     }
 
+    if (preg_match('#^/stream/([A-Za-z0-9_-]+)/poster\.jpg$#', $path, $matches) === 1) {
+        ve_video_stream_poster($matches[1]);
+    }
+
+    if (preg_match('#^/stream/([A-Za-z0-9_-]+)/preview\.vtt$#', $path, $matches) === 1) {
+        ve_video_stream_preview_vtt($matches[1]);
+    }
+
+    if (preg_match('#^/stream/([A-Za-z0-9_-]+)/preview\.jpg$#', $path, $matches) === 1) {
+        ve_video_stream_preview_sprite($matches[1]);
+    }
+
     if (preg_match('#^/stream/([A-Za-z0-9_-]+)/segment/([^/]+)$#', $path, $matches) === 1) {
         ve_video_stream_segment($matches[1], rawurldecode($matches[2]));
     }

@@ -1,0 +1,8 @@
+tools/downloads/
+tools/ffmpeg/bin/
+storage/private/player/
+storage/private/videos/
+storage/uploads/logos/
+storage/*.sqlite
+storage/*.sqlite-*
+storage/app.key

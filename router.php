@@ -11,6 +11,12 @@ if (is_string($path) && ($path === '/video-engine' || str_starts_with($path, '/v
 }
 
 if (is_string($path) && $path !== '/') {
+    if (str_starts_with($path, '/storage/private/')) {
+        http_response_code(403);
+        echo 'Forbidden';
+        return true;
+    }
+
     $file = __DIR__ . $path;
 
     if (is_file($file)) {
