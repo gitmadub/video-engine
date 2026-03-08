@@ -1294,6 +1294,10 @@ function ve_dispatch(): void
                 ve_render_videos_dashboard_page();
             }
 
+            if ($slug === 'reports') {
+                ve_render_reports_page();
+            }
+
             ve_render_dashboard_file(VE_DASHBOARD_PAGES[$slug]);
         }
     }
