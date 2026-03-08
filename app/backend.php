@@ -77,6 +77,31 @@ function ve_start_session(): void
     session_start();
 }
 
+function ve_request_method(): string
+{
+    return strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+}
+
+function ve_is_method(string $method): bool
+{
+    return ve_request_method() === strtoupper($method);
+}
+
+function ve_method_not_allowed(array $allowedMethods): void
+{
+    http_response_code(405);
+    header('Allow: ' . implode(', ', $allowedMethods));
+
+    if (str_starts_with((string) ($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json') || str_starts_with(ve_request_path(), '/api/')) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Method not allowed.',
+        ], 405);
+    }
+
+    ve_html('<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Method Not Allowed</title></head><body><h1>405</h1><p>Method not allowed.</p></body></html>', 405);
+}
+
 function ve_db(): PDO
 {
     static $pdo;
@@ -224,6 +249,19 @@ function ve_require_csrf(?string $token): void
         ve_flash('danger', 'Your session token is invalid. Refresh the page and try again.');
         ve_back_redirect(ve_url('/dashboard/settings'));
     }
+}
+
+function ve_request_csrf_token(): ?string
+{
+    $headerToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? null;
+
+    if (is_string($headerToken) && $headerToken !== '') {
+        return $headerToken;
+    }
+
+    $requestToken = $_POST['token'] ?? null;
+
+    return is_string($requestToken) ? $requestToken : null;
 }
 
 function ve_random_token(int $bytes = 24): string
@@ -568,8 +606,9 @@ function ve_regenerate_api_key_for_user(int $userId): string
 
 function ve_handle_login_ajax(): void
 {
-    $login = trim((string) ($_GET['login'] ?? $_POST['login'] ?? ''));
-    $password = (string) ($_GET['password'] ?? $_POST['password'] ?? '');
+    ve_require_csrf(ve_request_csrf_token());
+    $login = trim((string) ($_POST['login'] ?? ''));
+    $password = (string) ($_POST['password'] ?? '');
 
     if ($login === '' || $password === '') {
         ve_json([
@@ -597,10 +636,11 @@ function ve_handle_login_ajax(): void
 
 function ve_handle_registration_ajax(): void
 {
-    $username = trim((string) ($_GET['usr_login'] ?? $_POST['usr_login'] ?? ''));
-    $email = strtolower(trim((string) ($_GET['usr_email'] ?? $_POST['usr_email'] ?? '')));
-    $password = (string) ($_GET['usr_password'] ?? $_POST['usr_password'] ?? '');
-    $password2 = (string) ($_GET['usr_password2'] ?? $_POST['usr_password2'] ?? '');
+    ve_require_csrf(ve_request_csrf_token());
+    $username = trim((string) ($_POST['usr_login'] ?? ''));
+    $email = strtolower(trim((string) ($_POST['usr_email'] ?? '')));
+    $password = (string) ($_POST['usr_password'] ?? '');
+    $password2 = (string) ($_POST['usr_password2'] ?? '');
 
     $error = ve_validate_username($username)
         ?? ve_validate_email($email)
@@ -657,11 +697,12 @@ function ve_get_valid_reset_token(string $rawToken): ?array
 
 function ve_handle_forgot_password_ajax(): void
 {
-    $token = trim((string) ($_GET['sess_id'] ?? $_POST['sess_id'] ?? ''));
+    ve_require_csrf(ve_request_csrf_token());
+    $token = trim((string) ($_POST['sess_id'] ?? ''));
 
     if ($token !== '') {
-        $password = (string) ($_GET['password'] ?? $_POST['password'] ?? '');
-        $password2 = (string) ($_GET['password2'] ?? $_POST['password2'] ?? '');
+        $password = (string) ($_POST['password'] ?? '');
+        $password2 = (string) ($_POST['password2'] ?? '');
         $error = ve_validate_password($password, $password2);
 
         if ($error !== null) {
@@ -701,7 +742,7 @@ function ve_handle_forgot_password_ajax(): void
         ]);
     }
 
-    $login = trim((string) ($_GET['usr_login'] ?? $_POST['usr_login'] ?? ''));
+    $login = trim((string) ($_POST['usr_login'] ?? ''));
 
     if ($login === '') {
         ve_json([
@@ -774,7 +815,7 @@ function ve_allowed_payment_methods(): array
 
 function ve_save_account_settings(int $userId): void
 {
-    ve_require_csrf($_POST['token'] ?? null);
+    ve_require_csrf(ve_request_csrf_token());
 
     $paymentMethod = trim((string) ($_POST['usr_pay_type'] ?? ''));
     $paymentId = trim((string) ($_POST['usr_pay_email'] ?? ''));
@@ -833,7 +874,7 @@ function ve_save_account_settings(int $userId): void
 
 function ve_save_password(int $userId): void
 {
-    ve_require_csrf($_POST['token'] ?? null);
+    ve_require_csrf(ve_request_csrf_token());
     $user = ve_require_auth();
     $currentPassword = (string) ($_POST['password_current'] ?? '');
     $newPassword = (string) ($_POST['password_new'] ?? '');
@@ -865,7 +906,7 @@ function ve_save_password(int $userId): void
 
 function ve_save_email(int $userId): void
 {
-    ve_require_csrf($_POST['token'] ?? null);
+    ve_require_csrf(ve_request_csrf_token());
     $email = strtolower(trim((string) ($_POST['usr_email'] ?? '')));
     $email2 = strtolower(trim((string) ($_POST['usr_email2'] ?? '')));
     $error = ve_validate_email($email);
@@ -960,7 +1001,7 @@ function ve_store_logo_upload(array $file, int $userId): string
 
 function ve_save_player_settings(int $userId): void
 {
-    ve_require_csrf($_POST['token'] ?? null);
+    ve_require_csrf(ve_request_csrf_token());
 
     $playerImageMode = trim((string) ($_POST['usr_player_image'] ?? ''));
     $playerColour = ltrim(trim((string) ($_POST['usr_player_colour'] ?? 'ff9900')), '#');
@@ -1013,7 +1054,7 @@ function ve_save_player_settings(int $userId): void
 
 function ve_save_ad_settings(int $userId): void
 {
-    ve_require_csrf($_POST['token'] ?? null);
+    ve_require_csrf(ve_request_csrf_token());
 
     $vastUrl = trim((string) ($_POST['vast_url'] ?? ''));
     $popType = trim((string) ($_POST['pop_type'] ?? '1'));
@@ -1058,17 +1099,18 @@ function ve_save_ad_settings(int $userId): void
     ve_redirect('/dashboard/settings#premium_settings');
 }
 
-function ve_fetch_notifications(int $userId, ?int $openNotificationId = null): array
+function ve_mark_notification_read(int $userId, int $notificationId): void
 {
-    if ($openNotificationId !== null) {
-        $stmt = ve_db()->prepare('UPDATE notifications SET is_read = 1, read_at = :read_at WHERE id = :id AND user_id = :user_id');
-        $stmt->execute([
-            ':read_at' => ve_now(),
-            ':id' => $openNotificationId,
-            ':user_id' => $userId,
-        ]);
-    }
+    $stmt = ve_db()->prepare('UPDATE notifications SET is_read = 1, read_at = :read_at WHERE id = :id AND user_id = :user_id');
+    $stmt->execute([
+        ':read_at' => ve_now(),
+        ':id' => $notificationId,
+        ':user_id' => $userId,
+    ]);
+}
 
+function ve_fetch_notifications(int $userId): array
+{
     $stmt = ve_db()->prepare('SELECT id, subject, message, is_read, created_at FROM notifications WHERE user_id = :user_id ORDER BY id DESC LIMIT 20');
     $stmt->execute([':user_id' => $userId]);
 
@@ -1154,10 +1196,9 @@ function ve_handle_custom_domain_list(): void
 function ve_handle_custom_domain_add(): void
 {
     $user = ve_require_auth();
-    $token = $_POST['token'] ?? $_GET['token'] ?? null;
-    ve_require_csrf(is_string($token) ? $token : null);
+    ve_require_csrf(ve_request_csrf_token());
 
-    $domain = strtolower(trim((string) ($_POST['domain'] ?? $_GET['domain'] ?? '')));
+    $domain = strtolower(trim((string) ($_POST['domain'] ?? '')));
 
     if ($domain === '' || !ve_is_valid_domain($domain)) {
         ve_json([
@@ -1204,9 +1245,8 @@ function ve_handle_custom_domain_add(): void
 function ve_handle_custom_domain_delete(): void
 {
     $user = ve_require_auth();
-    $token = $_POST['token'] ?? $_GET['token'] ?? null;
-    ve_require_csrf(is_string($token) ? $token : null);
-    $domain = strtolower(trim((string) ($_POST['domain'] ?? $_GET['domain'] ?? '')));
+    ve_require_csrf(ve_request_csrf_token());
+    $domain = strtolower(trim((string) ($_POST['domain'] ?? '')));
 
     $stmt = ve_db()->prepare('DELETE FROM custom_domains WHERE user_id = :user_id AND lower(domain) = lower(:domain)');
     $stmt->execute([
@@ -1226,8 +1266,7 @@ function ve_handle_custom_domain_delete(): void
 function ve_handle_delete_account(): void
 {
     $user = ve_require_auth();
-    $token = $_POST['token'] ?? $_GET['token'] ?? null;
-    ve_require_csrf(is_string($token) ? $token : null);
+    ve_require_csrf(ve_request_csrf_token());
 
     $reasonCode = trim((string) ($_POST['reason_code'] ?? ''));
     $reason = trim((string) ($_POST['reason'] ?? ''));
@@ -1327,6 +1366,26 @@ function ve_runtime_html_transform(string $html, string $relativePath = ''): str
         if (is_array($user)) {
             $html = str_replace('videoengine', (string) $user['username'], $html);
         }
+
+        $html = str_replace('href="/?op=logout"', 'href="/logout"', $html);
+    }
+
+    if ($relativePath === 'index.html') {
+        $html = str_replace(
+            '<form method="POST" action="/" name="FL" class="js_auth">',
+            '<form method="POST" action="/login" name="FL" class="js_auth">',
+            $html
+        );
+        $html = str_replace(
+            '<form method="POST" onSubmit="return CheckForm(this)" class="js_auth">',
+            '<form method="POST" action="/register" onSubmit="return CheckForm(this)" class="js_auth">',
+            $html
+        );
+        $html = str_replace(
+            '<form method="POST" class="js_auth">',
+            '<form method="POST" action="/password/forgot" class="js_auth">',
+            $html
+        );
     }
 
     return $html;
@@ -1475,7 +1534,7 @@ function ve_settings_script(): string
         }
 
         function loadDomains(successMessage) {
-            $.getJSON(appUrl('/?op=custom_domain_list'))
+            $.getJSON(appUrl('/api/domains'))
                 .done(function (response) {
                     dnsTarget = response.dns_target || dnsTarget;
                     renderCustomDomains(response.domains || []);
@@ -1512,7 +1571,7 @@ function ve_settings_script(): string
 
             $.ajax({
                 type: 'POST',
-                url: appUrl('/?op=custom_domain_add'),
+                url: appUrl('/api/domains'),
                 dataType: 'json',
                 data: {
                     token: csrfToken,
@@ -1536,12 +1595,14 @@ function ve_settings_script(): string
             var domain = $(this).data('domain');
 
             $.ajax({
-                type: 'POST',
-                url: appUrl('/?op=custom_domain_delete'),
+                type: 'DELETE',
+                url: appUrl('/api/domains/' + encodeURIComponent(domain)),
                 dataType: 'json',
                 data: {
-                    token: csrfToken,
-                    domain: domain
+                    token: csrfToken
+                },
+                headers: {
+                    'X-CSRF-Token': csrfToken
                 }
             }).done(function (response) {
                 if (response.status !== 'ok') {
@@ -1578,7 +1639,7 @@ function ve_settings_script(): string
 
             $.ajax({
                 type: 'POST',
-                url: appUrl('/?op=delete_account'),
+                url: appUrl('/account/delete'),
                 dataType: 'json',
                 data: $.param(payload)
             }).done(function (response) {
@@ -1599,7 +1660,10 @@ function ve_settings_script(): string
                 return;
             }
 
-            window.location.href = appUrl('/genrate-api?token=' + encodeURIComponent(csrfToken));
+            var form = $('<form method="POST" action="' + appUrl('/account/api-key/regenerate') + '"></form>');
+            form.append('<input type="hidden" name="token" value="' + csrfToken + '">');
+            $('body').append(form);
+            form.trigger('submit');
         });
     });
 </script>
@@ -1617,6 +1681,7 @@ function ve_render_settings_page(): void
     $html = str_replace('Current email: <b>lzcoeyhl@telegmail.com</b>', 'Current email: <b>' . ve_h((string) $user['email']) . '</b>', $html);
     $html = str_replace('value="559348grlz3u7np0z0hccb"', 'value="' . ve_h(ve_user_api_key($user)) . '"', $html);
     $html = str_replace('value="8wmdu9ngch"', 'value="' . ve_h(ve_user_ftp_password($user)) . '"', $html);
+    $html = str_replace('href="/?op=logout"', 'href="/logout"', $html);
     $html = str_replace(
         'Just purchase a domain and point the DNS as shown below. This frontend preview stores domains in the current browser only.',
         'Attach a redirect domain to your account and point its A record to the required target below.',
@@ -1627,10 +1692,35 @@ function ve_render_settings_page(): void
         'This workflow immediately closes the account, revokes active sessions, and prevents future logins.',
         $html
     );
+    $html = str_replace(
+        "<form method=\"POST\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_account\">",
+        "<form method=\"POST\" action=\"/account/settings\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_account\">",
+        $html
+    );
+    $html = str_replace(
+        "<form method=\"POST\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_password\">",
+        "<form method=\"POST\" action=\"/account/password\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_password\">",
+        $html
+    );
+    $html = str_replace(
+        "<form method=\"POST\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_email\">",
+        "<form method=\"POST\" action=\"/account/email\">\n                        <input type=\"hidden\" name=\"op\" value=\"my_email\">",
+        $html
+    );
+    $html = str_replace(
+        "<form method=\"POST\" enctype=\"multipart/form-data\" class=\"mb-4\">\n                        <input type=\"hidden\" name=\"op\" value=\"upload_logo\">",
+        "<form method=\"POST\" action=\"/account/player\" enctype=\"multipart/form-data\" class=\"mb-4\">\n                        <input type=\"hidden\" name=\"op\" value=\"upload_logo\">",
+        $html
+    );
+    $html = str_replace(
+        "<form method=\"POST\">\n                        <input type=\"hidden\" name=\"op\" value=\"premium_settings\">",
+        "<form method=\"POST\" action=\"/account/advertising\">\n                        <input type=\"hidden\" name=\"op\" value=\"premium_settings\">",
+        $html
+    );
     $html = str_replace(' disabled="disabled"', '', $html);
     $html = preg_replace('/(<input type="hidden" name="token" value=")[^"]*(")/i', '$1' . ve_csrf_token() . '$2', $html) ?? $html;
     $html = str_replace('<input type="hidden" name="logo_mode" value="image">', '<input type="hidden" name="logo_mode" value="image">' . "\n                        " . '<input type="hidden" name="token" value="' . ve_h(ve_csrf_token()) . '">', $html);
-    $html = str_replace('<form class="delete-account-form" method="POST">', '<form class="delete-account-form" method="POST"><input type="hidden" name="token" value="' . ve_h(ve_csrf_token()) . '">', $html);
+    $html = str_replace('<form class="delete-account-form" method="POST">', '<form class="delete-account-form" method="POST" action="/account/delete"><input type="hidden" name="token" value="' . ve_h(ve_csrf_token()) . '">', $html);
 
     $html = ve_html_set_select_value($html, 'usr_pay_type', (string) ($settings['payment_method'] ?? 'Webmoney'));
     $html = ve_html_set_input_value($html, 'usr_pay_email', (string) ($settings['payment_id'] ?? ''));

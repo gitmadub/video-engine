@@ -200,6 +200,8 @@ function ve_rewrite_html_paths(string $html): string
     $prefixes = [
         '/assets/',
         '/js/',
+        '/api/',
+        '/account/',
         '/dashboard',
         '/videos',
         '/settings',
@@ -215,6 +217,10 @@ function ve_rewrite_html_paths(string $html): string
         '/earn-money',
         '/premium',
         '/terms-and-conditions',
+        '/login',
+        '/register',
+        '/logout',
+        '/password/',
         '/genrate-api',
         '/subscene/',
         '/data/',
@@ -675,53 +681,65 @@ function ve_back_redirect(string $fallback): void
     ve_redirect($target);
 }
 
+function ve_legacy_endpoint_removed(string $replacementPath, array $allowedMethods = ['POST']): void
+{
+    http_response_code(410);
+
+    if ($replacementPath !== '') {
+        header('X-Replacement-Endpoint: ' . ve_url($replacementPath));
+    }
+
+    if ($allowedMethods !== []) {
+        header('Allow: ' . implode(', ', $allowedMethods));
+    }
+
+    ve_json([
+        'status' => 'fail',
+        'message' => 'Legacy endpoint removed. Use ' . ve_url($replacementPath) . '.',
+    ], 410);
+}
+
 function ve_handle_op(string $op, string $path): bool
 {
     switch ($op) {
         case 'notifications':
-            $user = ve_current_user();
-            ve_json(is_array($user) ? ve_fetch_notifications((int) $user['id'], isset($_GET['open']) ? (int) $_GET['open'] : null) : []);
+            ve_legacy_endpoint_removed('/api/notifications', ['GET']);
 
         case 'login_ajax':
-            ve_handle_login_ajax();
+            ve_legacy_endpoint_removed('/login', ['POST']);
 
         case 'registration_ajax':
-            ve_handle_registration_ajax();
+            ve_legacy_endpoint_removed('/register', ['POST']);
 
         case 'forgot_pass_ajax':
-            ve_handle_forgot_password_ajax();
+            ve_legacy_endpoint_removed('/password/forgot', ['POST']);
 
         case 'logout':
-            ve_logout_current_user();
-            ve_redirect('/');
+            ve_legacy_endpoint_removed('/logout', ['POST']);
 
         case 'my_password':
-            $user = ve_require_auth();
-            ve_save_password((int) $user['id']);
+            ve_legacy_endpoint_removed('/account/password', ['POST']);
 
         case 'my_email':
-            $user = ve_require_auth();
-            ve_save_email((int) $user['id']);
+            ve_legacy_endpoint_removed('/account/email', ['POST']);
 
         case 'upload_logo':
-            $user = ve_require_auth();
-            ve_save_player_settings((int) $user['id']);
+            ve_legacy_endpoint_removed('/account/player', ['POST']);
 
         case 'premium_settings':
-            $user = ve_require_auth();
-            ve_save_ad_settings((int) $user['id']);
+            ve_legacy_endpoint_removed('/account/advertising', ['POST']);
 
         case 'custom_domain_list':
-            ve_handle_custom_domain_list();
+            ve_legacy_endpoint_removed('/api/domains', ['GET']);
 
         case 'custom_domain_add':
-            ve_handle_custom_domain_add();
+            ve_legacy_endpoint_removed('/api/domains', ['POST']);
 
         case 'custom_domain_delete':
-            ve_handle_custom_domain_delete();
+            ve_legacy_endpoint_removed('/api/domains/{domain}', ['DELETE']);
 
         case 'delete_account':
-            ve_handle_delete_account();
+            ve_legacy_endpoint_removed('/account/delete', ['POST']);
 
         case 'dmca_manager':
             if (isset($_GET['loadmore'])) {
@@ -787,8 +805,7 @@ function ve_handle_op(string $op, string $path): bool
 
         case 'register_save':
         case 'my_account':
-            $user = ve_require_auth();
-            ve_save_account_settings((int) $user['id']);
+            ve_legacy_endpoint_removed($op === 'register_save' ? '/register' : '/account/settings', ['POST']);
 
         case 'forgot_pass':
         case 'my_reports':
@@ -806,6 +823,156 @@ function ve_dispatch(): void
     $path = ve_request_path();
     $op = $_REQUEST['op'] ?? null;
 
+    if ($path === '/login') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_login_ajax();
+    }
+
+    if ($path === '/register') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_registration_ajax();
+    }
+
+    if ($path === '/password/forgot') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_forgot_password_ajax();
+    }
+
+    if ($path === '/password/reset') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_forgot_password_ajax();
+    }
+
+    if ($path === '/logout') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_require_csrf(ve_request_csrf_token());
+        ve_logout_current_user();
+        ve_redirect('/');
+    }
+
+    if ($path === '/api/notifications') {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        $user = ve_current_user();
+        ve_json(is_array($user) ? ve_fetch_notifications((int) $user['id']) : []);
+    }
+
+    if (preg_match('#^/api/notifications/(\d+)/read$#', $path, $matches) === 1) {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        $user = ve_require_auth();
+        ve_require_csrf(ve_request_csrf_token());
+        ve_mark_notification_read((int) $user['id'], (int) $matches[1]);
+        ve_json([
+            'status' => 'ok',
+        ]);
+    }
+
+    if ($path === '/api/domains') {
+        if (ve_is_method('GET')) {
+            ve_handle_custom_domain_list();
+        }
+
+        if (ve_is_method('POST')) {
+            ve_handle_custom_domain_add();
+        }
+
+        ve_method_not_allowed(['GET', 'POST']);
+    }
+
+    if (preg_match('#^/api/domains/(.+)$#', $path, $matches) === 1) {
+        if (!ve_is_method('DELETE')) {
+            ve_method_not_allowed(['DELETE']);
+        }
+
+        $_POST['domain'] = rawurldecode($matches[1]);
+        ve_handle_custom_domain_delete();
+    }
+
+    if ($path === '/account/settings') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        $user = ve_require_auth();
+        ve_save_account_settings((int) $user['id']);
+    }
+
+    if ($path === '/account/password') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        $user = ve_require_auth();
+        ve_save_password((int) $user['id']);
+    }
+
+    if ($path === '/account/email') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        $user = ve_require_auth();
+        ve_save_email((int) $user['id']);
+    }
+
+    if ($path === '/account/player') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        $user = ve_require_auth();
+        ve_save_player_settings((int) $user['id']);
+    }
+
+    if ($path === '/account/advertising') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        $user = ve_require_auth();
+        ve_save_ad_settings((int) $user['id']);
+    }
+
+    if ($path === '/account/delete') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_delete_account();
+    }
+
+    if ($path === '/account/api-key/regenerate') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        $user = ve_require_auth();
+        ve_require_csrf(ve_request_csrf_token());
+        ve_regenerate_api_key_for_user((int) $user['id']);
+        ve_flash('success', 'API key regenerated successfully.');
+        ve_redirect('/dashboard/settings');
+    }
+
     if (is_string($op) && $op !== '' && ve_handle_op($op, $path)) {
         return;
     }
@@ -819,17 +986,7 @@ function ve_dispatch(): void
     }
 
     if ($path === '/genrate-api/' || $path === '/genrate-api') {
-        $user = ve_require_auth();
-        $token = $_GET['token'] ?? null;
-
-        if (!is_string($token) || !hash_equals(ve_csrf_token(), $token)) {
-            ve_flash('danger', 'Your session token is invalid. Refresh the settings page and try again.');
-            ve_redirect('/dashboard/settings');
-        }
-
-        ve_regenerate_api_key_for_user((int) $user['id']);
-        ve_flash('success', 'API key regenerated successfully.');
-        ve_redirect('/dashboard/settings');
+        ve_legacy_endpoint_removed('/account/api-key/regenerate', ['POST']);
     }
 
     if (str_starts_with($path, '/subscene/')) {

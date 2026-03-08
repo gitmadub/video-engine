@@ -45,6 +45,16 @@ final class HttpClient
             CURLOPT_CUSTOMREQUEST => strtoupper($method),
         ]);
 
+        if (isset($options['headers']) && is_array($options['headers']) && $options['headers'] !== []) {
+            $headerLines = [];
+
+            foreach ($options['headers'] as $name => $value) {
+                $headerLines[] = $name . ': ' . $value;
+            }
+
+            curl_setopt($curl, CURLOPT_HTTPHEADER, $headerLines);
+        }
+
         if (isset($options['query']) && is_array($options['query']) && $options['query'] !== []) {
             $separator = str_contains($url, '?') ? '&' : '?';
             curl_setopt($curl, CURLOPT_URL, $url . $separator . http_build_query($options['query']));
@@ -100,6 +110,15 @@ function extract_api_key(string $html): string
     preg_match('/<label>API key<\/label>.*?<input[^>]*value="([^"]+)"/is', $html, $matches);
     assert_true(isset($matches[1]), 'Unable to find API key in settings page.');
     return html_entity_decode($matches[1], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function extract_runtime_token(string $html): string
+{
+    preg_match('/window\.VE_CSRF_TOKEN=("[^"]+"|\'[^\']+\')/i', $html, $matches);
+    assert_true(isset($matches[1]), 'Unable to find runtime CSRF token.');
+    $decoded = json_decode($matches[1], true);
+    assert_true(is_string($decoded) && $decoded !== '', 'Runtime CSRF token was invalid.');
+    return $decoded;
 }
 
 function create_test_png(string $path): void
@@ -179,21 +198,46 @@ $env = array_merge($_ENV, [
     'VE_CUSTOM_DOMAIN_TARGET' => '127.0.0.1',
 ]);
 $serverPid = null;
+$serverProcess = null;
 
 try {
     if ($managedServer) {
-        $envPrefix = '';
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $envPrefix = '';
 
-        foreach ($env as $key => $value) {
-            if (str_starts_with((string) $key, 'VE_')) {
-                $envPrefix .= 'set ' . $key . '=' . str_replace('"', '\"', (string) $value) . ' && ';
+            foreach ($env as $key => $value) {
+                if (str_starts_with((string) $key, 'VE_')) {
+                    $envPrefix .= 'set ' . $key . '=' . str_replace('"', '\"', (string) $value) . ' && ';
+                }
             }
-        }
 
-        $command = 'cmd /c "' . $envPrefix . 'cd /d "' . $root . '" && start "" /b "' . $php . '" -S 127.0.0.1:' . $port . ' router.php"';
-        exec($command);
-        wait_for_server($baseUrl);
-        $serverPid = find_listening_pid($port);
+            $command = 'cmd /c "' . $envPrefix . 'cd /d "' . $root . '" && start "" /b "' . $php . '" -S 127.0.0.1:' . $port . ' router.php"';
+            pclose(popen($command, 'r'));
+            wait_for_server($baseUrl);
+            $serverPid = find_listening_pid($port);
+        } else {
+            $devNull = '/dev/null';
+            $descriptors = [
+                0 => ['pipe', 'r'],
+                1 => ['file', $devNull, 'a'],
+                2 => ['file', $devNull, 'a'],
+            ];
+            $serverProcess = proc_open([$php, '-S', '127.0.0.1:' . $port, 'router.php'], $descriptors, $pipes, $root, $env);
+
+            if (!is_resource($serverProcess)) {
+                throw new RuntimeException('Unable to start the built-in PHP server.');
+            }
+
+            foreach ($pipes as $pipe) {
+                if (is_resource($pipe)) {
+                    fclose($pipe);
+                }
+            }
+
+            wait_for_server($baseUrl);
+            $status = proc_get_status($serverProcess);
+            $serverPid = is_array($status) && isset($status['pid']) ? (int) $status['pid'] : find_listening_pid($port);
+        }
     }
 
     $client = new HttpClient($baseUrl, $cookiePath);
@@ -201,32 +245,45 @@ try {
 
     echo "server ready\n";
 
+    $homePage = $client->request('GET', '/');
+    assert_true($homePage['status'] === 200, 'Home page should load.');
+    $publicCsrf = extract_runtime_token($homePage['body']);
+
+    $registerGet = $client->request('GET', '/register');
+    assert_true($registerGet['status'] === 405, 'GET /register should be rejected.');
+
+    $legacyRegistration = $client->request('GET', '/?op=registration_ajax&usr_login=legacy&usr_email=legacy%40example.com&usr_password=Legacy123&usr_password2=Legacy123');
+    assert_true($legacyRegistration['status'] === 410, 'Legacy registration endpoint should be disabled.');
+
     $response = $client->request('GET', '/dashboard/settings');
     assert_true(in_array($response['status'], [301, 302], true), 'Unauthenticated settings access should redirect.');
 
-    $registration = json_response($client->request('GET', '/?op=registration_ajax', [
-        'query' => [
+    $registration = json_response($client->request('POST', '/register', [
+        'form' => [
             'usr_login' => 'alice_case',
             'usr_email' => 'alice@example.com',
             'usr_password' => 'Start123',
             'usr_password2' => 'Start123',
+            'token' => $publicCsrf,
         ],
     ]));
     assert_true(($registration['status'] ?? null) === 'ok', 'Registration should succeed.');
     echo "registration ok\n";
 
-    $loginFail = json_response($client->request('GET', '/?op=login_ajax', [
-        'query' => [
+    $loginFail = json_response($client->request('POST', '/login', [
+        'form' => [
             'login' => 'alice_case',
             'password' => 'Wrong123',
+            'token' => $publicCsrf,
         ],
     ]));
     assert_true(($loginFail['status'] ?? null) === 'fail', 'Login with a wrong password should fail.');
 
-    $login = json_response($client->request('GET', '/?op=login_ajax', [
-        'query' => [
+    $login = json_response($client->request('POST', '/login', [
+        'form' => [
             'login' => 'alice_case',
             'password' => 'Start123',
+            'token' => $publicCsrf,
         ],
     ]));
     assert_true(($login['status'] ?? null) === 'redirect', 'Login should return a redirect payload.');
@@ -238,9 +295,8 @@ try {
     $csrf = extract_hidden_token($settingsPage['body']);
     $oldApiKey = extract_api_key($settingsPage['body']);
 
-    $accountSave = $client->request('POST', '/dashboard/settings', [
+    $accountSave = $client->request('POST', '/account/settings', [
         'form' => [
-            'op' => 'my_account',
             'token' => $csrf,
             'usr_pay_type' => 'Bitcoin',
             'usr_pay_email' => 'wallet-123',
@@ -257,9 +313,8 @@ try {
     echo "account settings ok\n";
 
     create_test_png($logoPath);
-    $playerSave = $client->request('POST', '/dashboard/settings', [
+    $playerSave = $client->request('POST', '/account/player', [
         'form' => [
-            'op' => 'upload_logo',
             'token' => $csrf,
             'logo_mode' => 'image',
             'usr_embed_title' => '1',
@@ -274,9 +329,8 @@ try {
     assert_true(in_array($playerSave['status'], [301, 302], true), 'Saving player settings should redirect.');
     echo "player settings ok\n";
 
-    $adsSave = $client->request('POST', '/dashboard/settings', [
+    $adsSave = $client->request('POST', '/account/advertising', [
         'form' => [
-            'op' => 'premium_settings',
             'token' => $csrf,
             'vast_url' => 'https://ads.example.com/vast.xml',
             'pop_type' => '2',
@@ -287,9 +341,8 @@ try {
     assert_true(in_array($adsSave['status'], [301, 302], true), 'Saving advert settings should redirect.');
     echo "ad settings ok\n";
 
-    $passwordSave = $client->request('POST', '/dashboard/settings', [
+    $passwordSave = $client->request('POST', '/account/password', [
         'form' => [
-            'op' => 'my_password',
             'token' => $csrf,
             'password_current' => 'Start123',
             'password_new' => 'NewPass456',
@@ -299,9 +352,8 @@ try {
     assert_true(in_array($passwordSave['status'], [301, 302], true), 'Changing password should redirect.');
     echo "password change ok\n";
 
-    $emailSave = $client->request('POST', '/dashboard/settings', [
+    $emailSave = $client->request('POST', '/account/email', [
         'form' => [
-            'op' => 'my_email',
             'token' => $csrf,
             'usr_email' => 'alice+updated@example.com',
             'usr_email2' => 'alice+updated@example.com',
@@ -320,7 +372,11 @@ try {
     assert_true(str_contains($settingsPage['body'], 'https://ads.example.com/popup.js'), 'Updated popup URL should render.');
     $csrf = extract_hidden_token($settingsPage['body']);
 
-    $apiRotate = $client->request('GET', '/genrate-api?token=' . urlencode($csrf));
+    $apiRotate = $client->request('POST', '/account/api-key/regenerate', [
+        'form' => [
+            'token' => $csrf,
+        ],
+    ]);
     assert_true(in_array($apiRotate['status'], [301, 302], true), 'API key regeneration should redirect.');
 
     $settingsAfterApiRotate = $client->request('GET', '/dashboard/settings');
@@ -329,7 +385,7 @@ try {
     $csrf = extract_hidden_token($settingsAfterApiRotate['body']);
     echo "api rotate ok\n";
 
-    $domainAdd = json_response($client->request('POST', '/?op=custom_domain_add', [
+    $domainAdd = json_response($client->request('POST', '/api/domains', [
         'form' => [
             'token' => $csrf,
             'domain' => 'example.org',
@@ -338,51 +394,72 @@ try {
     assert_true(($domainAdd['status'] ?? null) === 'ok', 'Custom domain add should succeed.');
     assert_true(count($domainAdd['domains'] ?? []) === 1, 'Custom domain list should contain the added domain.');
 
-    $domainDelete = json_response($client->request('POST', '/?op=custom_domain_delete', [
-        'form' => [
-            'token' => $csrf,
-            'domain' => 'example.org',
+    $domainDelete = json_response($client->request('DELETE', '/api/domains/example.org', [
+        'headers' => [
+            'X-CSRF-Token' => $csrf,
         ],
     ]));
     assert_true(($domainDelete['status'] ?? null) === 'ok', 'Custom domain delete should succeed.');
     assert_true(count($domainDelete['domains'] ?? []) === 0, 'Custom domain list should be empty after deletion.');
     echo "domains ok\n";
 
-    $notifications = json_response($client->request('GET', '/?op=notifications'));
+    $notifications = json_response($client->request('GET', '/api/notifications'));
     assert_true(count($notifications) >= 5, 'Notifications should be generated for account actions.');
 
-    $client->request('GET', '/?op=logout');
+    $legacyNotifications = $client->request('GET', '/?op=notifications');
+    assert_true($legacyNotifications['status'] === 410, 'Legacy notifications endpoint should be disabled.');
 
-    $oldPasswordLogin = json_response($client->request('GET', '/?op=login_ajax', [
-        'query' => [
+    $markNotification = json_response($client->request('POST', '/api/notifications/' . (int) $notifications[0]['id'] . '/read', [
+        'form' => [
+            'token' => $csrf,
+        ],
+    ]));
+    assert_true(($markNotification['status'] ?? null) === 'ok', 'Notification read endpoint should succeed.');
+
+    $client->request('POST', '/logout', [
+        'form' => [
+            'token' => $csrf,
+        ],
+    ]);
+
+    $homePage = $client->request('GET', '/');
+    $publicCsrf = extract_runtime_token($homePage['body']);
+
+    $oldPasswordLogin = json_response($client->request('POST', '/login', [
+        'form' => [
             'login' => 'alice_case',
             'password' => 'Start123',
+            'token' => $publicCsrf,
         ],
     ]));
     assert_true(($oldPasswordLogin['status'] ?? null) === 'fail', 'Old password should stop working after a password change.');
 
-    $newPasswordLogin = json_response($client->request('GET', '/?op=login_ajax', [
-        'query' => [
+    $newPasswordLogin = json_response($client->request('POST', '/login', [
+        'form' => [
             'login' => 'alice+updated@example.com',
             'password' => 'NewPass456',
+            'token' => $publicCsrf,
         ],
     ]));
     assert_true(($newPasswordLogin['status'] ?? null) === 'redirect', 'New password should log in successfully.');
     echo "password relogin ok\n";
 
-    $resetRegistration = json_response($client->request('GET', '/?op=registration_ajax', [
-        'query' => [
+    $resetRegistration = json_response($resetClient->request('POST', '/register', [
+        'form' => [
             'usr_login' => 'reset_case',
             'usr_email' => 'reset@example.com',
             'usr_password' => 'Reset123',
             'usr_password2' => 'Reset123',
+            'token' => extract_runtime_token($resetClient->request('GET', '/')['body']),
         ],
     ]));
     assert_true(($resetRegistration['status'] ?? null) === 'ok', 'Reset-case registration should succeed.');
 
-    $resetRequest = json_response($client->request('GET', '/?op=forgot_pass_ajax', [
-        'query' => [
+    $resetPublicCsrf = extract_runtime_token($resetClient->request('GET', '/')['body']);
+    $resetRequest = json_response($resetClient->request('POST', '/password/forgot', [
+        'form' => [
             'usr_login' => 'reset_case',
+            'token' => $resetPublicCsrf,
         ],
     ]));
     assert_true(($resetRequest['status'] ?? null) === 'ok', 'Forgot-password request should succeed.');
@@ -393,20 +470,24 @@ try {
     $resetPage = $resetClient->request('GET', '/reset-password?token=' . urlencode($resetToken));
     assert_true($resetPage['status'] === 200, 'Reset password page should load.');
     assert_true(str_contains($resetPage['body'], 'name="sess_id" value="' . $resetToken . '"'), 'Reset page should include the token.');
+    $resetPageCsrf = extract_runtime_token($resetPage['body']);
 
-    $resetSave = json_response($resetClient->request('GET', '/?op=forgot_pass_ajax', [
-        'query' => [
+    $resetSave = json_response($resetClient->request('POST', '/password/reset', [
+        'form' => [
             'sess_id' => $resetToken,
             'password' => 'Reset456',
             'password2' => 'Reset456',
+            'token' => $resetPageCsrf,
         ],
     ]));
     assert_true(($resetSave['status'] ?? null) === 'ok', 'Password reset should complete successfully.');
 
-    $resetLogin = json_response($resetClient->request('GET', '/?op=login_ajax', [
-        'query' => [
+    $resetPublicCsrf = extract_runtime_token($resetClient->request('GET', '/')['body']);
+    $resetLogin = json_response($resetClient->request('POST', '/login', [
+        'form' => [
             'login' => 'reset_case',
             'password' => 'Reset456',
+            'token' => $resetPublicCsrf,
         ],
     ]));
     assert_true(($resetLogin['status'] ?? null) === 'redirect', 'Reset user should log in with the new password.');
@@ -414,7 +495,7 @@ try {
 
     $aliceSettings = $client->request('GET', '/dashboard/settings');
     $csrf = extract_hidden_token($aliceSettings['body']);
-    $deleteAccount = json_response($client->request('POST', '/?op=delete_account', [
+    $deleteAccount = json_response($client->request('POST', '/account/delete', [
         'form' => [
             'token' => $csrf,
             'reason_code' => 'other',
@@ -425,10 +506,12 @@ try {
     assert_true(($deleteAccount['status'] ?? null) === 'redirect', 'Delete-account endpoint should return a redirect payload.');
     echo "delete account ok\n";
 
-    $deletedLogin = json_response($client->request('GET', '/?op=login_ajax', [
-        'query' => [
+    $publicCsrf = extract_runtime_token($client->request('GET', '/')['body']);
+    $deletedLogin = json_response($client->request('POST', '/login', [
+        'form' => [
             'login' => 'alice_case',
             'password' => 'NewPass456',
+            'token' => $publicCsrf,
         ],
     ]));
     assert_true(($deletedLogin['status'] ?? null) === 'fail', 'Deleted account should no longer log in.');
@@ -444,14 +527,19 @@ try {
     echo "All auth/settings tests passed.\n";
 } finally {
     if ($managedServer) {
-        if (is_int($serverPid) && $serverPid > 0) {
-            exec('taskkill /F /PID ' . $serverPid . ' >NUL 2>NUL');
-        } else {
-            $pid = find_listening_pid($port);
+        if (is_resource($serverProcess)) {
+            proc_terminate($serverProcess);
+            proc_close($serverProcess);
+        }
 
-            if (is_int($pid) && $pid > 0) {
-                exec('taskkill /F /PID ' . $pid . ' >NUL 2>NUL');
-            }
+        $pid = $serverPid;
+
+        if ((!is_int($pid) || $pid <= 0) && DIRECTORY_SEPARATOR === '\\') {
+            $pid = find_listening_pid($port);
+        }
+
+        if (is_int($pid) && $pid > 0 && DIRECTORY_SEPARATOR === '\\') {
+            exec('taskkill /F /PID ' . $pid . ' >NUL 2>NUL');
         }
     }
 

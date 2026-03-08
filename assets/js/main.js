@@ -16,6 +16,10 @@ function veAppUrl(path) {
     return basePath + path;
 }
 
+function veCsrfToken() {
+    return window.VE_CSRF_TOKEN || '';
+}
+
 $(document).ready(function() {
     var pathname = window.location.pathname;
     var l_first = true;
@@ -73,34 +77,38 @@ $(document).ready(function() {
         }
 
         if (op == 'login_ajax') {
-            url = veAppUrl('/?op=login_ajax');
+            url = veAppUrl('/login');
             formData = {
                 'login': login,
                 'password': password,
-                'loginotp': loginotp
+                'loginotp': loginotp,
+                'token': veCsrfToken()
             };
             button = 'Login <i class="fad fa-arrow-right ml-2"></i>';
         } else if (op == 'register_save') {
-            url = veAppUrl('/?op=registration_ajax');
+            url = veAppUrl('/register');
             formData = {
                 'usr_login': _form.find('input[name="usr_login"]').val(),
                 'usr_email': _form.find('input[name="usr_email"]').val(),
                 'usr_password': _form.find('input[name="usr_password"]').val(),
-                'usr_password2': _form.find('input[name="usr_password2"]').val()
+                'usr_password2': _form.find('input[name="usr_password2"]').val(),
+                'token': veCsrfToken()
             };
             button = 'Sign up <i class="fad fa-arrow-right ml-2"></i>';
         } else if (op == 'forgot_pass') {
-            url = veAppUrl('/?op=forgot_pass_ajax');
+            url = veAppUrl('/password/forgot');
             formData = {
-                'usr_login': _form.find('input[name="usr_login"]').val()
+                'usr_login': _form.find('input[name="usr_login"]').val(),
+                'token': veCsrfToken()
             };
             button = 'Send me instructions <i class="fad fa-arrow-right ml-2"></i>';
         } else if (op == 'reset_pass') {
-            url = veAppUrl('/?op=forgot_pass_ajax');
+            url = veAppUrl('/password/reset');
             formData = {
                 'sess_id': _form.find('input[name="sess_id"]').val(),
                 'password': _form.find('input[name="password"]').val(),
-                'password2': _form.find('input[name="password2"]').val()
+                'password2': _form.find('input[name="password2"]').val(),
+                'token': veCsrfToken()
             };
             button = 'Reset password <i class="fad fa-arrow-right ml-2"></i>';
         } else {
@@ -114,11 +122,10 @@ $(document).ready(function() {
         submit.prop('disabled', true).addClass('loading disabled').html('<img src="/assets/img/loader.svg">');
 
         $.ajax({
-            type: 'get',
+            type: 'post',
             url: url,
             data: formData,
             dataType: 'json',
-            cache: false,
             success: function(response) {
                 console.log(response);
 
@@ -179,6 +186,15 @@ $(document).ready(function() {
 
         getNotifications(id);
     });
+
+    $(document).on('click', 'a.logout', function(e) {
+        e.preventDefault();
+
+        var form = $('<form method="POST" action="' + veAppUrl('/logout') + '"></form>');
+        form.append('<input type="hidden" name="token" value="' + veCsrfToken() + '">');
+        $('body').append(form);
+        form.trigger('submit');
+    });
 });
 
 function removeTags(value) {
@@ -197,44 +213,57 @@ function getNotifications(open_msg = '') {
     $('.dropdown.notifications #notifications .count, .dropdown.notifications .notifications-box .empty').remove();
     $('.dropdown.notifications .notifications-list').html('');
 
-    var url = veAppUrl('/?op=notifications'),
-        formData = {
-            'open': open_msg
-        };
+    var url = veAppUrl('/api/notifications');
+    var loadNotifications = function() {
+        $.ajax({
+            type: 'get',
+            url: url,
+            dataType: 'json',
+            success: function(response) {
+                if (response.length > 0) {
+                    $.each(response, function(i) {
+                        var _class;
+                        var _readIcon;
 
-    $.ajax({
-        type: 'get',
-        url: url,
-        data: formData,
-        dataType: 'json',
-        cache: false,
-        success: function(response) {
-            if (response.length > 0) {
-                $.each(response, function(i) {
-                    var _class;
-                    var _readIcon;
+                        if (response[i].read == 0) {
+                            _class = 'position-relative new';
+                            _readIcon = '<i class="fad fa-envelope"></i> Unread';
+                        } else {
+                            _class = 'position-relative';
+                            _readIcon = '<i class="fad fa-envelope-open"></i> Read';
+                        }
 
-                    if (response[i].read == 0) {
-                        _class = 'position-relative new';
-                        _readIcon = '<i class="fad fa-envelope"></i> Unread';
-                    } else {
-                        _class = 'position-relative';
-                        _readIcon = '<i class="fad fa-envelope-open"></i> Read';
-                    }
+                        $('.dropdown.notifications .notifications-list').append('<li class="' + _class + '"><a href="#" id="openNotification" class="description" data-date="' + response[i].cr + '" data-message="' + response[i].message + '" data-subject="' + response[i].subject + '" data-id="' + response[i].id + '"><strong>' + response[i].subject + '</strong><p class="mb-1">' + truncateText(removeTags(response[i].message), 65) + '</p><span><i class="fad fa-clock"></i> ' + response[i].cr + '<i class="d-inline-block mx-2"></i>' + _readIcon + '</span></a></li>');
+                    });
+                } else {
+                    $('.dropdown.notifications .notifications-box').html('<div class="empty p-3 text-center text-muted font-weight-bold">No notifications</div>');
+                }
 
-                    $('.dropdown.notifications .notifications-list').append('<li class="' + _class + '"><a href="#" id="openNotification" class="description" data-date="' + response[i].cr + '" data-message="' + response[i].message + '" data-subject="' + response[i].subject + '" data-id="' + response[i].id + '"><strong>' + response[i].subject + '</strong><p class="mb-1">' + truncateText(removeTags(response[i].message), 65) + '</p><span><i class="fad fa-clock"></i> ' + response[i].cr + '<i class="d-inline-block mx-2"></i>' + _readIcon + '</span></a></li>');
+                var total_unread = response.filter(function(item) {
+                    return item.read == 0;
                 });
-            } else {
-                $('.dropdown.notifications .notifications-box').html('<div class="empty p-3 text-center text-muted font-weight-bold">No notifications</div>');
-            }
 
-            var total_unread = response.filter(function(item) {
-                return item.read == 0;
-            });
-
-            if (total_unread.length > 0) {
-                $('.dropdown.notifications #notifications').append('<span class="count">' + total_unread.length + '</span>');
+                if (total_unread.length > 0) {
+                    $('.dropdown.notifications #notifications').append('<span class="count">' + total_unread.length + '</span>');
+                }
             }
-        }
-    });
+        });
+    };
+
+    if (open_msg) {
+        $.ajax({
+            type: 'post',
+            url: veAppUrl('/api/notifications/' + encodeURIComponent(open_msg) + '/read'),
+            dataType: 'json',
+            data: {
+                token: veCsrfToken()
+            },
+            complete: function() {
+                loadNotifications();
+            }
+        });
+        return;
+    }
+
+    loadNotifications();
 }
