@@ -23,6 +23,7 @@ function requiredEnv(name) {
 
 (async () => {
   const baseURL = requiredEnv('DASHBOARD_BROWSER_BASE_URL');
+  const pathPrefix = (process.env.DASHBOARD_BROWSER_PATH_PREFIX || '').replace(/^\/+|\/+$/g, '');
   const username = requiredEnv('DASHBOARD_BROWSER_USER');
   const password = requiredEnv('DASHBOARD_BROWSER_PASSWORD');
   const reportFrom = requiredEnv('DASHBOARD_BROWSER_FROM');
@@ -41,6 +42,22 @@ function requiredEnv(name) {
     throw new Error('Unable to find a Chromium-based browser executable for Playwright.');
   }
 
+  function appPath(path) {
+    if (!path) {
+      return pathPrefix ? `/${pathPrefix}` : '/';
+    }
+
+    if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(path)) {
+      return path;
+    }
+
+    if (!path.startsWith('/')) {
+      path = `/${path}`;
+    }
+
+    return pathPrefix ? `/${pathPrefix}${path}` : path;
+  }
+
   const browser = await chromium.launch({
     headless: true,
     executablePath: browserPath,
@@ -49,7 +66,7 @@ function requiredEnv(name) {
   try {
     const context = await browser.newContext({ baseURL });
     const page = await context.newPage();
-    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.goto(appPath('/'), { waitUntil: 'networkidle' });
 
     const token = await page.evaluate(() => window.VE_CSRF_TOKEN || '');
 
@@ -58,7 +75,7 @@ function requiredEnv(name) {
     }
 
     const loginResult = await page.evaluate(async (credentials) => {
-      const response = await fetch('/login', {
+      const response = await fetch(credentials.loginUrl, {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
@@ -80,17 +97,17 @@ function requiredEnv(name) {
         payload = {};
       }
 
-      return {
-        status: response.status,
-        payload,
-      };
-    }, { username, password, token });
+        return {
+          status: response.status,
+          payload,
+        };
+    }, { username, password, token, loginUrl: appPath('/login') });
 
     if (loginResult.status !== 200 || loginResult.payload.status !== 'redirect') {
       throw new Error(`Login failed: ${JSON.stringify(loginResult)}`);
     }
 
-    await page.goto('/dashboard', { waitUntil: 'networkidle' });
+    await page.goto(appPath('/dashboard'), { waitUntil: 'networkidle' });
     const dashboardRoot = page.locator('[data-dashboard-home]');
 
     if ((await dashboardRoot.count()) === 0) {
@@ -112,7 +129,7 @@ function requiredEnv(name) {
       throw new Error(`Dashboard balance did not update from the live API. Received: ${balance || '(empty)'}`);
     }
 
-    await page.goto(`/dashboard/reports?from=${reportFrom}&to=${reportTo}`, { waitUntil: 'networkidle' });
+    await page.goto(appPath(`/dashboard/reports?from=${reportFrom}&to=${reportTo}`), { waitUntil: 'networkidle' });
     const reportsRoot = page.locator('[data-dashboard-reports]');
 
     if ((await reportsRoot.count()) === 0) {

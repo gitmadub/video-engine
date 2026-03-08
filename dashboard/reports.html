@@ -11,6 +11,47 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
     <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/css/iziToast.min.css">
     <link rel="stylesheet" type="text/css" href="/assets/css/panel.min__q_e2207d238712.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/morris.js/0.5.1/morris.css">
+    <style>
+        .reports-meta {
+            color: #8f9397;
+            font-size: 12px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .reports-error {
+            display: none;
+        }
+        .reports-error.is-visible {
+            display: block;
+        }
+        .reports-summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 24px;
+        }
+        .reports-summary .summary-card {
+            flex: 1 1 180px;
+            min-width: 180px;
+            background: #1c1c1c;
+            padding: 16px;
+        }
+        .reports-summary .summary-label {
+            color: #8f9397;
+            display: block;
+            margin-bottom: 8px;
+        }
+        .reports-summary .summary-value {
+            color: #fff;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        .reports-table td,
+        .reports-table th {
+            vertical-align: middle;
+        }
+    </style>
 </head>
 <body>
     <div class="modal fade" id="notifications" tabindex="-1" role="dialog" aria-labelledby="notificationsLabel" aria-hidden="true">
@@ -26,10 +67,10 @@
             </a>
             <ul class="notifications-mobile d-block d-sm-none m-0 p-0 ml-auto">
                 <li class="nav-item dropdown notifications">
-                    <a href="#" id="notifications" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+                    <a href="#" id="notificationsMobile" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
                         <i class="fad fa-bell"></i>
                     </a>
-                    <div aria-labelledby="notifications" class="dropdown-menu dropdown-menu-right notifications-box">
+                    <div aria-labelledby="notificationsMobile" class="dropdown-menu dropdown-menu-right notifications-box">
                         <div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div>
                         <ul class="notifications-list m-0 p-0"></ul>
                     </div>
@@ -39,12 +80,11 @@
                 <i class="fad fa-bars"></i>
             </button>
             <ul class="navbar-nav px-3 ml-auto d-none d-sm-flex">
-                <!-- <div onclick="window.open('/earn-money', '_blank');" style="cursor:pointer;border-radius:7px;padding:10px;background:linear-gradient(312deg, rgb(234 109 2) 0%, rgba(249,150,1,1) 100%);color:white;font-weight:600;font-size:14px;text-shadow: 2px 1px 2px #e96e03;"> Double Rates until 00:00 UTC, 08 January 2024 </div> -->
                 <li class="nav-item dropdown notifications">
-                    <a href="#" id="notifications" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+                    <a href="#" id="notificationsDesktop" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
                         <i class="fad fa-bell"></i>
                     </a>
-                    <div aria-labelledby="notifications" class="dropdown-menu dropdown-menu-right notifications-box">
+                    <div aria-labelledby="notificationsDesktop" class="dropdown-menu dropdown-menu-right notifications-box">
                         <div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div>
                         <ul class="notifications-list m-0 p-0"></ul>
                     </div>
@@ -59,7 +99,7 @@
                         <a href="/referrals" class="dropdown-item"><i class="fad fa-solar-system"></i>Refferal</a>
                         <a href="/settings" class="dropdown-item"><i class="fad fa-cog"></i>Settings</a>
                         <div class="dropdown-divider"></div>
-                        <a href="/?op=logout" class="dropdown-item logout"><i class="fad fa-power-off text-danger"></i>Logout</a>
+                        <a href="/logout" class="dropdown-item logout"><i class="fad fa-power-off text-danger"></i>Logout</a>
                     </div>
                 </li>
             </ul>
@@ -72,201 +112,122 @@
         </button>
         <div class="container-fluid">
             <ul class="nav justify-content-center">
-                <li class="nav-item">
-                    <a href="/dashboard" class="nav-link"><i class="fad fa-shapes"></i></i>Dashboard</a>
-                </li>
-                <li class="nav-item">
-                    <a href="/remote-upload" class="nav-link"><i class="fad fa-globe"></i>Remote Upload</a>
-                </li>
-                <li class="nav-item">
-                    <a href="/videos" class="nav-link"><i class="fad fa-camera-movie"></i>Videos</a>
-                </li>
-                <li class="nav-item">
-                    <a href="/reports" class="nav-link"><i class="fad fa-chart-line"></i>Reports</a>
-                </li>
-                <li class="nav-item">
-                    <a href="/premium-plans" class="nav-link"><i class="fad fa-gem"></i>Premium</a>
-                </li>
+                <li class="nav-item"><a href="/dashboard" class="nav-link"><i class="fad fa-shapes"></i>Dashboard</a></li>
+                <li class="nav-item"><a href="/remote-upload" class="nav-link"><i class="fad fa-globe"></i>Remote Upload</a></li>
+                <li class="nav-item"><a href="/videos" class="nav-link"><i class="fad fa-camera-movie"></i>Videos</a></li>
+                <li class="nav-item"><a href="/reports" class="nav-link"><i class="fad fa-chart-line"></i>Reports</a></li>
+                <li class="nav-item"><a href="/premium-plans" class="nav-link"><i class="fad fa-gem"></i>Premium</a></li>
                 <li class="nav-item d-block d-sm-none"><a href="/dmca-manager" class="nav-link"><i class="fad fa-folder-times"></i>DMCA Manager</a></li>
                 <li class="nav-item d-block d-sm-none"><a href="/api-docs" class="nav-link"><i class="fad fa-brackets-curly"></i>API</a></li>
                 <li class="nav-item d-block d-sm-none"><a href="/referrals" class="nav-link"><i class="fad fa-solar-system"></i>Refferal</a></li>
                 <li class="nav-item d-block d-sm-none"><a href="/settings" class="nav-link"><i class="fad fa-cog"></i>Settings</a></li>
-                <li class="nav-item d-block d-sm-none"><a href="/?op=logout" class="nav-link"><i class="fad fa-power-off text-danger"></i>Logout</a></li>
+                <li class="nav-item d-block d-sm-none"><a href="/logout" class="nav-link"><i class="fad fa-power-off text-danger"></i>Logout</a></li>
             </ul>
         </div>
     </nav>
 
     <div class="container-fluid pt-3 pt-sm-5 mt-sm-5">
-        <div class="the_box mb-5">
-            <div class="row">
-                <div class="col-md-12">
-                    <form method="GET" action="/" autocomplete="off" class="form-inline justify-content-center">
-                        <input type="hidden" name="op" value="my_reports">
-                        <div class="form-group">
-                            <label class="mr-md-3">From</label>
-                            <div class="input-group docs-datepicker">
-                                <input type="date" name="date1" id="date1" value="2026-03-01" class="form-control docs-date">
-                                <div class="input-group-append">
-                                    <span class="input-group-text"><i class="fad fa-calendar-alt"></i></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label class="mx-md-3">to</label>
-                            <div class="input-group docs-datepicker">
-                                <input type="date" name="date2" id="date2" value="2026-03-08" class="form-control docs-date">
-                                <div class="input-group-append">
-                                    <span class="input-group-text"><i class="fad fa-calendar-alt"></i></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="form-group ml-md-4">
-                            <button type="submit" value="" class="btn btn-primary">Show results <i class="fad fa-long-arrow-right ml-2 mt-1"></i></button>
-                        </div>
-                    </form>
+        <div class="the_box mb-5" data-dashboard-reports data-report-endpoint="/api/dashboard/reports">
+            <div class="d-flex align-items-center justify-content-between flex-wrap mb-3">
+                <div>
+                    <h2 class="title mb-1">Reports</h2>
+                    <div class="reports-meta">Custom date range reporting backed by daily aggregate tables</div>
                 </div>
-                <div class="col-md-12 mt-4">
-                    <div id="reports_chart" class="w-100 d-block position-relative" style="height:300px"></div>
-                </div>
-                <div class="col-md-12 mt-5">
-                    <div class="table-responsive">
-                        <table id="datatable" class="table table-striped" data-page-length="31">
-                            <thead>
-                                <tr>
-                                    <th></th>
-                                    <th></th>
-                                    <th>Views Profit</th>
-                                    <th>Refferal share</th>
-                                    <th></th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>2026-03-01</td>
-                                    <td>0</td>
-                                    <td>$0.00000</td>
-                                    <td>$0.00000</td>
-                                    <td></td>
-                                    <td>$0.00000</td>
-                                </tr>
-                                <tr>
-                                    <td>2026-03-02</td>
-                                    <td>0</td>
-                                    <td>$0.00000</td>
-                                    <td>$0.00000</td>
-                                    <td></td>
-                                    <td>$0.00000</td>
-                                </tr>
-                                <tr>
-                                    <td>2026-03-03</td>
-                                    <td>0</td>
-                                    <td>$0.00000</td>
-                                    <td>$0.00000</td>
-                                    <td></td>
-                                    <td>$0.00000</td>
-                                </tr>
-                                <tr>
-                                    <td>2026-03-04</td>
-                                    <td>0</td>
-                                    <td>$0.00000</td>
-                                    <td>$0.00000</td>
-                                    <td></td>
-                                    <td>$0.00000</td>
-                                </tr>
-                                <tr>
-                                    <td>2026-03-05</td>
-                                    <td>0</td>
-                                    <td>$0.00000</td>
-                                    <td>$0.00000</td>
-                                    <td></td>
-                                    <td>$0.00000</td>
-                                </tr>
-                                <tr>
-                                    <td>2026-03-06</td>
-                                    <td>0</td>
-                                    <td>$0.00000</td>
-                                    <td>$0.00000</td>
-                                    <td></td>
-                                    <td>$0.00000</td>
-                                </tr>
-                                <tr>
-                                    <td>2026-03-07</td>
-                                    <td>0</td>
-                                    <td>$0.00000</td>
-                                    <td>$0.00000</td>
-                                    <td></td>
-                                    <td>$0.00000</td>
-                                </tr>
-                                <tr>
-                                    <td>2026-03-08</td>
-                                    <td>0</td>
-                                    <td>$0.00000</td>
-                                    <td>$0.00000</td>
-                                    <td></td>
-                                    <td>$0.00000</td>
-                                </tr>
-                            </tbody>
-                            <tfoot>
-                                <tr>
-                                    <td></td>
-                                    <td>0</td>
-                                    <td>$0</td>
-                                    <td>$0</td>
-                                    <td>0</td>
-                                    <td>$0</td>
-                                </tr>
-                            </tfoot>
-                        </table>
+                <div class="reports-meta" data-reports-updated>Waiting for live data...</div>
+            </div>
+
+            <div class="alert alert-danger reports-error mb-4" data-reports-error role="alert"></div>
+
+            <form method="GET" action="/reports" autocomplete="off" class="form-inline justify-content-center" data-reports-form>
+                <div class="form-group">
+                    <label class="mr-md-3" for="reports-from">From</label>
+                    <div class="input-group docs-datepicker">
+                        <input type="date" name="from" id="reports-from" value="" class="form-control docs-date" data-reports-from>
+                        <div class="input-group-append">
+                            <span class="input-group-text"><i class="fad fa-calendar-alt"></i></span>
+                        </div>
                     </div>
+                </div>
+                <div class="form-group">
+                    <label class="mx-md-3" for="reports-to">To</label>
+                    <div class="input-group docs-datepicker">
+                        <input type="date" name="to" id="reports-to" value="" class="form-control docs-date" data-reports-to>
+                        <div class="input-group-append">
+                            <span class="input-group-text"><i class="fad fa-calendar-alt"></i></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group ml-md-4">
+                    <button type="submit" value="" class="btn btn-primary">Show results <i class="fad fa-long-arrow-right ml-2 mt-1"></i></button>
+                </div>
+            </form>
+
+            <div class="reports-summary" data-reports-summary>
+                <div class="summary-card">
+                    <span class="summary-label">Total views</span>
+                    <span class="summary-value" data-reports-total-views>0</span>
+                </div>
+                <div class="summary-card">
+                    <span class="summary-label">Total profit</span>
+                    <span class="summary-value" data-reports-total-profit>$0.00000</span>
+                </div>
+                <div class="summary-card">
+                    <span class="summary-label">Referral share</span>
+                    <span class="summary-value" data-reports-total-referral>$0.00000</span>
+                </div>
+                <div class="summary-card">
+                    <span class="summary-label">Traffic</span>
+                    <span class="summary-value" data-reports-total-traffic>0 B</span>
+                </div>
+            </div>
+
+            <div class="col-md-12 mt-4 px-0">
+                <div id="reports_chart" class="w-100 d-block position-relative" style="height:300px"></div>
+            </div>
+
+            <div class="col-md-12 mt-5 px-0">
+                <div class="table-responsive">
+                    <table id="datatable" class="table table-striped reports-table" data-page-length="31">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Views</th>
+                                <th>Profit</th>
+                                <th>Refferal share</th>
+                                <th>Traffic</th>
+                            </tr>
+                        </thead>
+                        <tbody data-reports-rows>
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">Loading...</td>
+                            </tr>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td>Total</td>
+                                <td data-reports-footer-views>0</td>
+                                <td data-reports-footer-profit>$0.00000</td>
+                                <td data-reports-footer-referral>$0.00000</td>
+                                <td data-reports-footer-traffic>0 B</td>
+                            </tr>
+                        </tfoot>
+                    </table>
                 </div>
             </div>
         </div>
-
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/morris.js/0.5.1/morris.css">
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.1.0/raphael-min.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/morris.js/0.5.1/morris.min.js"></script>
-        <script type="text/javascript">
-            $(document).ready(function() {
-                var data = [
-                    {time: '2026-03-01',views: '0', refs: '0.00000'},
-                    {time: '2026-03-02',views: '0', refs: '0.00000'},
-                    {time: '2026-03-03',views: '0', refs: '0.00000'},
-                    {time: '2026-03-04',views: '0', refs: '0.00000'},
-                    {time: '2026-03-05',views: '0', refs: '0.00000'},
-                    {time: '2026-03-06',views: '0', refs: '0.00000'},
-                    {time: '2026-03-07',views: '0', refs: '0.00000'},
-                    {time: '2026-03-08',views: '0', refs: '0.00000'}
-                ];
-
-                Morris.Line({
-                    element: 'reports_chart',
-                    data: data,
-                    xkey: 'time',
-                    ykeys: ['views', 'refs'],
-                    labels: ['Views ', 'Profit '],
-                    hideHover: 'auto',
-                    behaveLikeLine: true,
-                    resize: true,
-                    pointFillColors:['#ff9900','#42b983'],
-                    pointStrokeColors: ['#ff9900','#42b983'],
-                    lineColors:['#ff9900','#42b983']
-                });
-            });
-        </script>
     </div>
 
     <footer class="footer mt-4">
         <div class="container">
             <div class="row">
                 <div class="col-md-2">
-                    <img class="logo" src="/assets/img/logo-s.png">
+                    <img class="logo" src="/assets/img/logo-s.png" alt="Logo">
                 </div>
                 <div class="col-md-10 text-right">
                     <ul class="menu m-0 p-0 d-flex align-items-center justify-content-center justify-content-sm-end flex-wrap">
                         <li><a href="/">Home</a></li>
                         <li><a href="/copyright">Copyright policy</a></li>
-                        <li><a href="/terms-and-conditions">Terms & conditions</a></li>
+                        <li><a href="/terms-and-conditions">Terms &amp; conditions</a></li>
                         <li><a target="_blank" href="https://help.doodstream.com/">Help center</a></li>
                         <li><a href="/contact">Contact Us</a></li>
                     </ul>
@@ -275,10 +236,13 @@
         </div>
     </footer>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.1.0/raphael-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/morris.js/0.5.1/morris.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.15.0/umd/popper.min.js" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js" type="text/javascript"></script>
     <script src="/assets/js/main__q_8bb33b25bfc8.js" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js" type="text/javascript"></script>
+    <script src="/assets/js/dashboard_reports.js" type="text/javascript"></script>
     <script src="/assets/js/dood_load.js" type="module" defer></script>
 </body>
 </html>

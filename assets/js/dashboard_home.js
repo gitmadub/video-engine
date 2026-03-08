@@ -33,6 +33,10 @@
             path = '/' + path;
         }
 
+        if (basePath && (path === basePath || path.indexOf(basePath + '/') === 0)) {
+            return path;
+        }
+
         return basePath + path;
     }
 
