@@ -110,6 +110,47 @@ function ve_request_method(): string
     return strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 }
 
+function ve_client_ip(): string
+{
+    $candidates = [];
+
+    foreach ([
+        $_SERVER['HTTP_CF_CONNECTING_IP'] ?? null,
+        $_SERVER['HTTP_TRUE_CLIENT_IP'] ?? null,
+        $_SERVER['HTTP_X_REAL_IP'] ?? null,
+    ] as $value) {
+        if (is_string($value) && trim($value) !== '') {
+            $candidates[] = trim($value);
+        }
+    }
+
+    $forwardedFor = trim((string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? ''));
+
+    if ($forwardedFor !== '') {
+        foreach (explode(',', $forwardedFor) as $value) {
+            $value = trim($value);
+
+            if ($value !== '') {
+                $candidates[] = $value;
+            }
+        }
+    }
+
+    $remoteAddr = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+
+    if ($remoteAddr !== '') {
+        $candidates[] = $remoteAddr;
+    }
+
+    foreach ($candidates as $candidate) {
+        if (filter_var($candidate, FILTER_VALIDATE_IP) !== false) {
+            return $candidate;
+        }
+    }
+
+    return '';
+}
+
 function ve_is_method(string $method): bool
 {
     return ve_request_method() === strtoupper($method);
@@ -800,7 +841,7 @@ function ve_store_session_record(int $userId): void
     $stmt->execute([
         ':user_id' => $userId,
         ':session_id_hash' => hash('sha256', session_id()),
-        ':ip_address' => (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
+        ':ip_address' => ve_client_ip(),
         ':user_agent' => substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500),
         ':created_at' => ve_now(),
         ':last_seen_at' => ve_now(),
@@ -1062,7 +1103,7 @@ function ve_api_record_request(int $userId, string $apiKeyHash, string $requestK
         ':http_method' => ve_request_method(),
         ':status_code' => $statusCode,
         ':bytes_in' => max(0, $bytesIn),
-        ':client_ip' => (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
+        ':client_ip' => ve_client_ip(),
         ':user_agent' => substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500),
         ':created_at' => $now,
     ]);

@@ -1526,7 +1526,7 @@ function ve_video_issue_playback_session(array $video): array
 {
     $token = ve_random_token(24);
     $tokenHash = ve_video_playback_signature($token);
-    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    $ip = ve_client_ip();
     $userAgent = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500);
     $expiresAt = gmdate('Y-m-d H:i:s', ve_timestamp() + (int) ve_video_config()['session_ttl']);
     $user = ve_current_user();
@@ -1597,7 +1597,7 @@ function ve_video_validate_playback_session(array $video, ?string $token): ?arra
         return null;
     }
 
-    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    $ip = ve_client_ip();
     $userAgent = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500);
 
     if (!hash_equals((string) $session['ip_hash'], ve_video_playback_signature($ip))) {
