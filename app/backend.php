@@ -3882,18 +3882,9 @@ HTML;
 
 function ve_render_premium_plans_page(): void
 {
-    $user = ve_require_auth();
-    $html = (string) file_get_contents(ve_root_path('dashboard', 'referrals.html'));
-    $html = ve_runtime_html_transform($html, 'dashboard/referrals.html');
-    $html = preg_replace('/<title>.*?<\/title>/i', '<title>Premium Plans - DoodStream</title>', $html, 1) ?? $html;
-    $html = str_replace('href="/premium-plans" class="nav-link">', 'href="/premium-plans" class="nav-link active">', $html);
-    $html = preg_replace(
-        '/<div class="container-fluid pt-3 pt-sm-5 mt-sm-5">[\s\S]*?(?=<footer class="footer mt-4">)/',
-        '<div class="container-fluid pt-3 pt-sm-5 mt-sm-5">' . "\n" . ve_dashboard_premium_plans_content($user) . "\n",
-        $html,
-        1
-    ) ?? $html;
-
+    ve_require_auth();
+    $html = (string) file_get_contents(ve_root_path('dashboard', 'premium-plans.html'));
+    $html = ve_runtime_html_transform($html, 'dashboard/premium-plans.html');
     ve_html(ve_rewrite_html_paths($html));
 }
 

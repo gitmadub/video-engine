@@ -468,8 +468,9 @@ try {
     );
     $premiumPlansPage = $client->request('GET', '/premium-plans');
     assert_true($premiumPlansPage['status'] === 200, 'Premium plans page should load.');
-    assert_true(str_contains($premiumPlansPage['body'], 'Choose the <strong>right</strong> plan for your account'), 'Premium plans page should render the premium hero content.');
-    assert_true(str_contains($premiumPlansPage['body'], 'Premium account includes'), 'Premium plans page should render the included feature list.');
+    assert_true(str_contains($premiumPlansPage['body'], '<my-premium '), 'Premium plans page should serve the original premium component shell.');
+    assert_true(str_contains($premiumPlansPage['body'], '/assets/js/theme_panel__q_f247575e8408.js'), 'Premium plans page should load the original dashboard shell bundle.');
+    assert_true(str_contains($premiumPlansPage['body'], '/assets/js/premium_page__q_f247575e8408.js'), 'Premium plans page should load the original premium page bundle.');
     $csrf = extract_hidden_token($settingsPage['body']);
     $oldApiKey = extract_api_key($settingsPage['body']);
 
