@@ -275,6 +275,13 @@ function ve_csrf_token(): string
 function ve_require_csrf(?string $token): void
 {
     if (!is_string($token) || $token === '' || !hash_equals(ve_csrf_token(), $token)) {
+        if (ve_request_expects_json()) {
+            ve_json([
+                'status' => 'fail',
+                'message' => 'Your session token is invalid. Refresh the page and try again.',
+            ], 419);
+        }
+
         ve_flash('danger', 'Your session token is invalid. Refresh the page and try again.');
         ve_back_redirect(ve_url('/dashboard/settings'));
     }
@@ -291,6 +298,46 @@ function ve_request_csrf_token(): ?string
     $requestToken = $_POST['token'] ?? null;
 
     return is_string($requestToken) ? $requestToken : null;
+}
+
+function ve_request_expects_json(): bool
+{
+    $requestedWith = strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''));
+    $accept = strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? ''));
+    $path = ve_request_path();
+
+    return $requestedWith === 'xmlhttprequest'
+        || str_contains($accept, 'application/json')
+        || str_starts_with($path, '/api/');
+}
+
+function ve_fail_form_submission(string $message, string $redirectPath, int $status = 422): void
+{
+    if (ve_request_expects_json()) {
+        ve_json([
+            'status' => 'fail',
+            'message' => $message,
+        ], $status);
+    }
+
+    ve_flash('danger', $message);
+    ve_redirect($redirectPath);
+}
+
+/**
+ * @param array<string, mixed> $payload
+ */
+function ve_success_form_submission(string $message, string $redirectPath, array $payload = []): void
+{
+    if (ve_request_expects_json()) {
+        ve_json(array_merge([
+            'status' => 'ok',
+            'message' => $message,
+        ], $payload));
+    }
+
+    ve_flash('success', $message);
+    ve_redirect($redirectPath);
 }
 
 function ve_random_token(int $bytes = 24): string
@@ -853,18 +900,15 @@ function ve_save_account_settings(int $userId): void
     $embedDomains = ve_normalize_domain_list((string) ($_POST['embed_domain_allowed'] ?? ''));
 
     if (!in_array($paymentMethod, ve_allowed_payment_methods(), true)) {
-        ve_flash('danger', 'Choose a valid payout method.');
-        ve_back_redirect(ve_url('/dashboard/settings#details'));
+        ve_fail_form_submission('Choose a valid payout method.', '/dashboard/settings#details');
     }
 
     if (!in_array($adsMode, ['', '1', '2', '3', '4'], true)) {
-        ve_flash('danger', 'Choose a valid ads mode.');
-        ve_back_redirect(ve_url('/dashboard/settings#details'));
+        ve_fail_form_submission('Choose a valid ads mode.', '/dashboard/settings#details');
     }
 
     if (!in_array($uploaderType, ['0', '1', '2', '3'], true)) {
-        ve_flash('danger', 'Choose a valid uploader type.');
-        ve_back_redirect(ve_url('/dashboard/settings#details'));
+        ve_fail_form_submission('Choose a valid uploader type.', '/dashboard/settings#details');
     }
 
     $stmt = ve_db()->prepare(
@@ -897,8 +941,15 @@ function ve_save_account_settings(int $userId): void
     ]);
 
     ve_add_notification($userId, 'Account settings updated', 'Your payout and playback defaults were saved.');
-    ve_flash('success', 'Account details saved successfully.');
-    ve_redirect('/dashboard/settings#details');
+    ve_success_form_submission('Account details saved successfully.', '/dashboard/settings#details', [
+        'settings' => [
+            'payment_method' => $paymentMethod,
+            'payment_id' => $paymentId,
+            'ads_mode' => $adsMode,
+            'uploader_type' => $uploaderType,
+            'embed_domains' => $embedDomains,
+        ],
+    ]);
 }
 
 function ve_save_password(int $userId): void
@@ -912,13 +963,11 @@ function ve_save_password(int $userId): void
     $error = ve_validate_password($newPassword, $confirmPassword);
 
     if ($error !== null) {
-        ve_flash('danger', $error);
-        ve_redirect('/dashboard/settings#password_settings');
+        ve_fail_form_submission($error, '/dashboard/settings#password_settings');
     }
 
     if (!password_verify($currentPassword, (string) $user['password_hash'])) {
-        ve_flash('danger', 'Your current password is incorrect.');
-        ve_redirect('/dashboard/settings#password_settings');
+        ve_fail_form_submission('Your current password is incorrect.', '/dashboard/settings#password_settings');
     }
 
     $stmt = ve_db()->prepare('UPDATE users SET password_hash = :password_hash, updated_at = :updated_at WHERE id = :id');
@@ -929,8 +978,7 @@ function ve_save_password(int $userId): void
     ]);
 
     ve_add_notification($userId, 'Password changed', 'Your dashboard password was updated.');
-    ve_flash('success', 'Password updated successfully.');
-    ve_redirect('/dashboard/settings#password_settings');
+    ve_success_form_submission('Password updated successfully.', '/dashboard/settings#password_settings');
 }
 
 function ve_save_email(int $userId): void
@@ -941,13 +989,11 @@ function ve_save_email(int $userId): void
     $error = ve_validate_email($email);
 
     if ($error !== null) {
-        ve_flash('danger', $error);
-        ve_redirect('/dashboard/settings#email_settings');
+        ve_fail_form_submission($error, '/dashboard/settings#email_settings');
     }
 
     if ($email !== $email2) {
-        ve_flash('danger', 'The new email addresses do not match.');
-        ve_redirect('/dashboard/settings#email_settings');
+        ve_fail_form_submission('The new email addresses do not match.', '/dashboard/settings#email_settings');
     }
 
     $stmt = ve_db()->prepare('SELECT id FROM users WHERE lower(email) = lower(:email) AND id <> :id LIMIT 1');
@@ -957,8 +1003,7 @@ function ve_save_email(int $userId): void
     ]);
 
     if ($stmt->fetchColumn() !== false) {
-        ve_flash('danger', 'That email address is already in use.');
-        ve_redirect('/dashboard/settings#email_settings');
+        ve_fail_form_submission('That email address is already in use.', '/dashboard/settings#email_settings');
     }
 
     $update = ve_db()->prepare('UPDATE users SET email = :email, updated_at = :updated_at WHERE id = :id');
@@ -969,8 +1014,9 @@ function ve_save_email(int $userId): void
     ]);
 
     ve_add_notification($userId, 'Email updated', 'Your account email address was changed.');
-    ve_flash('success', 'Email address updated successfully.');
-    ve_redirect('/dashboard/settings#email_settings');
+    ve_success_form_submission('Email address updated successfully.', '/dashboard/settings#email_settings', [
+        'email' => $email,
+    ]);
 }
 
 function ve_store_logo_upload(array $file, int $userId): string
@@ -978,27 +1024,23 @@ function ve_store_logo_upload(array $file, int $userId): string
     $errorCode = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
 
     if ($errorCode !== UPLOAD_ERR_OK) {
-        ve_flash('danger', 'Logo upload failed. Please try again.');
-        ve_redirect('/dashboard/settings#player_settings');
+        ve_fail_form_submission('Logo upload failed. Please try again.', '/dashboard/settings#player_settings');
     }
 
     $tmpName = (string) ($file['tmp_name'] ?? '');
 
     if ($tmpName === '' || !is_file($tmpName)) {
-        ve_flash('danger', 'Uploaded logo file was not found.');
-        ve_redirect('/dashboard/settings#player_settings');
+        ve_fail_form_submission('Uploaded logo file was not found.', '/dashboard/settings#player_settings');
     }
 
     $imageInfo = @getimagesize($tmpName);
 
     if (!is_array($imageInfo)) {
-        ve_flash('danger', 'Upload a valid image file for the player logo.');
-        ve_redirect('/dashboard/settings#player_settings');
+        ve_fail_form_submission('Upload a valid image file for the player logo.', '/dashboard/settings#player_settings');
     }
 
     if (($imageInfo[0] ?? 0) > 300 || ($imageInfo[1] ?? 0) > 300) {
-        ve_flash('danger', 'Logo images must be no larger than 300x300 pixels.');
-        ve_redirect('/dashboard/settings#player_settings');
+        ve_fail_form_submission('Logo images must be no larger than 300x300 pixels.', '/dashboard/settings#player_settings');
     }
 
     $extensionMap = [
@@ -1011,8 +1053,7 @@ function ve_store_logo_upload(array $file, int $userId): string
     $mime = (string) ($imageInfo['mime'] ?? '');
 
     if (!isset($extensionMap[$mime])) {
-        ve_flash('danger', 'Only PNG, JPG, GIF, and WEBP logos are supported.');
-        ve_redirect('/dashboard/settings#player_settings');
+        ve_fail_form_submission('Only PNG, JPG, GIF, and WEBP logos are supported.', '/dashboard/settings#player_settings');
     }
 
     $targetName = 'user-' . $userId . '-' . ve_timestamp() . '.' . $extensionMap[$mime];
@@ -1020,8 +1061,7 @@ function ve_store_logo_upload(array $file, int $userId): string
 
     if (!move_uploaded_file($tmpName, $targetPath)) {
         if (!rename($tmpName, $targetPath)) {
-            ve_flash('danger', 'Unable to store the uploaded logo.');
-            ve_redirect('/dashboard/settings#player_settings');
+            ve_fail_form_submission('Unable to store the uploaded logo.', '/dashboard/settings#player_settings');
         }
     }
 
@@ -1039,13 +1079,11 @@ function ve_save_player_settings(int $userId): void
     $logoPath = ve_get_user_settings($userId)['logo_path'] ?? '';
 
     if (!in_array($playerImageMode, ['', 'splash', 'single'], true)) {
-        ve_flash('danger', 'Choose a valid player image mode.');
-        ve_redirect('/dashboard/settings#player_settings');
+        ve_fail_form_submission('Choose a valid player image mode.', '/dashboard/settings#player_settings');
     }
 
     if (!preg_match('/^[A-Fa-f0-9]{6}$/', $playerColour)) {
-        ve_flash('danger', 'Choose a valid player colour.');
-        ve_redirect('/dashboard/settings#player_settings');
+        ve_fail_form_submission('Choose a valid player colour.', '/dashboard/settings#player_settings');
     }
 
     if (isset($_FILES['logo_image']) && is_array($_FILES['logo_image']) && (int) ($_FILES['logo_image']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
@@ -1077,8 +1115,15 @@ function ve_save_player_settings(int $userId): void
     ]);
 
     ve_add_notification($userId, 'Player settings updated', 'Your player appearance defaults were saved.');
-    ve_flash('success', 'Player settings saved successfully.');
-    ve_redirect('/dashboard/settings#player_settings');
+    ve_success_form_submission('Player settings saved successfully.', '/dashboard/settings#player_settings', [
+        'player' => [
+            'player_image_mode' => $playerImageMode,
+            'player_colour' => strtolower($playerColour),
+            'embed_width' => $embedWidth,
+            'embed_height' => $embedHeight,
+            'logo_path' => $logoPath,
+        ],
+    ]);
 }
 
 function ve_save_ad_settings(int $userId): void
@@ -1091,18 +1136,15 @@ function ve_save_ad_settings(int $userId): void
     $popCap = max(0, min(86400, (int) ($_POST['pop_cap'] ?? 0)));
 
     if ($vastUrl !== '' && filter_var($vastUrl, FILTER_VALIDATE_URL) === false) {
-        ve_flash('danger', 'Enter a valid VAST URL.');
-        ve_redirect('/dashboard/settings#premium_settings');
+        ve_fail_form_submission('Enter a valid VAST URL.', '/dashboard/settings#premium_settings');
     }
 
     if ($popUrl !== '' && filter_var($popUrl, FILTER_VALIDATE_URL) === false) {
-        ve_flash('danger', 'Enter a valid popup URL.');
-        ve_redirect('/dashboard/settings#premium_settings');
+        ve_fail_form_submission('Enter a valid popup URL.', '/dashboard/settings#premium_settings');
     }
 
     if (!in_array($popType, ['1', '2'], true)) {
-        ve_flash('danger', 'Choose a valid popup type.');
-        ve_redirect('/dashboard/settings#premium_settings');
+        ve_fail_form_submission('Choose a valid popup type.', '/dashboard/settings#premium_settings');
     }
 
     $stmt = ve_db()->prepare(
@@ -1124,8 +1166,14 @@ function ve_save_ad_settings(int $userId): void
     ]);
 
     ve_add_notification($userId, 'Advert settings updated', 'Your VAST and popup ad settings were saved.');
-    ve_flash('success', 'Own adverts settings saved successfully.');
-    ve_redirect('/dashboard/settings#premium_settings');
+    ve_success_form_submission('Own adverts settings saved successfully.', '/dashboard/settings#premium_settings', [
+        'advertising' => [
+            'vast_url' => $vastUrl,
+            'pop_type' => $popType,
+            'pop_url' => $popUrl,
+            'pop_cap' => $popCap,
+        ],
+    ]);
 }
 
 function ve_mark_notification_read(int $userId, int $notificationId): void
@@ -1499,6 +1547,10 @@ function ve_settings_script(): string
         var basePath = window.VE_BASE_PATH || '';
         var csrfToken = window.VE_CSRF_TOKEN || '';
         var dnsTarget = {$domainTarget};
+        var ajaxHeaders = {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        };
 
         function appUrl(path) {
             if (!path) {
@@ -1514,6 +1566,64 @@ function ve_settings_script(): string
             }
 
             return basePath + path;
+        }
+
+        function escapeHtml(value) {
+            return String(value || '').replace(/[&<>"']/g, function (character) {
+                return {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;'
+                }[character];
+            });
+        }
+
+        function clearLegacyFlash() {
+            $('.details.settings_data > .alert').remove();
+        }
+
+        function ensurePanelFeedback(\$panel) {
+            var \$feedback = \$panel.find('.js-panel-feedback').first();
+
+            if (!\$feedback.length) {
+                \$feedback = $('<div class="settings-inline-feedback alert d-none js-panel-feedback" role="alert"></div>');
+                var \$subtitle = \$panel.find('.settings-panel-subtitle').first();
+
+                if (\$subtitle.length) {
+                    \$subtitle.after(\$feedback);
+                } else {
+                    \$panel.prepend(\$feedback);
+                }
+            }
+
+            return \$feedback;
+        }
+
+        function clearPanelFeedback(\$scope) {
+            \$scope.find('.js-panel-feedback').addClass('d-none').removeClass('alert-success alert-danger').text('');
+            \$scope.find('#response, #delete-account-feedback').text('').removeAttr('style');
+        }
+
+        function clearAllPanelFeedback() {
+            clearLegacyFlash();
+            clearPanelFeedback($('.settings_data'));
+        }
+
+        function showFormFeedback(\$panel, type, message) {
+            var \$feedback = ensurePanelFeedback(\$panel);
+            \$feedback.removeClass('d-none alert-success alert-danger').addClass(type === 'success' ? 'alert-success' : 'alert-danger').text(message || '');
+        }
+
+        function handleAjaxError(xhr, fallbackMessage) {
+            var response = xhr && xhr.responseJSON;
+
+            if (response && response.message) {
+                return response.message;
+            }
+
+            return fallbackMessage;
         }
 
         function activateSettingsPanel(hash) {
@@ -1623,6 +1733,7 @@ function ve_settings_script(): string
                 type: 'POST',
                 url: appUrl('/api/domains'),
                 dataType: 'json',
+                headers: ajaxHeaders,
                 data: {
                     token: csrfToken,
                     domain: domain
@@ -1648,11 +1759,11 @@ function ve_settings_script(): string
                 type: 'DELETE',
                 url: appUrl('/api/domains/' + encodeURIComponent(domain)),
                 dataType: 'json',
+                headers: $.extend({}, ajaxHeaders, {
+                    'X-CSRF-Token': csrfToken
+                }),
                 data: {
                     token: csrfToken
-                },
-                headers: {
-                    'X-CSRF-Token': csrfToken
                 }
             }).done(function (response) {
                 if (response.status !== 'ok') {
@@ -1674,6 +1785,8 @@ function ve_settings_script(): string
         });
 
         $('.settings_menu a').on('click', function () {
+            clearAllPanelFeedback();
+
             if (history.replaceState) {
                 history.replaceState(null, '', this.hash);
             } else {
@@ -1681,8 +1794,65 @@ function ve_settings_script(): string
             }
         });
 
+        $(document).on('submit', '.settings-panel form[action]', function (event) {
+            var action = $(this).attr('action') || '';
+
+            if (!/^\\/account\\/(settings|password|email|player|advertising)$/.test(action)) {
+                return;
+            }
+
+            event.preventDefault();
+            clearAllPanelFeedback();
+
+            var \$form = $(this);
+            var \$panel = \$form.closest('.settings-panel');
+            var \$submit = \$form.find('button[type="submit"]').first();
+            var originalLabel = \$submit.html();
+            var formData = new FormData(this);
+
+            formData.set('token', csrfToken);
+
+            \$submit.prop('disabled', true);
+
+            $.ajax({
+                type: 'POST',
+                url: appUrl(action),
+                data: formData,
+                dataType: 'json',
+                processData: false,
+                contentType: false,
+                headers: ajaxHeaders
+            }).done(function (response) {
+                if (response.status !== 'ok') {
+                    showFormFeedback(\$panel, 'danger', response.message || 'Unable to save settings.');
+                    return;
+                }
+
+                showFormFeedback(\$panel, 'success', response.message || 'Saved successfully.');
+
+                if (action === '/account/password') {
+                    \$form.trigger('reset');
+                }
+
+                if (action === '/account/email' && response.email) {
+                    \$panel.find('p.mb-4').html('Current email: <b>' + escapeHtml(response.email) + '</b>');
+                    \$form.find('input[name="usr_email"], input[name="usr_email2"]').val('');
+                }
+
+                if (action === '/account/player') {
+                    \$form.find('input[type="file"]').val('');
+                    \$form.find('.custom-file-label').text('Choose logo');
+                }
+            }).fail(function (xhr) {
+                showFormFeedback(\$panel, 'danger', handleAjaxError(xhr, 'Unable to save settings right now.'));
+            }).always(function () {
+                \$submit.prop('disabled', false).html(originalLabel);
+            });
+        });
+
         $('.delete-account-form').on('submit', function (event) {
             event.preventDefault();
+            clearAllPanelFeedback();
 
             var payload = $(this).serializeArray();
             payload.push({ name: 'token', value: csrfToken });
@@ -1691,6 +1861,7 @@ function ve_settings_script(): string
                 type: 'POST',
                 url: appUrl('/account/delete'),
                 dataType: 'json',
+                headers: ajaxHeaders,
                 data: $.param(payload)
             }).done(function (response) {
                 if (response.status === 'redirect') {
@@ -1699,21 +1870,41 @@ function ve_settings_script(): string
                 }
 
                 $('#delete-account-feedback').text(response.message || 'Unable to delete account.').css('color', response.status === 'ok' ? '#42b983' : '#dc3545');
-            }).fail(function () {
-                $('#delete-account-feedback').text('Unable to delete account right now.').css('color', '#dc3545');
+            }).fail(function (xhr) {
+                $('#delete-account-feedback').text(handleAjaxError(xhr, 'Unable to delete account right now.')).css('color', '#dc3545');
             });
         });
 
         $('.regenerate-key').on('click', function (event) {
+            event.preventDefault();
+
             if (!confirm('Are you sure you want to regenerate the API key?')) {
-                event.preventDefault();
                 return;
             }
 
-            var form = $('<form method="POST" action="' + appUrl('/account/api-key/regenerate') + '"></form>');
-            form.append('<input type="hidden" name="token" value="' + csrfToken + '">');
-            $('body').append(form);
-            form.trigger('submit');
+            clearAllPanelFeedback();
+
+            $.ajax({
+                type: 'POST',
+                url: appUrl('/account/api-key/regenerate'),
+                dataType: 'json',
+                headers: ajaxHeaders,
+                data: {
+                    token: csrfToken
+                }
+            }).done(function (response) {
+                var \$sidebar = $('.settings-page');
+
+                if (response.status !== 'ok' || !response.api_key) {
+                    showFormFeedback(\$sidebar, 'danger', response.message || 'Unable to regenerate the API key.');
+                    return;
+                }
+
+                $('.add-key input').val(response.api_key);
+                showFormFeedback(\$sidebar, 'success', response.message || 'API key regenerated successfully.');
+            }).fail(function (xhr) {
+                showFormFeedback($('.settings-page'), 'danger', handleAjaxError(xhr, 'Unable to regenerate the API key right now.'));
+            });
         });
     });
 </script>
@@ -1733,6 +1924,8 @@ function ve_render_settings_page(): void
     $html = str_replace('value="8wmdu9ngch"', 'value="' . ve_h(ve_user_ftp_password($user)) . '"', $html);
     $html = str_replace('208.73.202.233', ve_h((string) ve_config()['custom_domain_target']), $html);
     $html = str_replace('href="/?op=logout"', 'href="/logout"', $html);
+    $html = str_replace('href="/premium"', 'href="/premium-plans"', $html);
+    $html = str_replace("href='/premium'", "href='/premium-plans'", $html);
     $html = str_replace(
         'Just purchase a domain and point the DNS as shown below. This frontend preview stores domains in the current browser only.',
         'Attach a redirect domain to your account and point its A record to the required target below.',
@@ -1768,7 +1961,8 @@ function ve_render_settings_page(): void
         "<form method=\"POST\" action=\"/account/advertising\">\n                        <input type=\"hidden\" name=\"op\" value=\"premium_settings\">",
         $html
     );
-    $html = str_replace(' disabled="disabled"', '', $html);
+    $html = str_replace('<button class="btn btn-primary btn-block regenerate-key">', '<button type="button" class="btn btn-primary btn-block regenerate-key">', $html);
+    $html = preg_replace('/\sdisabled(?:="disabled")?/i', '', $html) ?? $html;
     $html = preg_replace('/(<input type="hidden" name="token" value=")[^"]*(")/i', '$1' . ve_csrf_token() . '$2', $html) ?? $html;
     $html = str_replace('<input type="hidden" name="logo_mode" value="image">', '<input type="hidden" name="logo_mode" value="image">' . "\n                        " . '<input type="hidden" name="token" value="' . ve_h(ve_csrf_token()) . '">', $html);
     $html = str_replace('<form class="delete-account-form" method="POST">', '<form class="delete-account-form" method="POST" action="/account/delete"><input type="hidden" name="token" value="' . ve_h(ve_csrf_token()) . '">', $html);

@@ -245,6 +245,10 @@ try {
 
     $client = new HttpClient($baseUrl, $cookiePath);
     $resetClient = new HttpClient($baseUrl, $resetCookiePath);
+    $ajaxHeaders = [
+        'X-Requested-With' => 'XMLHttpRequest',
+        'Accept' => 'application/json',
+    ];
 
     echo "server ready\n";
 
@@ -299,10 +303,13 @@ try {
     if ($expectedDomainTarget !== '') {
         assert_true(str_contains($settingsPage['body'], $expectedDomainTarget), 'Settings page should render the configured custom-domain DNS target.');
     }
+    assert_true(str_contains($settingsPage['body'], '/premium-plans'), 'Settings page should use the dashboard premium-plans route.');
+    assert_true(!str_contains($settingsPage['body'], 'href="/premium"'), 'Settings page should not use the guest premium route.');
     $csrf = extract_hidden_token($settingsPage['body']);
     $oldApiKey = extract_api_key($settingsPage['body']);
 
-    $accountSave = $client->request('POST', '/account/settings', [
+    $accountSave = json_response($client->request('POST', '/account/settings', [
+        'headers' => $ajaxHeaders,
         'form' => [
             'token' => $csrf,
             'usr_pay_type' => 'Bitcoin',
@@ -315,12 +322,13 @@ try {
             'usr_disable_adb' => '1',
             'usr_srt_burn' => '1',
         ],
-    ]);
-    assert_true(in_array($accountSave['status'], [301, 302], true), 'Saving account settings should redirect.');
+    ]));
+    assert_true(($accountSave['status'] ?? null) === 'ok', 'Saving account settings should return success JSON.');
     echo "account settings ok\n";
 
     create_test_png($logoPath);
-    $playerSave = $client->request('POST', '/account/player', [
+    $playerSave = json_response($client->request('POST', '/account/player', [
+        'headers' => $ajaxHeaders,
         'form' => [
             'token' => $csrf,
             'logo_mode' => 'image',
@@ -332,11 +340,12 @@ try {
             'embedcode_height' => '405',
             'logo_image' => new CURLFile($logoPath, 'image/png', 'logo.png'),
         ],
-    ]);
-    assert_true(in_array($playerSave['status'], [301, 302], true), 'Saving player settings should redirect.');
+    ]));
+    assert_true(($playerSave['status'] ?? null) === 'ok', 'Saving player settings should return success JSON.');
     echo "player settings ok\n";
 
-    $adsSave = $client->request('POST', '/account/advertising', [
+    $adsSave = json_response($client->request('POST', '/account/advertising', [
+        'headers' => $ajaxHeaders,
         'form' => [
             'token' => $csrf,
             'vast_url' => 'https://ads.example.com/vast.xml',
@@ -344,29 +353,31 @@ try {
             'pop_url' => 'https://ads.example.com/popup.js',
             'pop_cap' => '45',
         ],
-    ]);
-    assert_true(in_array($adsSave['status'], [301, 302], true), 'Saving advert settings should redirect.');
+    ]));
+    assert_true(($adsSave['status'] ?? null) === 'ok', 'Saving advert settings should return success JSON.');
     echo "ad settings ok\n";
 
-    $passwordSave = $client->request('POST', '/account/password', [
+    $passwordSave = json_response($client->request('POST', '/account/password', [
+        'headers' => $ajaxHeaders,
         'form' => [
             'token' => $csrf,
             'password_current' => 'Start123',
             'password_new' => 'NewPass456',
             'password_new2' => 'NewPass456',
         ],
-    ]);
-    assert_true(in_array($passwordSave['status'], [301, 302], true), 'Changing password should redirect.');
+    ]));
+    assert_true(($passwordSave['status'] ?? null) === 'ok', 'Changing password should return success JSON.');
     echo "password change ok\n";
 
-    $emailSave = $client->request('POST', '/account/email', [
+    $emailSave = json_response($client->request('POST', '/account/email', [
+        'headers' => $ajaxHeaders,
         'form' => [
             'token' => $csrf,
             'usr_email' => 'alice+updated@example.com',
             'usr_email2' => 'alice+updated@example.com',
         ],
-    ]);
-    assert_true(in_array($emailSave['status'], [301, 302], true), 'Changing email should redirect.');
+    ]));
+    assert_true(($emailSave['status'] ?? null) === 'ok', 'Changing email should return success JSON.');
     echo "email change ok\n";
 
     $settingsPage = $client->request('GET', '/dashboard/settings');
@@ -379,16 +390,19 @@ try {
     assert_true(str_contains($settingsPage['body'], 'https://ads.example.com/popup.js'), 'Updated popup URL should render.');
     $csrf = extract_hidden_token($settingsPage['body']);
 
-    $apiRotate = $client->request('POST', '/account/api-key/regenerate', [
+    $apiRotate = json_response($client->request('POST', '/account/api-key/regenerate', [
+        'headers' => $ajaxHeaders,
         'form' => [
             'token' => $csrf,
         ],
-    ]);
-    assert_true(in_array($apiRotate['status'], [301, 302], true), 'API key regeneration should redirect.');
+    ]));
+    assert_true(($apiRotate['status'] ?? null) === 'ok', 'API key regeneration should return success JSON.');
+    assert_true(is_string($apiRotate['api_key'] ?? null) && $apiRotate['api_key'] !== '', 'API key regeneration should return a new API key.');
 
     $settingsAfterApiRotate = $client->request('GET', '/dashboard/settings');
     $newApiKey = extract_api_key($settingsAfterApiRotate['body']);
     assert_true($newApiKey !== $oldApiKey, 'API key should change after regeneration.');
+    assert_true($newApiKey === $apiRotate['api_key'], 'Rendered API key should match the JSON response.');
     $csrf = extract_hidden_token($settingsAfterApiRotate['body']);
     echo "api rotate ok\n";
 
