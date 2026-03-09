@@ -325,9 +325,9 @@
 
         if (notice.can_submit_response) {
             return [
-                '<div class="the_box mt-4">',
+                '<div class="dmca-modal-card mt-4">',
                 '<h5 class="mb-3">Optional uploader response</h5>',
-                '<p class="text-muted mb-3">These fields are optional. The file stays online while the case is reviewed, and it is deleted automatically only if the review window expires without uploader action.</p>',
+                '<p class="dmca-modal-response-note">These fields are optional. The file stays online while the case is reviewed, and it is deleted automatically only if the review window expires without uploader action.</p>',
                 '<form data-dmca-response-form data-case-code="' + escapeHtml(notice.case_code || '') + '">',
                 '<div class="form-row">',
                 '<div class="form-group col-md-6">',
@@ -343,7 +343,7 @@
                 '<label>Notes</label>',
                 '<textarea class="form-control" name="notes" rows="4" placeholder="Optional details for review">' + escapeHtml(notes) + '</textarea>',
                 '</div>',
-                '<div class="d-flex flex-wrap align-items-center">',
+                '<div class="dmca-modal-actions">',
                 '<button type="submit" class="btn btn-primary mr-2 mb-2">Send optional info</button>',
                 (notice.can_delete_video ? '<button type="button" class="btn btn-danger mb-2" data-dmca-delete-case="' + escapeHtml(notice.case_code || '') + '">Delete video now</button>' : ''),
                 '</div>',
@@ -354,9 +354,9 @@
 
         if (notice.status === 'response_submitted' || notice.status === 'counter_submitted') {
             return [
-                '<div class="the_box mt-4">',
+                '<div class="dmca-modal-card mt-4">',
                 '<h5 class="mb-3">Uploader response</h5>',
-                '<p class="text-muted mb-3">Submitted ' + escapeHtml(notice.response_submitted_label || '') + '</p>',
+                '<p class="dmca-modal-response-note">Submitted ' + escapeHtml(notice.response_submitted_label || '') + '</p>',
                 '<dl class="dmca-detail-list mb-0">',
                 '<dt>Contact email</dt><dd>' + escapeHtml(contactEmail || 'Not provided') + '</dd>',
                 '<dt>Contact phone</dt><dd>' + escapeHtml(contactPhone || 'Not provided') + '</dd>',
@@ -382,24 +382,39 @@
             .filter(Boolean)
             .join(' | ');
         var deadline = deadlineLabel(notice);
+        var watchUrl = notice.video && notice.video.watch_url ? notice.video.watch_url : '';
+        var summaryItems = [
+            '<div class="dmca-modal-summary-item"><span>Status</span><strong>' + statusBadge(notice) + '</strong></div>',
+            '<div class="dmca-modal-summary-item"><span>Next step</span><strong>' + deadline + '</strong></div>',
+            '<div class="dmca-modal-summary-item"><span>Received</span><strong>' + escapeHtml(notice.received_label || 'Not available') + '</strong></div>'
+        ];
+
+        if (notice.can_delete_video) {
+            summaryItems.push('<div class="dmca-modal-summary-item"><span>Video action</span><strong>Uploader can delete this video now</strong></div>');
+        }
+
         var reviewNote = notice.status === 'pending_review'
-            ? '<div class="alert alert-info mb-4">The reported file stays online while this complaint is under review. The uploader can add optional information or delete the file directly.</div>'
+            ? '<div class="dmca-modal-alert">The reported file stays online while this complaint is under review. The uploader can add optional information or delete the file directly.</div>'
             : '';
 
         state.selectedCaseCode = notice.case_code || '';
         els.modalTitle.textContent = (notice.case_code || 'DMCA case') + ' - ' + videoTitle;
         els.modalBody.innerHTML = [
             reviewNote,
+            '<div class="dmca-modal-intro">',
+            '<span class="dmca-modal-intro-label">Uploader DMCA case</span>',
+            '<h4>' + escapeHtml(videoTitle) + '</h4>',
+            '<p>Review the claimant details, keep the file online while the case is reviewed, send optional information if you want, or delete the video directly from this case.</p>',
+            '<div class="dmca-modal-summary">' + summaryItems.join('') + '</div>',
+            '</div>',
             '<div class="row">',
-            '<div class="col-md-6 mb-4">',
-            '<div class="the_box h-100">',
-            '<h5 class="mb-3">Case details</h5>',
+            '<div class="col-lg-6 mb-4">',
+            '<div class="dmca-modal-card">',
+            '<h5>Case details</h5>',
             '<dl class="dmca-detail-list">',
             '<dt>Status</dt><dd>' + statusBadge(notice) + '</dd>',
-            '<dt>File</dt><dd>' + escapeHtml(videoTitle) + '</dd>',
+            '<dt>Case code</dt><dd>' + escapeHtml(notice.case_code || 'Not provided') + '</dd>',
             '<dt>Claimed work</dt><dd>' + escapeHtml(notice.claimed_work || 'Not provided') + '</dd>',
-            '<dt>Received</dt><dd>' + escapeHtml(notice.received_label || '') + '</dd>',
-            '<dt>Next step</dt><dd>' + deadline + '</dd>',
             '<dt>Reported URL</dt><dd>' + (notice.reported_url ? '<a href="' + escapeHtml(notice.reported_url) + '" target="_blank" rel="noopener">' + escapeHtml(notice.reported_url) + '</a>' : 'Not provided') + '</dd>',
             '<dt>Reference URL</dt><dd>' + (notice.work_reference_url ? '<a href="' + escapeHtml(notice.work_reference_url) + '" target="_blank" rel="noopener">' + escapeHtml(notice.work_reference_url) + '</a>' : 'Not provided') + '</dd>',
             '<dt>Claimant</dt><dd>' + complainant + '</dd>',
@@ -407,16 +422,32 @@
             '</dl>',
             '</div>',
             '</div>',
-            '<div class="col-md-6 mb-4">',
-            '<div class="the_box h-100">',
-            '<h5 class="mb-3">Timeline</h5>',
+            '<div class="col-lg-6 mb-4">',
+            '<div class="dmca-modal-card">',
+            '<h5>File and review</h5>',
+            '<dl class="dmca-detail-list mb-0">',
+            '<dt>File</dt><dd>' + escapeHtml(videoTitle) + '</dd>',
+            '<dt>Watch URL</dt><dd>' + (watchUrl ? '<a href="' + escapeHtml(watchUrl) + '" target="_blank" rel="noopener">' + escapeHtml(watchUrl) + '</a>' : 'Video is no longer available') + '</dd>',
+            '<dt>Received</dt><dd>' + escapeHtml(notice.received_label || 'Not available') + '</dd>',
+            '<dt>Next step</dt><dd>' + deadline + '</dd>',
+            '<dt>Review window</dt><dd>' + escapeHtml((notice.auto_delete_remaining_label || '') ? notice.auto_delete_remaining_label : ('Auto remove after ' + (notice.auto_delete_label || '24 hours'))) + '</dd>',
+            '</dl>',
+            '</div>',
+            '</div>',
+            '</div>',
+            '<div class="row">',
+            '<div class="col-lg-6 mb-4">',
+            '<div class="dmca-modal-card">',
+            '<h5>Evidence</h5>',
+            renderEvidence(notice),
+            '</div>',
+            '</div>',
+            '<div class="col-lg-6 mb-4">',
+            '<div class="dmca-modal-card">',
+            '<h5>Timeline</h5>',
             renderTimeline(notice),
             '</div>',
             '</div>',
-            '</div>',
-            '<div class="the_box mb-4">',
-            '<h5 class="mb-3">Evidence</h5>',
-            renderEvidence(notice),
             '</div>',
             renderUploaderResponse(notice)
         ].join('');

@@ -152,6 +152,159 @@
         .dmca-card p:last-child {
             margin-bottom: 0;
         }
+
+        .dmca-modal .modal-dialog {
+            max-width: 1040px;
+        }
+
+        .dmca-modal .modal-content {
+            background: #1c1c1c;
+            border: 1px solid rgba(67, 70, 69, 0.95);
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .dmca-modal .modal-header {
+            background: #1c1c1c;
+            border-bottom: 1px solid rgba(67, 70, 69, 0.95);
+            padding: 18px 24px;
+            align-items: center;
+        }
+
+        .dmca-modal .modal-title {
+            font-size: 1.2142857143rem;
+            font-weight: 700;
+        }
+
+        .dmca-modal .modal-body {
+            padding: 24px;
+            background: #1c1c1c;
+        }
+
+        .dmca-modal-intro {
+            margin-bottom: 20px;
+            padding: 22px 24px;
+            background: rgba(67, 70, 69, 0.4);
+            border: 1px solid rgba(67, 70, 69, 0.95);
+            border-radius: 5px;
+        }
+
+        .dmca-modal-intro-label {
+            display: inline-block;
+            margin-bottom: 10px;
+            color: #7f7f7f;
+            font-size: 0.7857142857rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .dmca-modal-intro h4 {
+            margin-bottom: 10px;
+            font-size: 1.3571428571rem;
+            font-weight: 700;
+            word-break: break-word;
+        }
+
+        .dmca-modal-intro p {
+            margin-bottom: 0;
+            color: #c7c7c7;
+        }
+
+        .dmca-modal-summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .dmca-modal-summary-item {
+            min-width: 180px;
+            padding: 12px 14px;
+            background: rgba(28, 28, 28, 0.82);
+            border: 1px solid rgba(67, 70, 69, 0.95);
+            border-radius: 4px;
+        }
+
+        .dmca-modal-summary-item span {
+            display: block;
+            margin-bottom: 4px;
+            color: #7f7f7f;
+            font-size: 0.7857142857rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .dmca-modal-summary-item strong {
+            display: block;
+            word-break: break-word;
+        }
+
+        .dmca-modal-alert {
+            margin-bottom: 20px;
+            padding: 14px 16px;
+            background: rgba(255, 153, 0, 0.08);
+            border: 1px solid rgba(255, 153, 0, 0.22);
+            border-radius: 4px;
+            color: #f2f2f2;
+        }
+
+        .dmca-modal-card {
+            height: 100%;
+            padding: 20px 22px;
+            background: rgba(67, 70, 69, 0.4);
+            border: 1px solid rgba(67, 70, 69, 0.95);
+            border-radius: 5px;
+        }
+
+        .dmca-modal-card h5 {
+            margin-bottom: 16px;
+            font-size: 1rem;
+            font-weight: 700;
+        }
+
+        .dmca-modal-card p:last-child {
+            margin-bottom: 0;
+        }
+
+        .dmca-modal-links a {
+            display: inline-block;
+            margin-right: 14px;
+            margin-bottom: 10px;
+        }
+
+        .dmca-modal-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 18px;
+        }
+
+        .dmca-modal-actions .btn {
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .dmca-modal-response-note {
+            color: #7f7f7f;
+            margin-bottom: 18px;
+        }
+
+        @media all and (max-width: 768px) {
+            .dmca-modal .modal-header,
+            .dmca-modal .modal-body {
+                padding: 18px;
+            }
+
+            .dmca-modal-intro,
+            .dmca-modal-card {
+                padding: 18px;
+            }
+
+            .dmca-modal-summary-item {
+                min-width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
@@ -408,7 +561,7 @@
         </div>
     </div>
 
-    <div class="modal fade" id="dmca-case-modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal fade dmca-modal" id="dmca-case-modal" tabindex="-1" role="dialog" aria-hidden="true">
         <div class="modal-dialog modal-lg" role="document">
             <div class="modal-content">
                 <div class="modal-header">
@@ -445,7 +598,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js" type="text/javascript"></script>
     <script src="/assets/js/main__q_8bb33b25bfc8.js" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js" type="text/javascript"></script>
-    <script src="/assets/js/dashboard_dmca.js?v=20260311" type="text/javascript"></script>
+    <script src="/assets/js/dashboard_dmca.js?v=20260312" type="text/javascript"></script>
     <script src="/assets/js/dood_load.js" type="module" defer></script>
 </body>
 </html>
