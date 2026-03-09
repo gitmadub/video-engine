@@ -301,6 +301,12 @@ function ve_remote_hosts(): array
         $host = require __DIR__ . '/remote_upload/hosts/' . $file;
 
         if (is_array($host)) {
+            $key = strtolower(trim((string) ($host['key'] ?? '')));
+
+            if ($key !== '') {
+                $host = array_merge(ve_remote_host_metadata($key), $host);
+            }
+
             $hosts[] = $host;
         }
     }
@@ -1197,6 +1203,8 @@ function ve_remote_mark_failed(int $jobId, string $message): void
         'speed_bytes_per_second' => 0,
         'updated_at' => ve_now(),
     ]);
+
+    ve_remote_host_mark_job_failed($jobId, $message);
 }
 
 function ve_remote_cleanup_job_files(int $jobId): void
@@ -1316,11 +1324,15 @@ function ve_remote_add_queue(int $userId, string $urls, int $folderId): array
     $remaining = ve_remote_remaining_slots($userId);
     $added = 0;
     $invalid = 0;
+    $disabled = 0;
     $skipped = 0;
 
     foreach ($entries as $entry) {
+        $sourceHost = ve_remote_url_host($entry);
+        $matchedHostKey = ve_remote_is_http_url($entry) ? ve_remote_host_known_match_key($entry) : '';
+
         if (!ve_remote_is_http_url($entry)) {
-            ve_remote_create_job(
+            $job = ve_remote_create_job(
                 $userId,
                 $entry,
                 $folderId,
@@ -1328,16 +1340,96 @@ function ve_remote_add_queue(int $userId, string $urls, int $folderId): array
                 'Invalid remote URL.',
                 'Only fully qualified http:// or https:// URLs are supported.'
             );
+            $logId = ve_remote_host_log_submission([
+                'user_id' => $userId,
+                'source_url' => $entry,
+                'source_host' => $sourceHost,
+                'matched_host_key' => $matchedHostKey,
+                'submission_status' => 'invalid_url',
+                'detail_message' => 'Only fully qualified http:// or https:// URLs are supported.',
+            ]);
+
+            if ($logId > 0 && isset($job['id'])) {
+                ve_remote_host_attach_log_to_job($logId, (int) $job['id']);
+            }
+
             $invalid++;
             continue;
         }
 
+        if ($matchedHostKey !== '' && !ve_remote_host_is_enabled($matchedHostKey)) {
+            $message = ve_remote_host_disabled_message($matchedHostKey);
+            $job = ve_remote_create_job(
+                $userId,
+                $entry,
+                $folderId,
+                VE_REMOTE_STATUS_ERROR,
+                'Remote host disabled.',
+                $message
+            );
+            $jobId = (int) ($job['id'] ?? 0);
+
+            if ($jobId > 0) {
+                ve_remote_update_job($jobId, [
+                    'host_key' => $matchedHostKey,
+                    'updated_at' => ve_now(),
+                ]);
+            }
+
+            $logId = ve_remote_host_log_submission([
+                'user_id' => $userId,
+                'remote_upload_id' => $jobId > 0 ? $jobId : null,
+                'source_url' => $entry,
+                'source_host' => $sourceHost,
+                'matched_host_key' => $matchedHostKey,
+                'host_key' => $matchedHostKey,
+                'submission_status' => 'disabled_host',
+                'detail_message' => $message,
+            ]);
+
+            if ($logId > 0 && $jobId > 0) {
+                ve_remote_host_attach_log_to_job($logId, $jobId);
+            }
+
+            $disabled++;
+            continue;
+        }
+
         if ($remaining <= 0) {
+            ve_remote_host_log_submission([
+                'user_id' => $userId,
+                'source_url' => $entry,
+                'source_host' => $sourceHost,
+                'matched_host_key' => $matchedHostKey,
+                'submission_status' => 'skipped_capacity',
+                'detail_message' => 'No remote-upload slots were left for this account.',
+            ]);
             $skipped++;
             continue;
         }
 
-        ve_remote_create_job($userId, $entry, $folderId);
+        $job = ve_remote_create_job($userId, $entry, $folderId);
+        $jobId = (int) ($job['id'] ?? 0);
+        $logId = ve_remote_host_log_submission([
+            'user_id' => $userId,
+            'remote_upload_id' => $jobId > 0 ? $jobId : null,
+            'source_url' => $entry,
+            'source_host' => $sourceHost,
+            'matched_host_key' => $matchedHostKey,
+            'submission_status' => 'queued',
+        ]);
+
+        if ($jobId > 0 && $matchedHostKey !== '') {
+            ve_remote_update_job($jobId, [
+                'host_key' => $matchedHostKey,
+                'updated_at' => ve_now(),
+            ]);
+        }
+
+        if ($logId > 0 && $jobId > 0) {
+            ve_remote_host_attach_log_to_job($logId, $jobId);
+        }
+
         $added++;
         $remaining--;
     }
@@ -1354,6 +1446,10 @@ function ve_remote_add_queue(int $userId, string $urls, int $folderId): array
 
     if ($invalid > 0) {
         $parts[] = $invalid . ' invalid link' . ($invalid === 1 ? ' was' : 's were') . ' moved to broken links.';
+    }
+
+    if ($disabled > 0) {
+        $parts[] = $disabled . ' disabled host link' . ($disabled === 1 ? ' was' : 's were') . ' moved to broken links.';
     }
 
     if ($skipped > 0) {
@@ -1431,6 +1527,7 @@ function ve_remote_restart_job(int $userId, int $jobId): bool
 
     if ($stmt->rowCount() > 0) {
         ve_remote_cleanup_job_files($jobId);
+        ve_remote_host_reset_job_log($jobId);
         ve_remote_maybe_spawn_worker();
         return true;
     }
@@ -1440,6 +1537,18 @@ function ve_remote_restart_job(int $userId, int $jobId): bool
 
 function ve_remote_restart_error_jobs(int $userId): int
 {
+    $jobIdStmt = ve_db()->prepare(
+        'SELECT id FROM remote_uploads
+         WHERE user_id = :user_id
+         AND deleted_at IS NULL
+         AND status = :expected_status'
+    );
+    $jobIdStmt->execute([
+        ':user_id' => $userId,
+        ':expected_status' => VE_REMOTE_STATUS_ERROR,
+    ]);
+    $rows = $jobIdStmt->fetchAll();
+
     $stmt = ve_db()->prepare(
         'UPDATE remote_uploads
          SET status = :status,
@@ -1471,6 +1580,12 @@ function ve_remote_restart_error_jobs(int $userId): int
     ]);
 
     if ($stmt->rowCount() > 0) {
+        foreach ($rows as $row) {
+            if (is_array($row) && isset($row['id'])) {
+                ve_remote_host_reset_job_log((int) $row['id']);
+            }
+        }
+
         ve_remote_maybe_spawn_worker();
     }
 
@@ -1772,6 +1887,38 @@ function ve_remote_claim_next_job(): ?array
     }
 }
 
+function ve_remote_assert_host_enabled(string $hostKey): void
+{
+    $hostKey = strtolower(trim($hostKey));
+
+    if ($hostKey !== '' && !ve_remote_host_is_enabled($hostKey)) {
+        throw new RuntimeException(ve_remote_host_disabled_message($hostKey));
+    }
+}
+
+function ve_remote_finalize_resolved_source(array $host, array $resolved, string $fallbackUrl): array
+{
+    if (!isset($resolved['download_url'])) {
+        throw new RuntimeException('The remote host resolver did not return a download URL.');
+    }
+
+    $hostKey = strtolower(trim((string) ($host['key'] ?? 'unknown')));
+    ve_remote_assert_host_enabled($hostKey);
+
+    $resolved['host_key'] = $hostKey !== '' ? $hostKey : 'unknown';
+    $resolved['normalized_url'] = trim((string) ($resolved['normalized_url'] ?? $fallbackUrl));
+    $resolved['download_url'] = trim((string) $resolved['download_url']);
+    $resolved['filename'] = trim((string) ($resolved['filename'] ?? ''));
+    $resolved['referer'] = trim((string) ($resolved['referer'] ?? ''));
+    $resolved['headers'] = is_array($resolved['headers'] ?? null) ? $resolved['headers'] : [];
+
+    if ($resolved['download_url'] === '') {
+        throw new RuntimeException('The resolved download URL is empty.');
+    }
+
+    return $resolved;
+}
+
 function ve_remote_resolve_source(array $job): array
 {
     $url = trim((string) ($job['source_url'] ?? ''));
@@ -1796,22 +1943,11 @@ function ve_remote_resolve_source(array $job): array
 
         $resolved = $resolve($url, $job);
 
-        if (!is_array($resolved) || !isset($resolved['download_url'])) {
+        if (!is_array($resolved)) {
             throw new RuntimeException('The remote host resolver did not return a download URL.');
         }
 
-        $resolved['host_key'] = (string) ($host['key'] ?? 'unknown');
-        $resolved['normalized_url'] = trim((string) ($resolved['normalized_url'] ?? $url));
-        $resolved['download_url'] = trim((string) $resolved['download_url']);
-        $resolved['filename'] = trim((string) ($resolved['filename'] ?? ''));
-        $resolved['referer'] = trim((string) ($resolved['referer'] ?? ''));
-        $resolved['headers'] = is_array($resolved['headers'] ?? null) ? $resolved['headers'] : [];
-
-        if ($resolved['download_url'] === '') {
-            throw new RuntimeException('The resolved download URL is empty.');
-        }
-
-        return $resolved;
+        return ve_remote_finalize_resolved_source($host, $resolved, $url);
     }
 
     try {
@@ -1841,22 +1977,11 @@ function ve_remote_resolve_source(array $job): array
 
             $resolved = $resolve($effectiveUrl, $job);
 
-            if (!is_array($resolved) || !isset($resolved['download_url'])) {
+            if (!is_array($resolved)) {
                 throw new RuntimeException('The remote host resolver did not return a download URL.');
             }
 
-            $resolved['host_key'] = (string) ($host['key'] ?? 'unknown');
-            $resolved['normalized_url'] = trim((string) ($resolved['normalized_url'] ?? $effectiveUrl));
-            $resolved['download_url'] = trim((string) $resolved['download_url']);
-            $resolved['filename'] = trim((string) ($resolved['filename'] ?? ''));
-            $resolved['referer'] = trim((string) ($resolved['referer'] ?? ''));
-            $resolved['headers'] = is_array($resolved['headers'] ?? null) ? $resolved['headers'] : [];
-
-            if ($resolved['download_url'] === '') {
-                throw new RuntimeException('The resolved download URL is empty.');
-            }
-
-            return $resolved;
+            return ve_remote_finalize_resolved_source($host, $resolved, $effectiveUrl);
         }
     }
 
@@ -1866,28 +1991,17 @@ function ve_remote_resolve_source(array $job): array
 
     if ($detectedHostKey !== '') {
         $host = ve_remote_find_host_resolver($hosts, $detectedHostKey);
-        $resolve = $host['resolve'] ?? null;
+        $resolve = is_array($host) ? ($host['resolve'] ?? null) : null;
 
-        if (is_callable($resolve)) {
+        if (is_array($host) && is_callable($resolve)) {
             $detectedUrl = $effectiveUrl !== '' ? $effectiveUrl : $url;
             $resolved = $resolve($detectedUrl, $job);
 
-            if (!is_array($resolved) || !isset($resolved['download_url'])) {
+            if (!is_array($resolved)) {
                 throw new RuntimeException('The remote host resolver did not return a download URL.');
             }
 
-            $resolved['host_key'] = (string) ($host['key'] ?? 'unknown');
-            $resolved['normalized_url'] = trim((string) ($resolved['normalized_url'] ?? $detectedUrl));
-            $resolved['download_url'] = trim((string) $resolved['download_url']);
-            $resolved['filename'] = trim((string) ($resolved['filename'] ?? ''));
-            $resolved['referer'] = trim((string) ($resolved['referer'] ?? ''));
-            $resolved['headers'] = is_array($resolved['headers'] ?? null) ? $resolved['headers'] : [];
-
-            if ($resolved['download_url'] === '') {
-                throw new RuntimeException('The resolved download URL is empty.');
-            }
-
-            return $resolved;
+            return ve_remote_finalize_resolved_source($host, $resolved, $detectedUrl);
         }
     }
 
@@ -1898,22 +2012,11 @@ function ve_remote_resolve_source(array $job): array
         if (is_callable($match) && is_callable($resolve) && $match($url) === true) {
             $resolved = $resolve($url, $job);
 
-            if (!is_array($resolved) || !isset($resolved['download_url'])) {
+            if (!is_array($resolved)) {
                 throw new RuntimeException('The remote host resolver did not return a download URL.');
             }
 
-            $resolved['host_key'] = (string) ($directHost['key'] ?? 'unknown');
-            $resolved['normalized_url'] = trim((string) ($resolved['normalized_url'] ?? $url));
-            $resolved['download_url'] = trim((string) $resolved['download_url']);
-            $resolved['filename'] = trim((string) ($resolved['filename'] ?? ''));
-            $resolved['referer'] = trim((string) ($resolved['referer'] ?? ''));
-            $resolved['headers'] = is_array($resolved['headers'] ?? null) ? $resolved['headers'] : [];
-
-            if ($resolved['download_url'] === '') {
-                throw new RuntimeException('The resolved download URL is empty.');
-            }
-
-            return $resolved;
+            return ve_remote_finalize_resolved_source($directHost, $resolved, $url);
         }
     }
 
@@ -2170,6 +2273,7 @@ function ve_remote_process_job(int $jobId): void
             'updated_at' => ve_now(),
         ]);
 
+        ve_remote_host_mark_job_completed($jobId);
         ve_remote_cleanup_job_files($jobId);
     } catch (Throwable $throwable) {
         ve_remote_cleanup_job_files($jobId);

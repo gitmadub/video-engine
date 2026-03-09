@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/remote_host_admin.php';
+
 const VE_SESSION_USER_ID = 've_user_id';
 const VE_SESSION_FLASH = 've_flash';
 const VE_SESSION_CSRF = 've_csrf';
@@ -519,6 +521,8 @@ function ve_run_database_migrations(PDO $pdo): void
         ve_referrals_run_database_migrations($pdo);
     }
 
+    ve_remote_host_run_migrations($pdo);
+
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_created ON api_request_logs(user_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_kind_created ON api_request_logs(user_id, request_kind, created_at DESC)');
@@ -937,7 +941,7 @@ function ve_player_splash_preview_html(array $settings): string
     }
 
     $updatedAt = (string) ($settings['updated_at'] ?? ve_timestamp());
-    $splashPreviewUrl = ve_h(ve_url('/api/account/player/preview?ts=' . rawurlencode($updatedAt)));
+    $splashPreviewUrl = ve_h(ve_url('/account/player/splash-preview?ts=' . rawurlencode($updatedAt)));
 
     return '<div class="small text-muted mb-2">Current protected splash image</div>'
         . '<img src="' . $splashPreviewUrl . '" alt="Splash preview" style="display:block;width:100%;max-width:100%;border-radius:12px;border:1px solid rgba(255,255,255,0.08);background:#0c0c0c;">';
@@ -3972,7 +3976,7 @@ function ve_settings_bind_delete_account_form(string $html): string
         $attributes = $matches[1];
         $attributes = preg_replace('/\saction="[^"]*"/i', '', $attributes) ?? $attributes;
 
-        return '<form class="delete-account-form js-settings-form"' . $attributes . ' action="/api/account/delete">' . "\n                        "
+        return '<form class="delete-account-form js-settings-form"' . $attributes . ' action="/account/delete">' . "\n                        "
             . '<input type="hidden" name="token" value="' . $token . '">' . "\n                        "
             . '<div class="settings-inline-feedback alert d-none js-form-feedback" role="alert"></div>' . "\n                        ";
     }, $html, 1);
@@ -4237,7 +4241,7 @@ function ve_settings_script(): string
         }
 
         function isManagedSettingsAction(action) {
-            return /^\/api\/account\/(profile|password|email|player|ads|api)$/.test(action || '');
+            return /^\/account\/(settings|password|email|player|advertising|api-settings|remote-upload)$/.test(action || '');
         }
 
         function handleAjaxError(xhr, fallbackMessage) {
@@ -4396,6 +4400,31 @@ function ve_settings_script(): string
             syncApiModalMeta(snapshot);
         }
 
+        function applyRemoteUploadSnapshot(snapshot) {
+            if (!snapshot || !snapshot.can_manage || typeof snapshot.panel_html !== 'string' || !snapshot.panel_html) {
+                return;
+            }
+
+            var \$panel = $('#remote_upload_hosts');
+
+            if (!\$panel.length) {
+                return;
+            }
+
+            var wasActive = \$panel.hasClass('active');
+            var \$replacement = $(snapshot.panel_html);
+
+            if (!\$replacement.length) {
+                return;
+            }
+
+            if (wasActive) {
+                \$replacement.addClass('active');
+            }
+
+            \$panel.replaceWith(\$replacement);
+        }
+
         function applyPlayerSnapshot(snapshot) {
             if (!snapshot) {
                 return;
@@ -4467,6 +4496,34 @@ function ve_settings_script(): string
                 }
             }).fail(function (xhr) {
                 showFormFeedback(\$apiForm, 'danger', handleAjaxError(xhr, 'Unable to load API usage right now.'));
+            });
+        }
+
+        function loadRemoteUploadSettings(successMessage) {
+            var \$form = $('#remote_upload_hosts form').first();
+
+            if (!\$form.length) {
+                return;
+            }
+
+            $.ajax({
+                type: 'GET',
+                url: appUrl('/api/account/remote-upload'),
+                dataType: 'json',
+                headers: ajaxHeaders
+            }).done(function (response) {
+                if (response.status !== 'ok' || !response.remote_upload || !response.remote_upload.can_manage) {
+                    showFormFeedback(\$form, 'danger', response.message || 'Unable to load remote-upload host settings.');
+                    return;
+                }
+
+                applyRemoteUploadSnapshot(response.remote_upload);
+
+                if (successMessage) {
+                    showFormFeedback($('#remote_upload_hosts form').first(), 'success', successMessage);
+                }
+            }).fail(function (xhr) {
+                showFormFeedback(\$form, 'danger', handleAjaxError(xhr, 'Unable to load remote-upload host settings right now.'));
             });
         }
 
@@ -4626,37 +4683,43 @@ function ve_settings_script(): string
                 headers: csrfAjaxHeaders()
             }).done(function (response) {
                 var messageType = response.status === 'warning' ? 'warning' : 'success';
+                var \$feedbackForm = \$form;
 
-                if (action === '/api/account/player' && response.player) {
+                if (action === '/account/player' && response.player) {
                     applyPlayerSnapshot(response.player);
                 }
 
-                if (action === '/api/account/api' && response.api) {
+                if (action === '/account/api-settings' && response.api) {
                     applyApiSnapshot(response.api);
                 }
 
+                if (action === '/account/remote-upload' && response.remote_upload) {
+                    applyRemoteUploadSnapshot(response.remote_upload);
+                    \$feedbackForm = $('#remote_upload_hosts form').first();
+                }
+
                 if (response.status !== 'ok' && response.status !== 'warning') {
-                    showFormFeedback(\$form, 'danger', response.message || 'Unable to save settings.');
+                    showFormFeedback(\$feedbackForm, 'danger', response.message || 'Unable to save settings.');
                     return;
                 }
 
-                showFormFeedback(\$form, messageType, response.message || 'Saved successfully.');
+                showFormFeedback(\$feedbackForm, messageType, response.message || 'Saved successfully.');
 
-                if (action === '/api/account/password') {
+                if (action === '/account/password') {
                     \$form.trigger('reset');
                 }
 
-                if (action === '/api/account/email' && response.email) {
+                if (action === '/account/email' && response.email) {
                     \$form.closest('.settings-panel').find('p.mb-4').html('Current email: <b>' + escapeHtml(response.email) + '</b>');
                     \$form.find('input[name="usr_email"], input[name="usr_email2"]').val('');
                 }
 
-                if (action === '/api/account/player') {
+                if (action === '/account/player') {
                     resetCustomFileInput(\$form.find('#logo_image'));
                     resetCustomFileInput(\$form.find('#splash_image'));
                 }
             }).fail(function (xhr) {
-                if (action === '/api/account/player' && xhr && xhr.responseJSON && xhr.responseJSON.player) {
+                if (action === '/account/player' && xhr && xhr.responseJSON && xhr.responseJSON.player) {
                     applyPlayerSnapshot(xhr.responseJSON.player);
                     resetCustomFileInput(\$form.find('#logo_image'));
                     resetCustomFileInput(\$form.find('#splash_image'));
@@ -4690,7 +4753,7 @@ function ve_settings_script(): string
 
             $.ajax({
                 type: 'POST',
-                url: appUrl('/api/account/delete'),
+                url: appUrl('/account/delete'),
                 dataType: 'json',
                 headers: csrfAjaxHeaders(),
                 data: $.param(payload)
@@ -4764,7 +4827,7 @@ function ve_settings_script(): string
 
             $.ajax({
                 type: 'POST',
-                url: appUrl('/api/account/key'),
+                url: appUrl('/account/api-key/regenerate'),
                 dataType: 'json',
                 headers: csrfAjaxHeaders(),
                 data: {
@@ -4818,6 +4881,12 @@ function ve_settings_script(): string
             loadApiUsage('API usage refreshed.');
         });
 
+        $(document).on('click', '#refreshRemoteUploadHosts', function (event) {
+            event.preventDefault();
+            clearAllPanelFeedback();
+            loadRemoteUploadSettings('Remote-upload host usage refreshed.');
+        });
+
         $(document).on('input', '#domainInput', function () {
             clearPanelFeedback($('#custom_domain'));
         });
@@ -4842,6 +4911,7 @@ function ve_render_settings_page(): void
     $settings = $user['settings'];
     $api = ve_api_usage_snapshot((int) $user['id']);
     $dashboard = ve_dashboard_summary((int) $user['id']);
+    $remoteUploadSnapshot = ve_remote_host_dashboard_snapshot($user);
     ve_pull_flash();
     $splashPreviewHtml = ve_player_splash_preview_html($settings);
 
@@ -4870,12 +4940,22 @@ function ve_render_settings_page(): void
         'This workflow immediately closes the account, revokes active sessions, and prevents future logins.',
         $html
     );
-    $html = ve_settings_bind_form($html, 'my_account', '/api/account/profile');
-    $html = ve_settings_bind_form($html, 'my_password', '/api/account/password');
-    $html = ve_settings_bind_form($html, 'my_email', '/api/account/email');
-    $html = ve_settings_bind_form($html, 'upload_logo', '/api/account/player');
-    $html = ve_settings_bind_form($html, 'premium_settings', '/api/account/ads');
-    $html = ve_settings_bind_form($html, 'api_settings', '/api/account/api');
+    $html = str_replace(
+        '<!--REMOTE_UPLOAD_HOSTS_MENU-->',
+        (bool) ($remoteUploadSnapshot['can_manage'] ?? false) ? ve_remote_host_settings_menu_html() : '',
+        $html
+    );
+    $html = str_replace(
+        '<!--REMOTE_UPLOAD_HOSTS_PANEL-->',
+        (string) ($remoteUploadSnapshot['panel_html'] ?? ''),
+        $html
+    );
+    $html = ve_settings_bind_form($html, 'my_account', '/account/settings');
+    $html = ve_settings_bind_form($html, 'my_password', '/account/password');
+    $html = ve_settings_bind_form($html, 'my_email', '/account/email');
+    $html = ve_settings_bind_form($html, 'upload_logo', '/account/player');
+    $html = ve_settings_bind_form($html, 'premium_settings', '/account/advertising');
+    $html = ve_settings_bind_form($html, 'api_settings', '/account/api-settings');
     $html = ve_settings_bind_delete_account_form($html);
     $html = str_replace('<div id="delete-account-feedback" class="settings-inline-feedback"></div>', '', $html);
     $html = preg_replace('/\sdisabled(?:="disabled")?/i', '', $html) ?? $html;

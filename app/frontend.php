@@ -986,6 +986,18 @@ function ve_dispatch(): void
         ]);
     }
 
+    if ($path === '/api/account/remote-upload') {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        $user = ve_require_auth();
+        ve_json([
+            'status' => 'ok',
+            'remote_upload' => ve_remote_host_dashboard_snapshot($user),
+        ]);
+    }
+
     if ($path === '/account/settings') {
         if (!ve_is_method('POST')) {
             ve_method_not_allowed(['POST']);
@@ -1047,6 +1059,15 @@ function ve_dispatch(): void
 
         $user = ve_require_auth();
         ve_save_api_settings((int) $user['id']);
+    }
+
+    if ($path === '/account/remote-upload') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        $user = ve_remote_host_require_manager();
+        ve_save_remote_host_settings((int) $user['id']);
     }
 
     if ($path === '/account/delete') {

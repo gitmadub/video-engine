@@ -1,31 +1,17 @@
 (function () {
-    var hosts = [
+    var fallbackHosts = [
         'YouTube',
         'Google Drive',
         'Dropbox',
         'MEGA',
-        'Vidi64 / WinVidPlay / Vidoy-style mirrors',
-        'MyVidPlay',
-        'Streamtape',
-        'Mixdrop',
-        'Waaw / Netu / HQQ',
-        'OK.ru',
-        'VideoBin',
-        'Vidoza',
-        'Vivo',
-        'Xvideos',
-        'YouPorn',
-        'StreamSB',
-        'Upstream',
-        'Vidlox',
-        'Fembed',
-        '1fichier',
-        'Uptobox',
-        'Uptostream',
-        'Uploaded',
-        'Zippyshare',
+        'Vidi64 / WinVidPlay / Vidoy',
         'Direct MP4 / M3U8 links'
     ];
+    var noteText = 'Mirror sites and domains are also supported.';
+    var emptyText = 'No remote upload hosts are currently enabled.';
+    var script = document.currentScript || document.querySelector('script[src*="remote_upload_supported_hosts.js"]');
+    var endpoint = script ? (script.getAttribute('data-hosts-endpoint') || '') : '';
+    var requestedRemoteHosts = false;
 
     function createBadge() {
         var icon = document.createElement('i');
@@ -47,7 +33,7 @@
         return item;
     }
 
-    function patchSupportedHosts() {
+    function renderSupportedHosts(hosts) {
         var modal = document.getElementById('supported-host');
 
         if (!modal) {
@@ -60,17 +46,21 @@
             return false;
         }
 
-        if (body.getAttribute('data-ve-hosts-patched') === '1') {
-            return true;
-        }
-
         body.textContent = '';
         body.setAttribute('data-ve-hosts-patched', '1');
 
         var note = document.createElement('p');
         note.className = 'small text-muted mb-3';
-        note.textContent = 'Ordered by relevance. Mirror domains are also detected when they use a supported page structure.';
+        note.textContent = noteText;
         body.appendChild(note);
+
+        if (!hosts.length) {
+            var empty = document.createElement('p');
+            empty.className = 'small mb-0';
+            empty.textContent = emptyText;
+            body.appendChild(empty);
+            return true;
+        }
 
         var list = document.createElement('ul');
         list.className = 'list-group';
@@ -81,6 +71,54 @@
 
         body.appendChild(list);
 
+        return true;
+    }
+
+    function extractRemoteHosts(response) {
+        if (!response || response.status !== 'ok' || !response.remote_upload || !Array.isArray(response.remote_upload.supported_hosts)) {
+            return null;
+        }
+
+        return response.remote_upload.supported_hosts
+            .map(function (item) {
+                return item && typeof item.label === 'string' ? item.label.trim() : '';
+            })
+            .filter(function (label) {
+                return label !== '';
+            });
+    }
+
+    function requestRemoteHosts() {
+        if (!endpoint || requestedRemoteHosts) {
+            return;
+        }
+
+        requestedRemoteHosts = true;
+
+        window.fetch(endpoint, {
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        }).then(function (response) {
+            return response.ok ? response.json() : null;
+        }).then(function (payload) {
+            var hosts = extractRemoteHosts(payload);
+
+            if (hosts !== null) {
+                renderSupportedHosts(hosts);
+            }
+        }).catch(function () {
+        });
+    }
+
+    function patchSupportedHosts() {
+        if (!renderSupportedHosts(fallbackHosts)) {
+            return false;
+        }
+
+        requestRemoteHosts();
         return true;
     }
 
