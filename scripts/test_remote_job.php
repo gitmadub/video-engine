@@ -32,7 +32,7 @@ try {
     $video = null;
 
     if (is_array($job) && (int) ($job['video_id'] ?? 0) > 0) {
-        $statement = ve_db()->prepare('SELECT * FROM videos WHERE video_id = ? LIMIT 1');
+        $statement = ve_db()->prepare('SELECT * FROM videos WHERE id = ? LIMIT 1');
         $statement->execute([(int) $job['video_id']]);
         $video = $statement->fetch(PDO::FETCH_ASSOC) ?: null;
     }
