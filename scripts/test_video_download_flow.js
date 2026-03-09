@@ -50,6 +50,17 @@ function appPath(pathname, pathPrefix) {
   return pathPrefix ? `/${pathPrefix}${normalized}` : normalized;
 }
 
+function pulseIntervalFor(minWatchSeconds) {
+  const safeMinimum = Math.max(5, Number(minWatchSeconds) || 0);
+  return Math.max(5, Math.min(10, Math.floor(safeMinimum / 3)));
+}
+
+function requiredPulseCountFor(minWatchSeconds) {
+  const safeMinimum = Math.max(5, Number(minWatchSeconds) || 0);
+  const interval = pulseIntervalFor(safeMinimum);
+  return Math.max(1, Math.min(6, Math.floor(Math.max(1, safeMinimum - 1) / Math.max(1, interval))));
+}
+
 async function loginWithApi(context, baseURL, pathPrefix, username, password) {
   const page = await context.newPage();
   await page.goto(appPath('/', pathPrefix), { waitUntil: 'networkidle' });
@@ -410,6 +421,68 @@ async function elementDocumentBox(page, selector) {
 
     const embedPage = await anonymousContext.newPage();
     debugPage(embedPage, 'embed');
+    const prePlayNetwork = {
+      poster: 0,
+      previewVtt: 0,
+      previewJpg: 0,
+      manifest: 0,
+      segment: 0,
+    };
+    const pulsePlaybackTokens = [];
+    let playbackTriggeredAt = 0;
+    let startupSegmentRequests = 0;
+    embedPage.on('request', (request) => {
+      const url = request.url();
+
+      if (!url.includes('/stream/') && !url.includes('/playback/')) {
+        return;
+      }
+
+      if (url.includes('/playback/pulse') && request.method() === 'POST') {
+        const body = request.postData() || '';
+        const params = new URLSearchParams(body);
+        pulsePlaybackTokens.push(params.get('playback_token') || '');
+        return;
+      }
+
+      const isPrePlay = playbackTriggeredAt === 0;
+
+      if (url.includes('/poster.jpg')) {
+        if (isPrePlay) {
+          prePlayNetwork.poster += 1;
+        }
+        return;
+      }
+
+      if (url.includes('/preview.vtt')) {
+        if (isPrePlay) {
+          prePlayNetwork.previewVtt += 1;
+        }
+        return;
+      }
+
+      if (url.includes('/preview.jpg')) {
+        if (isPrePlay) {
+          prePlayNetwork.previewJpg += 1;
+        }
+        return;
+      }
+
+      if (url.includes('/manifest.m3u8')) {
+        if (isPrePlay) {
+          prePlayNetwork.manifest += 1;
+        }
+        return;
+      }
+
+      if (url.includes('/segment/')) {
+        if (isPrePlay) {
+          prePlayNetwork.segment += 1;
+        } else if ((Date.now() - playbackTriggeredAt) <= 2500) {
+          startupSegmentRequests += 1;
+        }
+      }
+    });
     await embedPage.goto(embedUrl, { waitUntil: 'networkidle' });
     await embedPage.waitForSelector('#ve-secure-player', { timeout: 15000 });
 
@@ -422,10 +495,22 @@ async function elementDocumentBox(page, selector) {
       return Boolean(state && !state.classList.contains('is-visible'));
     }, null, { timeout: 15000 });
 
-    const rawPlaybackToken = await extractInlineStringVariable(embedPage, 'token');
+    const rawPlaybackToken = await extractInlineStringVariable(embedPage, 'sessionToken');
 
     if (!rawPlaybackToken) {
       throw new Error('The secure embed page should expose the playback token only to the running player bootstrap.');
+    }
+
+    if (prePlayNetwork.poster > 1) {
+      throw new Error(`Secure poster image should be fetched at most once before playback begins. Observed ${prePlayNetwork.poster}.`);
+    }
+
+    if (prePlayNetwork.previewVtt !== 0 || prePlayNetwork.previewJpg !== 0) {
+      throw new Error(`Preview thumbnails should stay cold before playback starts. Observed ${JSON.stringify(prePlayNetwork)}.`);
+    }
+
+    if (prePlayNetwork.manifest !== 0 || prePlayNetwork.segment !== 0) {
+      throw new Error(`Secure stream data should not preload before playback starts. Observed ${JSON.stringify(prePlayNetwork)}.`);
     }
 
     const forgedQualification = await fetchJsonStatus(embedPage, appPath(`/api/videos/${publicId}/playback/qualify`, pathPrefix), {
@@ -467,6 +552,7 @@ async function elementDocumentBox(page, selector) {
         // The readiness check below will fail if playback never begins.
       }
     });
+    playbackTriggeredAt = Date.now();
 
     await embedPage.waitForFunction(() => {
       const video = document.getElementById('ve-secure-player');
@@ -477,6 +563,23 @@ async function elementDocumentBox(page, selector) {
 
     if (firstQualifiedView.status !== 'ok' || firstQualifiedView.payable !== true || firstQualifiedView.counted !== true) {
       throw new Error(`The first playback qualification should be payable. Received: ${JSON.stringify(firstQualifiedView)}`);
+    }
+
+    if (startupSegmentRequests > 2) {
+      throw new Error(`Secure playback should only fetch the current segment plus one segment ahead at startup. Observed ${startupSegmentRequests} startup segment requests.`);
+    }
+
+    if (requiredPulseCountFor(minWatchSeconds) > 1) {
+      const nonEmptyPulseTokens = pulsePlaybackTokens.filter(Boolean);
+      const uniquePulseTokens = new Set(nonEmptyPulseTokens);
+
+      if (uniquePulseTokens.size < 2) {
+        throw new Error(`Playback pulses should rotate the playback token on every POST. Observed tokens: ${JSON.stringify(pulsePlaybackTokens)}.`);
+      }
+
+      if (uniquePulseTokens.size !== nonEmptyPulseTokens.length) {
+        throw new Error(`Playback pulse requests reused a playback token. Observed tokens: ${JSON.stringify(pulsePlaybackTokens)}.`);
+      }
     }
 
     await embedPage.close();

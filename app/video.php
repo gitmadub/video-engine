@@ -3294,11 +3294,12 @@ function ve_video_build_playback_request_proof(
 }
 
 /**
- * @return array{client_token:string,server_token:string,sequence:int}
+ * @return array{playback_token:string,client_token:string,server_token:string,sequence:int}
  */
 function ve_video_issue_playback_request_state(int $sequence = 0): array
 {
     return [
+        'playback_token' => ve_random_token(24),
         'client_token' => ve_random_token(24),
         'server_token' => ve_random_token(24),
         'sequence' => max(0, $sequence),
@@ -3306,7 +3307,7 @@ function ve_video_issue_playback_request_state(int $sequence = 0): array
 }
 
 /**
- * @return array{client_token:string,server_token:string,sequence:int}
+ * @return array{playback_token:string,client_token:string,server_token:string,sequence:int}
  */
 function ve_video_rotate_playback_request_state(array $session): array
 {
@@ -3319,8 +3320,10 @@ function ve_video_rotate_playback_request_state(array $session): array
     $nextState = ve_video_issue_playback_request_state(((int) ($session['pulse_sequence'] ?? 0)) + 1);
     $stmt = ve_db()->prepare(
         'UPDATE video_playback_sessions
-         SET previous_pulse_client_token_hash = :previous_pulse_client_token_hash,
+         SET previous_playback_token_hash = :previous_playback_token_hash,
+             previous_pulse_client_token_hash = :previous_pulse_client_token_hash,
              previous_pulse_server_token_hash = :previous_pulse_server_token_hash,
+             playback_token_hash = :playback_token_hash,
              pulse_client_token_hash = :pulse_client_token_hash,
              pulse_server_token_hash = :pulse_server_token_hash,
              pulse_sequence = :pulse_sequence,
@@ -3329,8 +3332,10 @@ function ve_video_rotate_playback_request_state(array $session): array
          WHERE id = :id'
     );
     $stmt->execute([
+        ':previous_playback_token_hash' => (string) ($session['playback_token_hash'] ?? ''),
         ':previous_pulse_client_token_hash' => (string) ($session['pulse_client_token_hash'] ?? ''),
         ':previous_pulse_server_token_hash' => (string) ($session['pulse_server_token_hash'] ?? ''),
+        ':playback_token_hash' => ve_video_playback_request_token_hash($nextState['playback_token']),
         ':pulse_client_token_hash' => ve_video_playback_request_token_hash($nextState['client_token']),
         ':pulse_server_token_hash' => ve_video_playback_request_token_hash($nextState['server_token']),
         ':pulse_sequence' => $nextState['sequence'],
@@ -3343,7 +3348,7 @@ function ve_video_rotate_playback_request_state(array $session): array
 }
 
 /**
- * @return array{client_token:string,server_token:string,sequence:int,pulse_interval_seconds:int,required_pulse_count:int}
+ * @return array{playback_token:string,client_token:string,server_token:string,sequence:int,pulse_interval_seconds:int,required_pulse_count:int}
  */
 function ve_video_rotation_payload(array $video, array $session): array
 {
@@ -3351,6 +3356,7 @@ function ve_video_rotation_payload(array $video, array $session): array
     $nextState = ve_video_rotate_playback_request_state($session);
 
     return [
+        'playback_token' => $nextState['playback_token'],
         'client_token' => $nextState['client_token'],
         'server_token' => $nextState['server_token'],
         'sequence' => $nextState['sequence'],
@@ -3360,7 +3366,7 @@ function ve_video_rotation_payload(array $video, array $session): array
 }
 
 /**
- * @return array{client_token:string,server_token:string,sequence:int}
+ * @return array{playback_token:string,client_token:string,server_token:string,sequence:int}
  */
 function ve_video_validate_playback_request_state(array $session, string $kind, int $watchedSeconds, string $playbackToken): array
 {
@@ -3374,17 +3380,25 @@ function ve_video_validate_playback_request_state(array $session, string $kind, 
     }
 
     $sequence = (int) $sequenceHeader;
+    $playbackTokenHash = ve_video_playback_request_token_hash($playbackToken);
     $clientTokenHash = ve_video_playback_request_token_hash($clientToken);
     $serverTokenHash = ve_video_playback_request_token_hash($serverToken);
     $currentSequence = max(0, (int) ($session['pulse_sequence'] ?? 0));
-    $currentMatches = $sequence === $currentSequence
+    $currentHeaderMatches = $sequence === $currentSequence
         && hash_equals((string) ($session['pulse_client_token_hash'] ?? ''), $clientTokenHash)
         && hash_equals((string) ($session['pulse_server_token_hash'] ?? ''), $serverTokenHash);
-    $previousMatches = $sequence === max(0, $currentSequence - 1)
+    $previousHeaderMatches = $sequence === max(0, $currentSequence - 1)
         && hash_equals((string) ($session['previous_pulse_client_token_hash'] ?? ''), $clientTokenHash)
         && hash_equals((string) ($session['previous_pulse_server_token_hash'] ?? ''), $serverTokenHash);
+    $currentMatches = $currentHeaderMatches
+        && hash_equals((string) ($session['playback_token_hash'] ?? ''), $playbackTokenHash);
+    $previousMatches = $previousHeaderMatches
+        && hash_equals((string) ($session['previous_playback_token_hash'] ?? ''), $playbackTokenHash);
+    $legacyPlaybackTokenMatches = $playbackToken !== ''
+        && hash_equals((string) ($session['session_token_hash'] ?? ''), ve_video_playback_signature($playbackToken))
+        && ($currentHeaderMatches || $previousHeaderMatches);
 
-    if (!$currentMatches && !$previousMatches) {
+    if (!$currentMatches && !$previousMatches && !$legacyPlaybackTokenMatches) {
         throw new RuntimeException('Playback request tokens are invalid or stale.');
     }
 
@@ -3405,6 +3419,7 @@ function ve_video_validate_playback_request_state(array $session, string $kind, 
     }
 
     return [
+        'playback_token' => $playbackToken,
         'client_token' => $clientToken,
         'server_token' => $serverToken,
         'sequence' => $sequence,
@@ -3469,7 +3484,7 @@ function ve_video_record_playback_pulse(array $video, array $session, int $watch
             'watched_seconds' => $watchedSeconds,
             'accepted_watched_seconds' => $lastPulseWatchedSeconds,
             'required_seconds' => $minimumWatchSeconds,
-            'remaining_seconds' => max(0, $minimumWatchSeconds - max($acceptedWatchedSeconds, $elapsedPlaybackSeconds)),
+            'remaining_seconds' => max(0, $minimumWatchSeconds - $lastPulseWatchedSeconds),
             'pulse_count' => max(0, (int) ($session['pulse_count'] ?? 0)),
             'required_pulse_count' => $requiredPulseCount,
             'pulse_interval_seconds' => $pulseIntervalSeconds,
@@ -3484,7 +3499,7 @@ function ve_video_record_playback_pulse(array $video, array $session, int $watch
             'watched_seconds' => $watchedSeconds,
             'accepted_watched_seconds' => $lastPulseWatchedSeconds,
             'required_seconds' => $minimumWatchSeconds,
-            'remaining_seconds' => max(0, $minimumWatchSeconds - max($acceptedWatchedSeconds, $elapsedPlaybackSeconds)),
+            'remaining_seconds' => max(0, $minimumWatchSeconds - $lastPulseWatchedSeconds),
             'pulse_count' => max(0, (int) ($session['pulse_count'] ?? 0)),
             'required_pulse_count' => $requiredPulseCount,
             'pulse_interval_seconds' => $pulseIntervalSeconds,
@@ -3522,7 +3537,7 @@ function ve_video_record_playback_pulse(array $video, array $session, int $watch
         'watched_seconds' => $watchedSeconds,
         'accepted_watched_seconds' => $acceptedWatchedSeconds,
         'required_seconds' => $minimumWatchSeconds,
-        'remaining_seconds' => max(0, $minimumWatchSeconds - max($acceptedWatchedSeconds, $elapsedPlaybackSeconds)),
+        'remaining_seconds' => max(0, $minimumWatchSeconds - $acceptedWatchedSeconds),
         'pulse_count' => $pulseCount,
         'required_pulse_count' => $requiredPulseCount,
         'pulse_interval_seconds' => $pulseIntervalSeconds,
@@ -3548,13 +3563,15 @@ function ve_video_issue_playback_session(array $video): array
     $stmt = ve_db()->prepare(
         'INSERT INTO video_playback_sessions (
             video_id, session_token_hash, owner_user_id, ip_hash, user_agent_hash,
-            client_proof_key, pulse_client_token_hash, pulse_server_token_hash,
+            client_proof_key, playback_token_hash, previous_playback_token_hash,
+            pulse_client_token_hash, pulse_server_token_hash,
             previous_pulse_client_token_hash, previous_pulse_server_token_hash, pulse_sequence,
             pulse_count, last_pulse_at, last_pulse_watched_seconds, last_pulse_bandwidth_bytes,
             expires_at, created_at, last_seen_at, uses_premium_bandwidth, revoked_at
         ) VALUES (
             :video_id, :session_token_hash, :owner_user_id, :ip_hash, :user_agent_hash,
-            :client_proof_key, :pulse_client_token_hash, :pulse_server_token_hash,
+            :client_proof_key, :playback_token_hash, :previous_playback_token_hash,
+            :pulse_client_token_hash, :pulse_server_token_hash,
             :previous_pulse_client_token_hash, :previous_pulse_server_token_hash, :pulse_sequence,
             0, NULL, 0, 0,
             :expires_at, :created_at, :last_seen_at, :uses_premium_bandwidth, NULL
@@ -3567,6 +3584,8 @@ function ve_video_issue_playback_session(array $video): array
         ':ip_hash' => ve_video_playback_signature($ip),
         ':user_agent_hash' => ve_video_playback_signature($userAgent),
         ':client_proof_key' => $clientProofKey,
+        ':playback_token_hash' => ve_video_playback_request_token_hash($requestState['playback_token']),
+        ':previous_playback_token_hash' => '',
         ':pulse_client_token_hash' => ve_video_playback_request_token_hash($requestState['client_token']),
         ':pulse_server_token_hash' => ve_video_playback_request_token_hash($requestState['server_token']),
         ':previous_pulse_client_token_hash' => '',
@@ -3593,6 +3612,7 @@ function ve_video_issue_playback_session(array $video): array
     return [
         'token' => $token,
         'manifest_url' => ve_url('/stream/' . rawurlencode((string) $video['public_id']) . '/manifest.m3u8?token=' . rawurlencode($token)),
+        'playback_token' => $requestState['playback_token'],
         'client_proof_key' => $clientProofKey,
         'pulse_client_token' => $requestState['client_token'],
         'pulse_server_token' => $requestState['server_token'],
@@ -3601,9 +3621,11 @@ function ve_video_issue_playback_session(array $video): array
     ];
 }
 
-function ve_video_validate_playback_session(array $video, ?string $token): ?array
+function ve_video_find_playback_session(array $video, ?string $token): ?array
 {
-    if (!is_string($token) || $token === '') {
+    $token = is_string($token) ? trim($token) : '';
+
+    if ($token === '') {
         return null;
     }
 
@@ -3637,14 +3659,32 @@ function ve_video_validate_playback_session(array $video, ?string $token): ?arra
         return null;
     }
 
-    $headerToken = $_SERVER['HTTP_X_PLAYBACK_SESSION'] ?? '';
-    $cookieToken = $_COOKIE[ve_video_playback_cookie_name((string) $video['public_id'])] ?? '';
+    return $session;
+}
+
+function ve_video_validate_playback_session(array $video, ?string $token): ?array
+{
+    $token = is_string($token) ? trim($token) : '';
+    $explicitTokenProvided = $token !== '';
+    $headerToken = trim((string) ($_SERVER['HTTP_X_PLAYBACK_SESSION'] ?? ''));
+    $cookieToken = trim((string) ($_COOKIE[ve_video_playback_cookie_name((string) $video['public_id'])] ?? ''));
+
+    if ($token === '') {
+        $token = $headerToken !== '' ? $headerToken : $cookieToken;
+    }
+
+    $session = ve_video_find_playback_session($video, $token);
+
+    if (!is_array($session)) {
+        return null;
+    }
+
     $fetchDest = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_DEST'] ?? ''));
 
     $headerValid = is_string($headerToken) && $headerToken !== '' && hash_equals($token, $headerToken);
     $cookieValid = is_string($cookieToken) && $cookieToken !== '' && hash_equals($token, $cookieToken) && $fetchDest !== 'document';
 
-    if (!$headerValid && !$cookieValid) {
+    if (!$headerValid && !$cookieValid && !$explicitTokenProvided) {
         return null;
     }
 
@@ -3660,6 +3700,19 @@ function ve_video_validate_playback_session(array $video, ?string $token): ?arra
     ]);
 
     return $session;
+}
+
+function ve_video_fetch_playback_session_by_id(int $sessionId): ?array
+{
+    if ($sessionId <= 0) {
+        return null;
+    }
+
+    $stmt = ve_db()->prepare('SELECT * FROM video_playback_sessions WHERE id = :id LIMIT 1');
+    $stmt->execute([':id' => $sessionId]);
+    $session = $stmt->fetch();
+
+    return is_array($session) ? $session : null;
 }
 
 /**
@@ -3991,6 +4044,10 @@ function ve_video_playback_qualify_api(string $publicId): void
     }
 
     $token = trim((string) ($_POST['playback_token'] ?? ''));
+    $sessionToken = trim((string) ($_POST['session_token'] ?? ''));
+    if ($sessionToken === '') {
+        $sessionToken = trim((string) ($_SERVER['HTTP_X_PLAYBACK_SESSION'] ?? ''));
+    }
 
     if ($token === '') {
         ve_json([
@@ -3999,7 +4056,7 @@ function ve_video_playback_qualify_api(string $publicId): void
         ], 422);
     }
 
-    $session = ve_video_validate_playback_session($video, $token);
+    $session = ve_video_find_playback_session($video, $sessionToken !== '' ? $sessionToken : $token);
 
     if (!is_array($session)) {
         ve_json([
@@ -4018,6 +4075,7 @@ function ve_video_playback_qualify_api(string $publicId): void
         ], 403);
     }
 
+    $session = ve_video_fetch_playback_session_by_id((int) ($session['id'] ?? 0)) ?? $session;
     $result = ve_video_record_qualified_view($video, $session, $watchedSeconds);
     $result['rotation'] = ve_video_rotation_payload($video, $session);
     $statusCode = match ($result['status'] ?? 'ok') {
@@ -4042,6 +4100,10 @@ function ve_video_playback_pulse_api(string $publicId): void
     }
 
     $token = trim((string) ($_POST['playback_token'] ?? ''));
+    $sessionToken = trim((string) ($_POST['session_token'] ?? ''));
+    if ($sessionToken === '') {
+        $sessionToken = trim((string) ($_SERVER['HTTP_X_PLAYBACK_SESSION'] ?? ''));
+    }
 
     if ($token === '') {
         ve_json([
@@ -4050,7 +4112,7 @@ function ve_video_playback_pulse_api(string $publicId): void
         ], 422);
     }
 
-    $session = ve_video_validate_playback_session($video, $token);
+    $session = ve_video_find_playback_session($video, $sessionToken !== '' ? $sessionToken : $token);
 
     if (!is_array($session)) {
         ve_json([
@@ -4070,6 +4132,7 @@ function ve_video_playback_pulse_api(string $publicId): void
         ], 403);
     }
 
+    $session = ve_video_fetch_playback_session_by_id((int) ($session['id'] ?? 0)) ?? $session;
     $result = ve_video_record_playback_pulse($video, $session, $watchedSeconds);
     $result['rotation'] = ve_video_rotation_payload($video, $session);
     $statusCode = match ($result['status'] ?? 'ok') {
@@ -4596,7 +4659,8 @@ function ve_video_stream_preview_vtt(string $publicId): void
 function ve_video_secure_player_script(array $session, string $publicId, int $minimumWatchSeconds, ?string $previewVttUrl = null): string
 {
     $manifestUrl = json_encode(ve_absolute_url((string) $session['manifest_url']), JSON_UNESCAPED_SLASHES);
-    $token = json_encode((string) $session['token'], JSON_UNESCAPED_SLASHES);
+    $sessionToken = json_encode((string) $session['token'], JSON_UNESCAPED_SLASHES);
+    $playbackToken = json_encode((string) ($session['playback_token'] ?? ''), JSON_UNESCAPED_SLASHES);
     $homeUrl = json_encode(ve_absolute_url('/'), JSON_UNESCAPED_SLASHES);
     $previewUrl = json_encode($previewVttUrl !== null ? ve_absolute_url($previewVttUrl) : '', JSON_UNESCAPED_SLASHES);
     $pulseViewUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/pulse'), JSON_UNESCAPED_SLASHES);
@@ -4604,6 +4668,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
     $minimumWatchSeconds = max(5, $minimumWatchSeconds);
     $pulseIntervalSeconds = ve_video_pulse_interval_seconds($minimumWatchSeconds);
     $requiredPulseCount = ve_video_required_pulse_count($minimumWatchSeconds);
+    $segmentSeconds = max(1, (int) ve_video_config()['segment_seconds']);
     $pulseClientToken = json_encode((string) ($session['pulse_client_token'] ?? ''), JSON_UNESCAPED_SLASHES);
     $pulseServerToken = json_encode((string) ($session['pulse_server_token'] ?? ''), JSON_UNESCAPED_SLASHES);
     $pulseSequence = max(0, (int) ($session['pulse_sequence'] ?? 0));
@@ -4615,7 +4680,8 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 <script>
     (function () {
         var manifestUrl = {$manifestUrl};
-        var token = {$token};
+        var sessionToken = {$sessionToken};
+        var playbackToken = {$playbackToken};
         var previewUrl = {$previewUrl};
         var fallbackUrl = {$homeUrl};
         var pulseViewUrl = {$pulseViewUrl};
@@ -4623,6 +4689,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         var minimumWatchSeconds = {$minimumWatchSeconds};
         var pulseIntervalSeconds = {$pulseIntervalSeconds};
         var requiredPulseCount = {$requiredPulseCount};
+        var segmentSeconds = {$segmentSeconds};
         var playbackClientToken = {$pulseClientToken};
         var playbackServerToken = {$pulseServerToken};
         var playbackSequence = {$pulseSequence};
@@ -4630,6 +4697,8 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         var video = document.getElementById('ve-secure-player');
         var stage = document.querySelector('.ve-stage');
         var state = document.getElementById('ve-player-state');
+        var overlay = document.getElementById('ve-player-overlay');
+        var overlayButton = document.getElementById('ve-player-overlay-button');
         var player = null;
         var watchedSeconds = 0;
         var watchAuditTimer = null;
@@ -4643,6 +4712,19 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         var qualificationSent = false;
         var qualificationInFlight = false;
         var qualificationRetryTimer = null;
+        var nativePlay = video && typeof video.play === 'function' ? video.play.bind(video) : null;
+        var hls = null;
+        var hlsMediaAttached = false;
+        var hlsSourceLoaded = false;
+        var hlsLoaderActive = false;
+        var pendingSourceLoad = false;
+        var playbackStartRequested = false;
+        var awaitingInitialPlayback = false;
+        var playbackBootstrapped = false;
+        var streamActivated = false;
+        var sourceFailure = false;
+        var bufferLowWatermark = Math.max(2, segmentSeconds * 0.75);
+        var bufferHighWatermark = Math.max(bufferLowWatermark + 0.5, (segmentSeconds * 2) - 0.35);
 
         function setState(message, isError) {
             if (!state) {
@@ -4655,11 +4737,20 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 + (isError ? ' is-error' : '');
         }
 
-        function attemptAutoplay() {
-            var playPromise = video.play();
+        function setOverlayMode(mode) {
+            if (!overlay) {
+                return;
+            }
 
-            if (playPromise && typeof playPromise.catch === 'function') {
-                playPromise.catch(function () {});
+            overlay.classList.remove('is-hidden', 'is-loading');
+
+            if (mode === 'hidden') {
+                overlay.classList.add('is-hidden');
+                return;
+            }
+
+            if (mode === 'loading') {
+                overlay.classList.add('is-loading');
             }
         }
 
@@ -4675,6 +4766,220 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 disableContextMenu: true,
                 previewThumbnails: previewUrl ? { enabled: true, src: previewUrl } : { enabled: false }
             });
+        }
+
+        function bufferedAheadSeconds() {
+            if (!video || !video.buffered) {
+                return 0;
+            }
+
+            var currentTime = Number(video.currentTime || 0);
+
+            for (var index = 0; index < video.buffered.length; index += 1) {
+                var start = video.buffered.start(index);
+                var end = video.buffered.end(index);
+
+                if (currentTime + 0.05 >= start && currentTime <= end + 0.05) {
+                    return Math.max(0, end - currentTime);
+                }
+            }
+
+            return 0;
+        }
+
+        function stopHlsLoading() {
+            if (!hls || !hlsLoaderActive) {
+                return;
+            }
+
+            hlsLoaderActive = false;
+
+            try {
+                hls.stopLoad();
+            } catch (error) {}
+        }
+
+        function startHlsLoading() {
+            if (!hls || !hlsSourceLoaded || hlsLoaderActive) {
+                return;
+            }
+
+            hlsLoaderActive = true;
+
+            try {
+                hls.startLoad(Number.isFinite(Number(video && video.currentTime)) ? Number(video.currentTime) : -1);
+            } catch (error) {
+                hlsLoaderActive = false;
+            }
+        }
+
+        function syncManagedLoading() {
+            if (!hls || !hlsSourceLoaded || sourceFailure) {
+                return;
+            }
+
+            if (!video || video.ended) {
+                stopHlsLoading();
+                return;
+            }
+
+            if (video.paused && !awaitingInitialPlayback) {
+                stopHlsLoading();
+                return;
+            }
+
+            if (bufferedAheadSeconds() >= bufferHighWatermark) {
+                stopHlsLoading();
+                return;
+            }
+
+            startHlsLoading();
+        }
+
+        function failSecurePlayback(message) {
+            sourceFailure = true;
+            awaitingInitialPlayback = false;
+            stopHlsLoading();
+            setOverlayMode('default');
+            setState(message, true);
+        }
+
+        function ensureHlsPipeline() {
+            if (!window.Hls || !window.Hls.isSupported()) {
+                return false;
+            }
+
+            if (hls) {
+                return true;
+            }
+
+            hls = new window.Hls({
+                autoStartLoad: false,
+                startFragPrefetch: false,
+                maxBufferLength: bufferHighWatermark,
+                maxMaxBufferLength: bufferHighWatermark,
+                backBufferLength: bufferLowWatermark,
+                maxBufferSize: 16 * 1024 * 1024,
+                xhrSetup: function (xhr) {
+                    xhr.withCredentials = true;
+                    xhr.setRequestHeader('X-Playback-Session', sessionToken);
+                }
+            });
+
+            hls.on(window.Hls.Events.MEDIA_ATTACHED, function () {
+                hlsMediaAttached = true;
+
+                if (pendingSourceLoad && !hlsSourceLoaded) {
+                    pendingSourceLoad = false;
+                    hlsSourceLoaded = true;
+                    hls.loadSource(manifestUrl);
+                }
+            });
+
+            hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+                hlsLoaderActive = false;
+                startHlsLoading();
+
+                if (playbackStartRequested && video && video.paused && typeof nativePlay === 'function') {
+                    nativePlay().catch(function () {});
+                }
+
+                if (video && !video.paused) {
+                    syncManagedLoading();
+                }
+            });
+
+            hls.on(window.Hls.Events.FRAG_BUFFERED, function () {
+                syncManagedLoading();
+            });
+
+            hls.on(window.Hls.Events.ERROR, function (event, data) {
+                if (!data || !data.fatal) {
+                    return;
+                }
+
+                if (window.console && typeof window.console.warn === 'function') {
+                    window.console.warn('VE secure player fatal HLS error', data.type || '', data.details || '');
+                }
+
+                failSecurePlayback('Playback session expired or could not be loaded. Reload the page to continue.');
+            });
+
+            hls.attachMedia(video);
+            return true;
+        }
+
+        function ensureSourceLoaded() {
+            if (!video || sourceFailure) {
+                return false;
+            }
+
+            if (streamActivated) {
+                return true;
+            }
+
+            streamActivated = true;
+            playbackBootstrapped = true;
+            bootUi();
+            setOverlayMode('loading');
+            setState('Loading encrypted video stream...');
+
+            if (ensureHlsPipeline()) {
+                if (hlsMediaAttached) {
+                    if (!hlsSourceLoaded) {
+                        hlsSourceLoaded = true;
+                        hls.loadSource(manifestUrl);
+                    }
+                } else {
+                    pendingSourceLoad = true;
+                }
+
+                return true;
+            }
+
+            if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                if (!video.currentSrc) {
+                    video.src = manifestUrl;
+                    video.load();
+                }
+
+                return true;
+            }
+
+            failSecurePlayback('This browser cannot play the secure stream. Open the watch page in a modern browser.');
+            return false;
+        }
+
+        function beginPlayback() {
+            if (!video || typeof nativePlay !== 'function') {
+                return Promise.resolve(false);
+            }
+
+            playbackStartRequested = true;
+            awaitingInitialPlayback = true;
+
+            if (!ensureSourceLoaded()) {
+                awaitingInitialPlayback = false;
+                return Promise.resolve(false);
+            }
+
+            if (hls) {
+                syncManagedLoading();
+            }
+
+            if (video.readyState < 2) {
+                return Promise.resolve(true);
+            }
+
+            var playPromise = nativePlay();
+
+            if (playPromise && typeof playPromise.catch === 'function') {
+                return playPromise.catch(function () {
+                    return false;
+                });
+            }
+
+            return Promise.resolve(true);
         }
 
         function nowMs() {
@@ -4935,7 +5240,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 String(Math.max(0, playbackSequence)),
                 playbackClientToken,
                 playbackServerToken,
-                token,
+                playbackToken,
                 String(Math.max(0, Math.floor(watchedSeconds)))
             ].join('\\n');
 
@@ -4952,7 +5257,8 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
         function buildPlaybackBody() {
             var params = new URLSearchParams();
-            params.set('playback_token', token);
+            params.set('session_token', sessionToken);
+            params.set('playback_token', playbackToken);
             params.set('watched_seconds', String(Math.max(0, Math.floor(watchedSeconds))));
             return params.toString();
         }
@@ -4960,6 +5266,10 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         function applyRotationPayload(rotation) {
             if (!rotation || typeof rotation !== 'object') {
                 return;
+            }
+
+            if (typeof rotation.playback_token === 'string' && rotation.playback_token !== '') {
+                playbackToken = rotation.playback_token;
             }
 
             if (typeof rotation.client_token === 'string' && rotation.client_token !== '') {
@@ -4992,7 +5302,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                     headers: {
                         Accept: 'application/json',
                         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                        'X-Playback-Session': token,
+                        'X-Playback-Session': sessionToken,
                         'X-Playback-Client-Token': playbackClientToken,
                         'X-Playback-Server-Token': playbackServerToken,
                         'X-Playback-Sequence': String(Math.max(0, playbackSequence)),
@@ -5218,17 +5528,6 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             });
         }
 
-        function attachNative() {
-            video.src = manifestUrl;
-            video.addEventListener('loadedmetadata', function () {
-                setState('');
-                attemptAutoplay();
-            }, { once: true });
-            video.addEventListener('error', function () {
-                setState('Secure playback could not be started in this browser.', true);
-            });
-        }
-
         if (!video) {
             return;
         }
@@ -5239,50 +5538,118 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             });
         }
 
-        bootUi();
         bindWatchTracking();
-        setState('Securing playback session...');
+        setState('');
+        setOverlayMode('default');
+        video.preload = 'none';
+        video.play = function () {
+            return beginPlayback();
+        };
 
-        if (window.Hls && window.Hls.isSupported()) {
-            var hls = new window.Hls({
-                xhrSetup: function (xhr) {
-                    xhr.withCredentials = true;
-                    xhr.setRequestHeader('X-Playback-Session', token);
-                }
+        if (overlayButton) {
+            overlayButton.addEventListener('click', function (event) {
+                event.preventDefault();
+                beginPlayback();
             });
-
-            hls.on(window.Hls.Events.MEDIA_ATTACHED, function () {
-                setState('Loading encrypted video stream...');
-                hls.loadSource(manifestUrl);
-            });
-
-            hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
-                setState('');
-                attemptAutoplay();
-            });
-
-            hls.on(window.Hls.Events.ERROR, function (event, data) {
-                if (data && data.fatal) {
-                    setState('Playback session expired or could not be loaded. Reload the page to continue.', true);
-                }
-            });
-
-            hls.attachMedia(video);
-            return;
         }
 
-        if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            setState('Loading encrypted video stream...');
-            attachNative();
-            return;
-        }
-
-        setState('This browser cannot play the secure stream. Open the watch page in a modern browser.', true);
-        window.setTimeout(function () {
-            if (!video.currentSrc) {
-                window.location.href = fallbackUrl;
+        video.addEventListener('play', function () {
+            if (!streamActivated) {
+                beginPlayback();
             }
-        }, 1200);
+
+            if (hls) {
+                syncManagedLoading();
+            }
+        });
+
+        video.addEventListener('playing', function () {
+            awaitingInitialPlayback = false;
+            setOverlayMode('hidden');
+            setState('');
+
+            if (hls) {
+                syncManagedLoading();
+            }
+        });
+
+        video.addEventListener('progress', function () {
+            if (!streamActivated) {
+                return;
+            }
+
+            if (!video.paused && video.readyState >= 2) {
+                setState('');
+            }
+
+            if (hls) {
+                syncManagedLoading();
+            }
+        });
+
+        video.addEventListener('timeupdate', function () {
+            if (hls) {
+                syncManagedLoading();
+            }
+        });
+
+        video.addEventListener('waiting', function () {
+            if (!streamActivated) {
+                return;
+            }
+
+            setState('Buffering secure stream...');
+
+            if (hls) {
+                startHlsLoading();
+            }
+        });
+
+        video.addEventListener('seeked', function () {
+            if (hls) {
+                syncManagedLoading();
+            }
+        });
+
+        ['loadeddata', 'loadedmetadata', 'canplay'].forEach(function (eventName) {
+            video.addEventListener(eventName, function () {
+                if (!streamActivated) {
+                    return;
+                }
+
+                if (!video.paused) {
+                    setState('');
+                }
+
+                if (playbackStartRequested && video.paused && typeof nativePlay === 'function') {
+                    nativePlay().catch(function () {});
+                }
+            });
+        });
+
+        ['pause', 'ended'].forEach(function (eventName) {
+            video.addEventListener(eventName, function () {
+                awaitingInitialPlayback = false;
+                if (hls) {
+                    stopHlsLoading();
+                }
+            });
+        });
+
+        video.addEventListener('error', function () {
+            if (!sourceFailure) {
+                failSecurePlayback('Secure playback could not be started in this browser.');
+            }
+        });
+
+        if (!(window.Hls && window.Hls.isSupported()) && !video.canPlayType('application/vnd.apple.mpegurl')) {
+            setState('This browser cannot play the secure stream. Open the watch page in a modern browser.', true);
+            window.setTimeout(function () {
+                if (!video.currentSrc) {
+                    window.location.href = fallbackUrl;
+                }
+            }, 1200);
+        }
     }());
 </script>
 HTML;
@@ -6020,11 +6387,11 @@ HTML);
     }
 
     $posterAsset = ve_video_resolve_poster_asset($video);
-    $posterAttribute = '';
+    $posterOverlay = '';
 
     if (is_array($posterAsset)) {
         $posterUrl = ve_h(ve_url('/stream/' . rawurlencode($publicId) . '/poster.jpg?token=' . rawurlencode((string) $session['token'])));
-        $posterAttribute = ' poster="' . $posterUrl . '"';
+        $posterOverlay = '<img class="ve-player-poster" src="' . $posterUrl . '" alt="" draggable="false">';
     }
 
     $logoPath = trim((string) ($ownerSettings['logo_path'] ?? ''));
@@ -6076,6 +6443,67 @@ HTML);
         .ve-stage .plyr--full-ui input[type=range] {
             color: var(--ve-accent);
         }
+        .ve-player-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 4;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at center, rgba(255,255,255,0.08), rgba(0,0,0,0.78) 62%),
+                linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.68));
+            transition: opacity .18s ease;
+        }
+        .ve-player-overlay.is-hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .ve-player-overlay.is-loading {
+            pointer-events: none;
+        }
+        .ve-player-poster {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .ve-player-overlay-button {
+            position: relative;
+            z-index: 1;
+            width: 94px;
+            height: 94px;
+            border: 0;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 153, 0, 0.96);
+            color: #111;
+            box-shadow: 0 18px 40px rgba(0,0,0,0.42);
+            transition: transform .16s ease, opacity .16s ease, background .16s ease;
+            cursor: pointer;
+        }
+        .ve-player-overlay-button:hover {
+            transform: scale(1.04);
+            background: rgba(255, 172, 38, 0.98);
+        }
+        .ve-player-overlay.is-loading .ve-player-overlay-button {
+            opacity: 0.82;
+        }
+        .ve-player-overlay-button::before {
+            content: "";
+            display: block;
+            width: 0;
+            height: 0;
+            margin-left: 6px;
+            border-top: 17px solid transparent;
+            border-bottom: 17px solid transparent;
+            border-left: 27px solid currentColor;
+        }
         .ve-logo-badge {
             position: absolute;
             top: 18px;
@@ -6117,14 +6545,18 @@ HTML);
     <div class="ve-embed-shell">
         <div class="ve-stage">
             {$logoBadge}
+            <div id="ve-player-overlay" class="ve-player-overlay">
+                {$posterOverlay}
+                <button type="button" id="ve-player-overlay-button" class="ve-player-overlay-button" aria-label="Start secure playback"></button>
+            </div>
             <video
                 id="ve-secure-player"
                 controls
                 playsinline
-                preload="metadata"
+                preload="none"
                 controlsList="nodownload noplaybackrate"
                 disablepictureinpicture
-                crossorigin="use-credentials"{$posterAttribute}
+                crossorigin="use-credentials"
             ></video>
             <div id="ve-player-state" class="ve-player-state"></div>
         </div>
