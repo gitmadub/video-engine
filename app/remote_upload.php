@@ -343,6 +343,23 @@ function ve_remote_url_matches_host(string $url, array $hosts): bool
     return false;
 }
 
+function ve_remote_find_host_resolver(array $hosts, string $key): ?array
+{
+    $key = strtolower(trim($key));
+
+    if ($key === '') {
+        return null;
+    }
+
+    foreach ($hosts as $host) {
+        if (strtolower(trim((string) ($host['key'] ?? ''))) === $key) {
+            return $host;
+        }
+    }
+
+    return null;
+}
+
 function ve_remote_absolute_url(string $baseUrl, string $location): string
 {
     $location = trim($location);
@@ -741,6 +758,20 @@ function ve_remote_html_redirect_url(string $html, string $baseUrl): string
         if ($redirectUrl !== '' && ve_remote_is_http_url($redirectUrl)) {
             return $redirectUrl;
         }
+    }
+
+    return '';
+}
+
+function ve_remote_detect_host_key_from_page(string $html): string
+{
+    $html = strtolower($html);
+
+    if ($html !== ''
+        && (str_contains($html, '/token911') || str_contains($html, 'token911'))
+        && (str_contains($html, '/ip129jk') || str_contains($html, 'iframeid'))
+    ) {
+        return 'vidi64';
     }
 
     return '';
@@ -1744,8 +1775,9 @@ function ve_remote_claim_next_job(): ?array
 function ve_remote_resolve_source(array $job): array
 {
     $url = trim((string) ($job['source_url'] ?? ''));
+    $hosts = ve_remote_hosts();
 
-    foreach (ve_remote_hosts() as $host) {
+    foreach ($hosts as $host) {
         $match = $host['match'] ?? null;
         $resolve = $host['resolve'] ?? null;
 
@@ -1775,6 +1807,83 @@ function ve_remote_resolve_source(array $job): array
         }
 
         return $resolved;
+    }
+
+    try {
+        $probe = ve_remote_http_request($url, [
+            'follow_location' => true,
+            'referer' => $url,
+            'timeout' => 20,
+        ]);
+    } catch (Throwable $throwable) {
+        $probe = null;
+    }
+
+    $effectiveUrl = trim((string) (($probe['effective_url'] ?? '') ?: ''));
+
+    if ($effectiveUrl !== '' && $effectiveUrl !== $url) {
+        foreach ($hosts as $host) {
+            $match = $host['match'] ?? null;
+            $resolve = $host['resolve'] ?? null;
+
+            if (!is_callable($match) || !is_callable($resolve)) {
+                continue;
+            }
+
+            if ($match($effectiveUrl) !== true) {
+                continue;
+            }
+
+            $resolved = $resolve($effectiveUrl, $job);
+
+            if (!is_array($resolved) || !isset($resolved['download_url'])) {
+                throw new RuntimeException('The remote host resolver did not return a download URL.');
+            }
+
+            $resolved['host_key'] = (string) ($host['key'] ?? 'unknown');
+            $resolved['normalized_url'] = trim((string) ($resolved['normalized_url'] ?? $effectiveUrl));
+            $resolved['download_url'] = trim((string) $resolved['download_url']);
+            $resolved['filename'] = trim((string) ($resolved['filename'] ?? ''));
+            $resolved['referer'] = trim((string) ($resolved['referer'] ?? ''));
+            $resolved['headers'] = is_array($resolved['headers'] ?? null) ? $resolved['headers'] : [];
+
+            if ($resolved['download_url'] === '') {
+                throw new RuntimeException('The resolved download URL is empty.');
+            }
+
+            return $resolved;
+        }
+    }
+
+    $detectedHostKey = is_array($probe)
+        ? ve_remote_detect_host_key_from_page((string) ($probe['body'] ?? ''))
+        : '';
+
+    if ($detectedHostKey !== '') {
+        $host = ve_remote_find_host_resolver($hosts, $detectedHostKey);
+        $resolve = $host['resolve'] ?? null;
+
+        if (is_callable($resolve)) {
+            $detectedUrl = $effectiveUrl !== '' ? $effectiveUrl : $url;
+            $resolved = $resolve($detectedUrl, $job);
+
+            if (!is_array($resolved) || !isset($resolved['download_url'])) {
+                throw new RuntimeException('The remote host resolver did not return a download URL.');
+            }
+
+            $resolved['host_key'] = (string) ($host['key'] ?? 'unknown');
+            $resolved['normalized_url'] = trim((string) ($resolved['normalized_url'] ?? $detectedUrl));
+            $resolved['download_url'] = trim((string) $resolved['download_url']);
+            $resolved['filename'] = trim((string) ($resolved['filename'] ?? ''));
+            $resolved['referer'] = trim((string) ($resolved['referer'] ?? ''));
+            $resolved['headers'] = is_array($resolved['headers'] ?? null) ? $resolved['headers'] : [];
+
+            if ($resolved['download_url'] === '') {
+                throw new RuntimeException('The resolved download URL is empty.');
+            }
+
+            return $resolved;
+        }
     }
 
     throw new RuntimeException('This remote host is not supported yet.');

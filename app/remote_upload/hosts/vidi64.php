@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 function ve_remote_vidi64_match(string $url): bool
 {
-    return ve_remote_url_matches_host($url, ['vidi64.com', 'winvidplay.com']);
+    return ve_remote_url_matches_host($url, ['vidi64.com', 'winvidplay.com', 'vidoy.cam', 'poopvid.com']);
 }
 
 function ve_remote_vidi64_title_from_html(string $html): string

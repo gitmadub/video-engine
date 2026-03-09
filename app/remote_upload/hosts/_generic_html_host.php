@@ -38,12 +38,14 @@ function ve_remote_generic_html_pages(string $url, array $config = []): array
             continue;
         }
 
-        if (($response['status'] ?? 0) >= 400) {
+        $effectiveUrl = (string) ($response['effective_url'] ?? $candidate);
+        $body = (string) ($response['body'] ?? '');
+        $status = (int) ($response['status'] ?? 0);
+
+        if ($status >= 400 && trim($body) === '') {
             continue;
         }
 
-        $effectiveUrl = (string) ($response['effective_url'] ?? $candidate);
-        $body = (string) ($response['body'] ?? '');
         $cookieHeader = ve_remote_merge_cookie_header($cookieHeader, ve_remote_cookie_header_from_response($response));
         $pages[$effectiveUrl] = [
             'body' => $body,
@@ -108,5 +110,53 @@ function ve_remote_generic_html_resolve(string $url, array $config = []): array
     }
 
     $label = trim((string) ($config['label'] ?? 'remote host'));
-    throw new RuntimeException('Could not extract a downloadable video source from ' . $label . '.');
+    throw new RuntimeException(ve_remote_generic_html_failure_reason($pages, $label));
+}
+
+function ve_remote_generic_html_failure_reason(array $pages, string $label): string
+{
+    foreach ($pages as $pageUrl => $pageData) {
+        $html = is_array($pageData) ? (string) ($pageData['body'] ?? '') : (string) $pageData;
+        $haystack = strtolower($pageUrl . "\n" . $html);
+
+        if ($haystack === '') {
+            continue;
+        }
+
+        if (
+            str_contains($haystack, 'gocomper.com')
+            || str_contains($haystack, 'resultsfinderonline.com')
+            || str_contains($haystack, 'resultsfastfind.com')
+            || str_contains($haystack, '<title>category search</title>')
+            || (
+                str_contains($haystack, '<title>redirecting...</title>')
+                && str_contains($haystack, 'ad-overlay google-ad-bottom-outer prebid-wrapper')
+            )
+            || str_contains($haystack, 'domain may be for sale')
+            || str_contains($haystack, 'parked')
+        ) {
+            return $label . ' redirected to a parking or lander page instead of a video page.';
+        }
+
+        if (
+            str_contains($haystack, 'ddos-guard')
+            && (
+                str_contains($haystack, '503 service unavailable')
+                || str_contains($haystack, 'wrongip.js')
+                || str_contains($haystack, 'server could not complete your request')
+            )
+        ) {
+            return $label . ' is currently blocked by DDoS-Guard from this server IP.';
+        }
+
+        if (
+            str_contains($haystack, "we can't find the file you are looking for")
+            || str_contains($haystack, 'removed due a copyright violation')
+            || str_contains($haystack, 'file was removed')
+        ) {
+            return $label . ' reports that the file is no longer available.';
+        }
+    }
+
+    return 'Could not extract a downloadable video source from ' . $label . '.';
 }
