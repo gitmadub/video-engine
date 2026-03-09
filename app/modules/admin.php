@@ -2699,17 +2699,18 @@ function ve_admin_dashboard_shell(
             margin-top: 10px;
         }
         .admin-shell .the_box {
+            display: grid !important;
+            grid-template-columns: 285px minmax(0, 1fr);
             align-items: flex-start;
             gap: 18px;
         }
         .admin-shell .sidebar.settings-page {
-            flex: 0 0 285px;
             width: 285px;
+            margin-right: 0 !important;
             position: sticky;
             top: 108px;
         }
         .admin-shell .details.settings_data {
-            flex: 1 1 calc(100% - 303px);
             min-width: 0;
         }
         .admin-shell .settings_data > .data {
@@ -2856,7 +2857,6 @@ function ve_admin_dashboard_shell(
             .admin-shell .details.settings_data {
                 position: static;
                 width: 100%;
-                flex: 1 1 100%;
             }
             .admin-shell .sidebar.settings-page { margin-bottom: 18px; }
         }
