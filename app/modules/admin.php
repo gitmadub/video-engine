@@ -2712,6 +2712,9 @@ function ve_admin_dashboard_shell(
             flex: 1 1 calc(100% - 303px);
             min-width: 0;
         }
+        .admin-shell .settings_data > .data {
+            display: block !important;
+        }
         .admin-shell .settings-panel {
             padding: 24px 26px;
             background: #151515;
