@@ -268,6 +268,7 @@ require __DIR__ . '/modules/public_api.php';
 require __DIR__ . '/referrals.php';
 require __DIR__ . '/video.php';
 require __DIR__ . '/modules/dmca.php';
+require __DIR__ . '/modules/admin.php';
 require __DIR__ . '/remote_upload.php';
 require __DIR__ . '/routes/api.php';
 require __DIR__ . '/routes/legacy.php';
@@ -1116,6 +1117,10 @@ function ve_dispatch(): void
 
     if ($path === '/genrate-api/' || $path === '/genrate-api') {
         ve_legacy_endpoint_removed('/account/api-key/regenerate', ['POST']);
+    }
+
+    if ($path === '/backend' || str_starts_with($path, '/backend/')) {
+        ve_handle_backend_request();
     }
 
     if (str_starts_with($path, '/subscene/')) {
