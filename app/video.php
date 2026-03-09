@@ -4898,8 +4898,8 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         var playbackBootstrapped = false;
         var streamActivated = false;
         var sourceFailure = false;
-        var bufferLowWatermark = Math.max(2, segmentSeconds * 0.75);
-        var bufferHighWatermark = Math.max(bufferLowWatermark + 0.5, (segmentSeconds * 2) - 0.35);
+        var bufferLowWatermark = Math.max(1.5, segmentSeconds * 0.5);
+        var bufferHighWatermark = Math.max(bufferLowWatermark + 0.75, segmentSeconds + 0.75);
 
         function setState(message, isError) {
             if (!state) {
