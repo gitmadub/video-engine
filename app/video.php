@@ -44,6 +44,38 @@ function ve_video_storage_path(string ...$parts): string
     return ve_storage_path('private', 'videos', ...$parts);
 }
 
+function ve_video_normalize_library_directory(string $path): void
+{
+    if ($path === '' || !is_dir($path)) {
+        return;
+    }
+
+    @chmod($path, 0775);
+
+    if (DIRECTORY_SEPARATOR === '\\') {
+        return;
+    }
+
+    $parent = dirname($path);
+
+    if ($parent === '' || $parent === $path || !is_dir($parent)) {
+        return;
+    }
+
+    $owner = @fileowner($parent);
+    $group = @filegroup($parent);
+
+    if (is_int($owner) && $owner >= 0) {
+        @chown($path, $owner);
+    }
+
+    if (is_int($group) && $group >= 0) {
+        @chgrp($path, $group);
+    }
+
+    @chmod($path, 0775);
+}
+
 function ve_video_processing_lock_path(): string
 {
     return ve_video_storage_path('processor.lock');
@@ -226,7 +258,11 @@ function ve_video_upload_limit_bytes(): int
 
 function ve_video_library_directory(string $publicId): string
 {
-    return ve_video_storage_path('library', $publicId);
+    $directory = ve_video_storage_path('library', $publicId);
+    ve_ensure_directory($directory);
+    ve_video_normalize_library_directory($directory);
+
+    return $directory;
 }
 
 function ve_video_source_path(array $video): string
