@@ -291,7 +291,7 @@ try {
     $csrf = dashboard_api_extract_runtime_token($home['body']);
     echo "home ok\n";
 
-    $login = dashboard_api_json($client->request('POST', '/login', [
+    $login = dashboard_api_json($client->request('POST', '/api/auth/login', [
         'form' => [
             'login' => 'dashboard_case',
             'password' => 'DashPass123',

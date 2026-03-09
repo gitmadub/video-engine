@@ -271,6 +271,121 @@
         };
     }
 
+    function currentPremiumPage(vm) {
+        if (vm && vm.data && vm.data.page) {
+            return vm.data.page;
+        }
+
+        if (vm && vm.page) {
+            return vm.page;
+        }
+
+        return {};
+    }
+
+    function renderPremiumOverview(vm) {
+        var root = document.querySelector('.my-premium');
+
+        if (!root) {
+            return;
+        }
+
+        var page = currentPremiumPage(vm);
+        var accountStatus = page.plan_label || 'Free account';
+        var accountDetail = page.premium_until_label || 'No active renewal';
+        var bandwidthStatus = page.purchased_bw_label || '0 B';
+        var bandwidthDetail = 'Remaining ' + escapeHtml(page.available_bw_label || '0 B') + ' • ' + escapeHtml(page.premium_bandwidth_status_label || 'Inactive');
+        var usageStatus = page.used_bw_label || '0 B';
+        var usageDetail = page.premium_bandwidth_status_detail || 'Only traffic served while own adverts are enabled counts against premium bandwidth.';
+        var overview = root.querySelector('[data-premium-overview]');
+
+        if (!overview) {
+            overview = document.createElement('section');
+            overview.className = 've-premium-overview';
+            overview.setAttribute('data-premium-overview', '1');
+            root.insertBefore(overview, root.firstChild);
+        }
+
+        overview.innerHTML = ''
+            + '<div class="ve-premium-overview-card" data-premium-card="account">'
+            + '  <span class="ve-premium-overview-kicker" data-premium-card-title="account">Premium account</span>'
+            + '  <strong>' + escapeHtml(accountStatus) + '</strong>'
+            + '  <p>' + escapeHtml(accountDetail) + '</p>'
+            + '</div>'
+            + '<div class="ve-premium-overview-card" data-premium-card="bandwidth">'
+            + '  <span class="ve-premium-overview-kicker" data-premium-card-title="bandwidth">Premium bandwidth</span>'
+            + '  <strong>' + escapeHtml(bandwidthStatus) + '</strong>'
+            + '  <p>' + bandwidthDetail + '</p>'
+            + '</div>'
+            + '<div class="ve-premium-overview-card" data-premium-card="usage">'
+            + '  <span class="ve-premium-overview-kicker" data-premium-card-title="usage">Premium bandwidth usage</span>'
+            + '  <strong>' + escapeHtml(usageStatus) + '</strong>'
+            + '  <p>' + escapeHtml(usageDetail) + '</p>'
+            + '</div>';
+    }
+
+    function reorderPremiumSections(vm) {
+        var root = document.querySelector('.my-premium');
+
+        if (!root) {
+            return;
+        }
+
+        var directChildren = Array.prototype.slice.call(root.children || []);
+        var mainRow = directChildren.find(function (element) {
+            return element && element.classList
+                && element.classList.contains('row')
+                && !element.classList.contains('premium-plans');
+        }) || null;
+        var accountTitle = directChildren.find(function (element) {
+            return element && element.tagName === 'H2' && element.classList && element.classList.contains('title');
+        }) || null;
+        var accountRow = directChildren.find(function (element) {
+            return element && element.classList
+                && element.classList.contains('row')
+                && element.classList.contains('premium-plans');
+        }) || null;
+
+        if (accountTitle && accountRow && mainRow) {
+            root.insertBefore(accountRow, mainRow);
+            root.insertBefore(accountTitle, accountRow);
+        }
+
+        if (!mainRow) {
+            return;
+        }
+
+        var mainRowChildren = Array.prototype.slice.call(mainRow.children || []);
+        var usageTitle = mainRowChildren.find(function (element) {
+            return element && element.classList
+                && element.classList.contains('col-md-12')
+                && !element.classList.contains('mt-4');
+        }) || null;
+        var usageCard = mainRowChildren.find(function (element) {
+            return element && element.classList && element.classList.contains('col-md-2');
+        }) || null;
+        var usageChart = mainRowChildren.find(function (element) {
+            return element && element.classList && element.classList.contains('col-md-10');
+        }) || null;
+        var bandwidthTitle = mainRowChildren.find(function (element) {
+            return element && element.classList
+                && element.classList.contains('col-md-12')
+                && element.classList.contains('mt-4');
+        }) || null;
+        var bandwidthPlans = bandwidthTitle ? bandwidthTitle.nextElementSibling : null;
+
+        [bandwidthTitle, bandwidthPlans, usageTitle, usageCard, usageChart].forEach(function (element) {
+            if (element && element.parentNode === mainRow) {
+                mainRow.appendChild(element);
+            }
+        });
+    }
+
+    function renderPremiumLayout(vm) {
+        reorderPremiumSections(vm);
+        renderPremiumOverview(vm);
+    }
+
     function applyPremiumSummary(vm, summary) {
         if (!vm || !summary || !vm.data || !vm.data.page) {
             return;
@@ -299,6 +414,8 @@
         if (typeof vm.$forceUpdate === 'function') {
             vm.$forceUpdate();
         }
+
+        renderPremiumLayout(vm);
     }
 
     function renderBalanceCheckoutBody(quote) {
@@ -455,7 +572,7 @@
     function confirmBalanceCheckout(vm, quote) {
         showCheckoutLoading('Processing balance purchase', 'Applying your premium purchase and refreshing the account state.');
 
-        requestJson('/api/premium/checkout/balance', {
+        requestJson('/api/billing/balance', {
             purchase_type: quote.purchase_type,
             package_id: quote.package_id,
             payment_method: 'balance'
@@ -477,7 +594,7 @@
         var selection = buildPremiumSelection(vm, purchaseType);
         showCheckoutLoading('Preparing balance checkout', 'Fetching your live balance and premium entitlement state.');
 
-        requestJson('/api/premium/checkout/quote', {
+        requestJson('/api/billing/quote', {
             purchase_type: selection.purchase_type,
             package_id: selection.package_id,
             payment_method: 'balance'
@@ -492,7 +609,7 @@
         var selection = buildPremiumSelection(vm, purchaseType);
         showCheckoutLoading('Generating crypto invoice', 'Creating a sandbox payment invoice in the same premium flow.');
 
-        requestJson('/api/premium/checkout/crypto', {
+        requestJson('/api/billing/crypto', {
             purchase_type: selection.purchase_type,
             package_id: selection.package_id,
             payment_method: paymentMethod
@@ -529,6 +646,9 @@
         }
 
         vm.__vePremiumCheckoutBound = true;
+        renderPremiumLayout(vm);
+        var originalPayPlan = typeof vm.pay_plan === 'function' ? vm.pay_plan : null;
+        var originalPayBw = typeof vm.pay_bw === 'function' ? vm.pay_bw : null;
 
         vm.pay_ajax_balance = function (payload) {
             openBalanceCheckout(vm, payload && payload.premium === 'bandwidth' ? 'bandwidth' : 'account');
@@ -540,6 +660,52 @@
                 payload && payload.premium === 'bandwidth' ? 'bandwidth' : 'account',
                 payload && (payload.coin || payload.submethod) ? (payload.coin || payload.submethod) : 'BTC'
             );
+        };
+
+        vm.pay_plan = function () {
+            if (vm.payment_selected === 'paypal') {
+                var plan = vm.premium_plans && vm.premium_plans[vm.premium_selected.index] ? vm.premium_plans[vm.premium_selected.index] : null;
+                var planUrl = new URL(appUrl('/api/billing/paypal'), window.location.origin);
+
+                if (plan && plan.price) {
+                    planUrl.searchParams.set('amount', plan.price);
+                }
+
+                if (vm.data && vm.data.page && vm.data.page.rand) {
+                    planUrl.searchParams.set('r', vm.data.page.rand);
+                }
+
+                window.open(planUrl.toString(), '_blank');
+                return;
+            }
+
+            if (originalPayPlan) {
+                return originalPayPlan.apply(vm, arguments);
+            }
+        };
+
+        vm.pay_bw = function () {
+            if (vm.payment_selected_bw === 'paypal') {
+                var bandwidthPackage = vm.packages && vm.packages[vm.package_selected.index] ? vm.packages[vm.package_selected.index] : null;
+                var bandwidthUrl = new URL(appUrl('/api/billing/paypal'), window.location.origin);
+
+                if (bandwidthPackage && bandwidthPackage.price) {
+                    bandwidthUrl.searchParams.set('amount', bandwidthPackage.price);
+                }
+
+                bandwidthUrl.searchParams.set('premium_bw', '1');
+
+                if (vm.data && vm.data.page && vm.data.page.rand) {
+                    bandwidthUrl.searchParams.set('r', vm.data.page.rand);
+                }
+
+                window.open(bandwidthUrl.toString(), '_blank');
+                return;
+            }
+
+            if (originalPayBw) {
+                return originalPayBw.apply(vm, arguments);
+            }
         };
     }
 

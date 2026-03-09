@@ -17,6 +17,7 @@
         totalViews: root.querySelector('[data-reports-total-views]'),
         totalProfit: root.querySelector('[data-reports-total-profit]'),
         totalReferral: root.querySelector('[data-reports-total-referral]'),
+        totalRevenue: root.querySelector('[data-reports-total-revenue]'),
         totalTraffic: root.querySelector('[data-reports-total-traffic]'),
         footerViews: root.querySelector('[data-reports-footer-views]'),
         footerProfit: root.querySelector('[data-reports-footer-profit]'),
@@ -87,6 +88,7 @@
         var views = totals && typeof totals.views !== 'undefined' ? totals.views : 0;
         var profit = totals && totals.profit ? totals.profit : '$0.00000';
         var referral = totals && totals.referral_share ? totals.referral_share : '$0.00000';
+        var revenue = totals && totals.total ? totals.total : '$0.00000';
         var traffic = totals && totals.traffic ? totals.traffic : '0 B';
 
         if (els.totalViews) {
@@ -97,6 +99,9 @@
         }
         if (els.totalReferral) {
             els.totalReferral.textContent = referral;
+        }
+        if (els.totalRevenue) {
+            els.totalRevenue.textContent = revenue;
         }
         if (els.totalTraffic) {
             els.totalTraffic.textContent = traffic;

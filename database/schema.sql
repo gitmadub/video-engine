@@ -286,12 +286,37 @@ CREATE TABLE IF NOT EXISTS video_playback_sessions (
     last_seen_at TEXT NOT NULL,
     playback_started_at TEXT DEFAULT NULL,
     bandwidth_bytes_served INTEGER NOT NULL DEFAULT 0,
+    uses_premium_bandwidth INTEGER NOT NULL DEFAULT 0,
+    premium_bandwidth_bytes_served INTEGER NOT NULL DEFAULT 0,
     revoked_at TEXT DEFAULT NULL,
     FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_video_sessions_video_expires ON video_playback_sessions(video_id, expires_at);
+
+CREATE TABLE IF NOT EXISTS video_download_grants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL,
+    viewer_user_id INTEGER DEFAULT NULL,
+    session_id_hash TEXT NOT NULL,
+    request_token_hash TEXT NOT NULL UNIQUE,
+    download_token_hash TEXT DEFAULT NULL UNIQUE,
+    ip_hash TEXT NOT NULL,
+    user_agent_hash TEXT NOT NULL,
+    wait_seconds INTEGER NOT NULL DEFAULT 0,
+    available_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    issued_at TEXT DEFAULT NULL,
+    used_at TEXT DEFAULT NULL,
+    revoked_at TEXT DEFAULT NULL,
+    FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+    FOREIGN KEY (viewer_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_download_grants_video_expiry ON video_download_grants(video_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_video_download_grants_session_created ON video_download_grants(session_id_hash, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS user_stats_daily (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -301,6 +326,7 @@ CREATE TABLE IF NOT EXISTS user_stats_daily (
     earned_micro_usd INTEGER NOT NULL DEFAULT 0,
     referral_earned_micro_usd INTEGER NOT NULL DEFAULT 0,
     bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
+    premium_bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -314,6 +340,7 @@ CREATE TABLE IF NOT EXISTS video_stats_daily (
     earned_micro_usd INTEGER NOT NULL DEFAULT 0,
     referral_earned_micro_usd INTEGER NOT NULL DEFAULT 0,
     bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
+    premium_bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE

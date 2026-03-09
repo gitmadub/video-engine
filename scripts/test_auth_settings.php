@@ -164,13 +164,13 @@ function assert_settings_forms_bound(string $html): void
 
     $xpath = new DOMXPath($dom);
     $expectedForms = [
-        'details' => '/account/settings',
-        'password_settings' => '/account/password',
-        'email_settings' => '/account/email',
-        'player_settings' => '/account/player',
-        'premium_settings' => '/account/advertising',
-        'api_access' => '/account/api-settings',
-        'delete_account' => '/account/delete',
+        'details' => '/api/account/profile',
+        'password_settings' => '/api/account/password',
+        'email_settings' => '/api/account/email',
+        'player_settings' => '/api/account/player',
+        'premium_settings' => '/api/account/ads',
+        'api_access' => '/api/account/api',
+        'delete_account' => '/api/account/delete',
     ];
 
     foreach ($expectedForms as $panelId => $action) {
@@ -480,8 +480,8 @@ try {
     assert_true($homePage['status'] === 200, 'Home page should load.');
     $publicCsrf = extract_runtime_token($homePage['body']);
 
-    $registerGet = $client->request('GET', '/register');
-    assert_true($registerGet['status'] === 405, 'GET /register should be rejected.');
+    $registerGet = $client->request('GET', '/api/auth/register');
+    assert_true($registerGet['status'] === 405, 'GET /api/auth/register should be rejected.');
 
     $legacyRegistration = $client->request('GET', '/?op=registration_ajax&usr_login=legacy&usr_email=legacy%40example.com&usr_password=Legacy123&usr_password2=Legacy123');
     assert_true($legacyRegistration['status'] === 410, 'Legacy registration endpoint should be disabled.');
@@ -489,7 +489,7 @@ try {
     $response = $client->request('GET', '/dashboard/settings');
     assert_true(in_array($response['status'], [301, 302], true), 'Unauthenticated settings access should redirect.');
 
-    $registration = json_response($client->request('POST', '/register', [
+    $registration = json_response($client->request('POST', '/api/auth/register', [
         'form' => [
             'usr_login' => 'alice_case',
             'usr_email' => 'alice@example.com',
@@ -501,7 +501,7 @@ try {
     assert_true(($registration['status'] ?? null) === 'ok', 'Registration should succeed.');
     echo "registration ok\n";
 
-    $loginFail = json_response($client->request('POST', '/login', [
+    $loginFail = json_response($client->request('POST', '/api/auth/login', [
         'form' => [
             'login' => 'alice_case',
             'password' => 'Wrong123',
@@ -510,7 +510,7 @@ try {
     ]));
     assert_true(($loginFail['status'] ?? null) === 'fail', 'Login with a wrong password should fail.');
 
-    $login = json_response($client->request('POST', '/login', [
+    $login = json_response($client->request('POST', '/api/auth/login', [
         'form' => [
             'login' => 'alice_case',
             'password' => 'Start123',
@@ -529,7 +529,7 @@ try {
     }
     assert_true(str_contains($settingsPage['body'], '/premium-plans'), 'Settings page should use the dashboard premium-plans route.');
     assert_true(!str_contains($settingsPage['body'], 'href="/premium"'), 'Settings page should not use the guest premium route.');
-    assert_true(str_contains($settingsPage['body'], '/account/api-settings'), 'Settings page should expose the API policy form.');
+    assert_true(str_contains($settingsPage['body'], '/api/account/api'), 'Settings page should expose the API policy form.');
     assert_true(str_contains($settingsPage['body'], 'data-api-status'), 'Settings page should render the API usage summary.');
     assert_true(str_contains($settingsPage['body'], 'id="apiKeyModal"'), 'Settings page should render the API key rotation modal.');
     assert_settings_panel_structure($settingsPage['body']);
@@ -559,7 +559,7 @@ try {
     $csrf = extract_hidden_token($settingsPage['body']);
     $oldApiKey = extract_api_key($settingsPage['body']);
 
-    $accountSaveResponse = $client->request('POST', '/account/settings', [
+    $accountSaveResponse = $client->request('POST', '/api/account/profile', [
         'form' => [
             'token' => $csrf,
             'usr_pay_type' => 'Bitcoin',
@@ -579,7 +579,7 @@ try {
     echo "account settings ok\n";
 
     create_test_png($logoPath);
-    $playerColourOnlyResponse = $client->request('POST', '/account/player', [
+    $playerColourOnlyResponse = $client->request('POST', '/api/account/player', [
         'form' => [
             'token' => $csrf,
             'logo_mode' => 'image',
@@ -592,7 +592,7 @@ try {
     assert_true(str_contains(strtolower((string) ($playerColourOnly['message'] ?? '')), 'premium'), 'Premium-only colour rejection should explain the entitlement requirement.');
     assert_true(($playerColourOnly['player']['player_colour'] ?? null) === 'ff9900', 'Rejected player colour saves should return the canonical persisted colour.');
 
-    $playerSaveResponse = $client->request('POST', '/account/player', [
+    $playerSaveResponse = $client->request('POST', '/api/account/player', [
         'form' => [
             'token' => $csrf,
             'logo_mode' => 'image',
@@ -617,7 +617,7 @@ try {
     assert_true(str_contains($settingsAfterPartialPlayerSave['body'], 'value="ff9900"'), 'Partial player saves should restore the persisted player colour in the rendered settings page.');
     $csrf = extract_hidden_token($settingsAfterPartialPlayerSave['body']);
 
-    $premiumQuoteResponse = $client->request('POST', '/api/premium/checkout/quote', [
+    $premiumQuoteResponse = $client->request('POST', '/api/billing/quote', [
         'form' => [
             'token' => $csrf,
             'purchase_type' => 'account',
@@ -630,7 +630,7 @@ try {
     assert_true(($premiumQuote['status'] ?? null) === 'ok', 'Premium balance quotes should succeed.');
     assert_true(($premiumQuote['checkout']['can_pay'] ?? null) === true, 'Seeded earnings should make the monthly premium plan payable by balance.');
 
-    $insufficientQuoteResponse = $client->request('POST', '/api/premium/checkout/quote', [
+    $insufficientQuoteResponse = $client->request('POST', '/api/billing/quote', [
         'form' => [
             'token' => $csrf,
             'purchase_type' => 'bandwidth',
@@ -643,7 +643,7 @@ try {
     assert_true(($insufficientQuote['status'] ?? null) === 'ok', 'Insufficient premium balance quotes should still return a quote payload.');
     assert_true(($insufficientQuote['checkout']['can_pay'] ?? null) === false, 'Oversized balance purchases should be quoted as not payable.');
 
-    $insufficientBalanceCheckoutResponse = $client->request('POST', '/api/premium/checkout/balance', [
+    $insufficientBalanceCheckoutResponse = $client->request('POST', '/api/billing/balance', [
         'form' => [
             'token' => $csrf,
             'purchase_type' => 'bandwidth',
@@ -656,7 +656,7 @@ try {
     $insufficientBalanceCheckout = json_response($insufficientBalanceCheckoutResponse);
     assert_true(($insufficientBalanceCheckout['status'] ?? null) === 'fail', 'Insufficient balance purchases should fail cleanly.');
 
-    $balanceCheckoutResponse = $client->request('POST', '/api/premium/checkout/balance', [
+    $balanceCheckoutResponse = $client->request('POST', '/api/billing/balance', [
         'form' => [
             'token' => $csrf,
             'purchase_type' => 'account',
@@ -680,7 +680,12 @@ try {
     assert_true((string) ($premiumOrders[0]['purchase_type'] ?? '') === 'account', 'The first premium order should capture the account upgrade.');
     assert_true((string) ($premiumOrders[0]['payment_method'] ?? '') === 'balance', 'The first premium order should record the balance payment method.');
 
-    $cryptoCheckoutResponse = $client->request('POST', '/api/premium/checkout/crypto', [
+    $premiumSummaryResponse = $client->request('GET', '/api/premium/summary');
+    assert_json_content_type($premiumSummaryResponse, 'Premium summary should return JSON.');
+    $premiumSummary = json_response($premiumSummaryResponse);
+    assert_true((int) ($premiumSummary['summary']['used_bw'] ?? -1) === 0, 'Regular account traffic must not be counted as premium bandwidth usage.');
+
+    $cryptoCheckoutResponse = $client->request('POST', '/api/billing/crypto', [
         'form' => [
             'token' => $csrf,
             'purchase_type' => 'bandwidth',
@@ -700,7 +705,7 @@ try {
     assert_true((string) ($premiumOrders[1]['purchase_type'] ?? '') === 'bandwidth', 'The crypto invoice should capture the bandwidth purchase type.');
     assert_true((string) ($premiumOrders[1]['payment_method'] ?? '') === 'BTC', 'The crypto invoice should capture the selected crypto currency.');
 
-    $premiumPlayerSaveResponse = $client->request('POST', '/account/player', [
+    $premiumPlayerSaveResponse = $client->request('POST', '/api/account/player', [
         'form' => [
             'token' => $csrf,
             'logo_mode' => 'image',
@@ -713,7 +718,34 @@ try {
     assert_true(($premiumPlayerSave['player']['player_colour'] ?? null) === '00aa11', 'Premium player colour saves should persist the chosen colour.');
     echo "player settings ok\n";
 
-    $adsSaveResponse = $client->request('POST', '/account/advertising', [
+    $adsBlockedResponse = $client->request('POST', '/api/account/ads', [
+        'form' => [
+            'token' => $csrf,
+            'vast_url' => 'https://ads.example.com/vast.xml',
+            'pop_type' => '2',
+            'pop_url' => 'https://ads.example.com/popup.js',
+            'pop_cap' => '45',
+        ],
+    ]);
+    assert_json_content_type($adsBlockedResponse, 'Rejected advert settings should return JSON.');
+    assert_true($adsBlockedResponse['status'] === 403, 'Own adverts should require completed premium bandwidth before saving.');
+    $adsBlocked = json_response($adsBlockedResponse);
+    assert_true(($adsBlocked['status'] ?? null) === 'fail', 'Saving advert settings without premium bandwidth should fail cleanly.');
+
+    $bandwidthCheckoutResponse = $client->request('POST', '/api/billing/balance', [
+        'form' => [
+            'token' => $csrf,
+            'purchase_type' => 'bandwidth',
+            'package_id' => '10tb',
+            'payment_method' => 'balance',
+        ],
+    ]);
+    assert_json_content_type($bandwidthCheckoutResponse, 'Premium bandwidth balance purchases should return JSON.');
+    $bandwidthCheckout = json_response($bandwidthCheckoutResponse);
+    assert_true(($bandwidthCheckout['status'] ?? null) === 'ok', 'Premium bandwidth balance purchases should succeed.');
+    assert_true((int) ($bandwidthCheckout['summary']['purchased_bw'] ?? 0) > 0, 'Completed premium bandwidth purchases should increase the purchased premium bandwidth total.');
+
+    $adsSaveResponse = $client->request('POST', '/api/account/ads', [
         'form' => [
             'token' => $csrf,
             'vast_url' => 'https://ads.example.com/vast.xml',
@@ -724,10 +756,10 @@ try {
     ]);
     assert_json_content_type($adsSaveResponse, 'Saving advert settings should return JSON.');
     $adsSave = json_response($adsSaveResponse);
-    assert_true(($adsSave['status'] ?? null) === 'ok', 'Saving advert settings should return success JSON.');
+    assert_true(($adsSave['status'] ?? null) === 'ok', 'Saving advert settings should return success JSON after premium bandwidth is purchased.');
     echo "ad settings ok\n";
 
-    $passwordSaveResponse = $client->request('POST', '/account/password', [
+    $passwordSaveResponse = $client->request('POST', '/api/account/password', [
         'form' => [
             'token' => $csrf,
             'password_current' => 'Start123',
@@ -740,7 +772,7 @@ try {
     assert_true(($passwordSave['status'] ?? null) === 'ok', 'Changing password should return success JSON.');
     echo "password change ok\n";
 
-    $emailSaveResponse = $client->request('POST', '/account/email', [
+    $emailSaveResponse = $client->request('POST', '/api/account/email', [
         'form' => [
             'token' => $csrf,
             'usr_email' => 'alice+updated@example.com',
@@ -766,7 +798,7 @@ try {
     assert_settings_ajax_script_valid($settingsPage['body']);
     $csrf = extract_hidden_token($settingsPage['body']);
 
-    $apiRotateResponse = $client->request('POST', '/account/api-key/regenerate', [
+    $apiRotateResponse = $client->request('POST', '/api/account/key', [
         'form' => [
             'token' => $csrf,
         ],
@@ -825,7 +857,7 @@ try {
     assert_true(count($apiUsageAfterTraffic['api']['recent_activity'] ?? []) >= 3, 'API usage should expose recent activity.');
 
     $requestsLastHour = (int) ($apiUsageAfterTraffic['api']['usage']['requests_last_hour'] ?? 0);
-    $apiPolicyResponse = $client->request('POST', '/account/api-settings', [
+    $apiPolicyResponse = $client->request('POST', '/api/account/api', [
         'form' => [
             'token' => $csrf,
             'api_enabled' => '1',
@@ -848,7 +880,7 @@ try {
     assert_true($limitAllowed['status'] === 200, 'One request should still fit under the updated hourly limit.');
     assert_true($limitDenied['status'] === 429, 'Hourly API limits should block excess requests.');
 
-    $uploadOnlyPolicy = json_response($client->request('POST', '/account/api-settings', [
+    $uploadOnlyPolicy = json_response($client->request('POST', '/api/account/api', [
         'headers' => array_merge($ajaxHeaders, [
             'X-CSRF-Token' => $csrf,
         ]),
@@ -871,7 +903,7 @@ try {
     ]);
     assert_true($uploadLimitDenied['status'] === 429, 'Daily API upload limits should block additional uploads.');
 
-    $disableApi = json_response($client->request('POST', '/account/api-settings', [
+    $disableApi = json_response($client->request('POST', '/api/account/api', [
         'headers' => array_merge($ajaxHeaders, [
             'X-CSRF-Token' => $csrf,
         ]),
@@ -888,7 +920,7 @@ try {
     ]);
     assert_true($disabledApiCall['status'] === 403, 'Disabled API access should reject API key requests.');
 
-    $reenableApi = json_response($client->request('POST', '/account/api-settings', [
+    $reenableApi = json_response($client->request('POST', '/api/account/api', [
         'headers' => array_merge($ajaxHeaders, [
             'X-CSRF-Token' => $csrf,
         ]),
@@ -990,7 +1022,7 @@ try {
     assert_true(($clearNotifications['status'] ?? null) === 'ok', 'Clear-all notifications endpoint should succeed.');
     assert_true(count(json_response($client->request('GET', '/api/notifications'))) === 0, 'All notifications should be removable.');
 
-    $client->request('POST', '/logout', [
+    $client->request('POST', '/api/auth/logout', [
         'form' => [
             'token' => $csrf,
         ],
@@ -999,7 +1031,7 @@ try {
     $homePage = $client->request('GET', '/');
     $publicCsrf = extract_runtime_token($homePage['body']);
 
-    $oldPasswordLogin = json_response($client->request('POST', '/login', [
+    $oldPasswordLogin = json_response($client->request('POST', '/api/auth/login', [
         'form' => [
             'login' => 'alice_case',
             'password' => 'Start123',
@@ -1008,7 +1040,7 @@ try {
     ]));
     assert_true(($oldPasswordLogin['status'] ?? null) === 'fail', 'Old password should stop working after a password change.');
 
-    $newPasswordLogin = json_response($client->request('POST', '/login', [
+    $newPasswordLogin = json_response($client->request('POST', '/api/auth/login', [
         'form' => [
             'login' => 'alice+updated@example.com',
             'password' => 'NewPass456',
@@ -1018,7 +1050,7 @@ try {
     assert_true(($newPasswordLogin['status'] ?? null) === 'redirect', 'New password should log in successfully.');
     echo "password relogin ok\n";
 
-    $resetRegistration = json_response($resetClient->request('POST', '/register', [
+    $resetRegistration = json_response($resetClient->request('POST', '/api/auth/register', [
         'form' => [
             'usr_login' => 'reset_case',
             'usr_email' => 'reset@example.com',
@@ -1030,7 +1062,7 @@ try {
     assert_true(($resetRegistration['status'] ?? null) === 'ok', 'Reset-case registration should succeed.');
 
     $resetPublicCsrf = extract_runtime_token($resetClient->request('GET', '/')['body']);
-    $resetRequest = json_response($resetClient->request('POST', '/password/forgot', [
+    $resetRequest = json_response($resetClient->request('POST', '/api/auth/forgot', [
         'form' => [
             'usr_login' => 'reset_case',
             'token' => $resetPublicCsrf,
@@ -1046,7 +1078,7 @@ try {
     assert_true(str_contains($resetPage['body'], 'name="sess_id" value="' . $resetToken . '"'), 'Reset page should include the token.');
     $resetPageCsrf = extract_runtime_token($resetPage['body']);
 
-    $resetSave = json_response($resetClient->request('POST', '/password/reset', [
+    $resetSave = json_response($resetClient->request('POST', '/api/auth/reset', [
         'form' => [
             'sess_id' => $resetToken,
             'password' => 'Reset456',
@@ -1057,7 +1089,7 @@ try {
     assert_true(($resetSave['status'] ?? null) === 'ok', 'Password reset should complete successfully.');
 
     $resetPublicCsrf = extract_runtime_token($resetClient->request('GET', '/')['body']);
-    $resetLogin = json_response($resetClient->request('POST', '/login', [
+    $resetLogin = json_response($resetClient->request('POST', '/api/auth/login', [
         'form' => [
             'login' => 'reset_case',
             'password' => 'Reset456',
@@ -1069,7 +1101,7 @@ try {
 
     $aliceSettings = $client->request('GET', '/dashboard/settings');
     $csrf = extract_hidden_token($aliceSettings['body']);
-    $deleteAccountResponse = $client->request('POST', '/account/delete', [
+    $deleteAccountResponse = $client->request('POST', '/api/account/delete', [
         'form' => [
             'token' => $csrf,
             'reason_code' => 'other',
@@ -1083,7 +1115,7 @@ try {
     echo "delete account ok\n";
 
     $publicCsrf = extract_runtime_token($client->request('GET', '/')['body']);
-    $deletedLogin = json_response($client->request('POST', '/login', [
+    $deletedLogin = json_response($client->request('POST', '/api/auth/login', [
         'form' => [
             'login' => 'alice_case',
             'password' => 'NewPass456',

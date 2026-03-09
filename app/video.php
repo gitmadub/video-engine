@@ -162,6 +162,10 @@ function ve_video_config(): array
         'encoder_preset' => trim((string) (getenv('VE_VIDEO_PRESET') ?: 'medium')),
         'target_max_width' => max(640, (int) (getenv('VE_VIDEO_MAX_WIDTH') ?: 1920)),
         'target_max_height' => max(360, (int) (getenv('VE_VIDEO_MAX_HEIGHT') ?: 1080)),
+        'download_wait_free' => max(0, (int) (getenv('VE_VIDEO_DOWNLOAD_WAIT_FREE') ?: 15)),
+        'download_wait_premium' => max(0, (int) (getenv('VE_VIDEO_DOWNLOAD_WAIT_PREMIUM') ?: 0)),
+        'download_request_ttl' => max(60, (int) (getenv('VE_VIDEO_DOWNLOAD_REQUEST_TTL') ?: 600)),
+        'download_ready_ttl' => max(15, (int) (getenv('VE_VIDEO_DOWNLOAD_READY_TTL') ?: 45)),
     ];
 
     return $config;
@@ -265,6 +269,529 @@ function ve_video_preview_sprite_path(array $video): string
 function ve_video_preview_vtt_path(array $video): string
 {
     return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'preview.vtt';
+}
+
+function ve_video_download_path(array $video): string
+{
+    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'download.mp4';
+}
+
+function ve_video_download_lock_path(array $video): string
+{
+    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'download.lock';
+}
+
+function ve_video_download_playlist_path(array $video): string
+{
+    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'download-build.m3u8';
+}
+
+function ve_video_download_session_hash(): string
+{
+    $sessionId = session_id();
+
+    if ($sessionId === '') {
+        return hash('sha256', 'no-session');
+    }
+
+    return hash('sha256', $sessionId);
+}
+
+function ve_video_download_wait_seconds_for_viewer(?array $user = null): int
+{
+    $user = is_array($user) ? $user : ve_current_user();
+
+    return is_array($user) && ve_user_is_premium($user)
+        ? (int) ve_video_config()['download_wait_premium']
+        : (int) ve_video_config()['download_wait_free'];
+}
+
+function ve_video_download_filename(array $video): string
+{
+    $sourcePath = ve_video_source_path($video);
+    $extension = is_file($sourcePath)
+        ? strtolower((string) pathinfo($sourcePath, PATHINFO_EXTENSION))
+        : 'mp4';
+
+    if ($extension === '' || preg_match('/^[a-z0-9]{2,5}$/', $extension) !== 1) {
+        $extension = 'mp4';
+    }
+
+    $baseName = trim((string) pathinfo((string) ($video['original_filename'] ?? ''), PATHINFO_FILENAME));
+
+    if ($baseName === '') {
+        $baseName = trim((string) ($video['title'] ?? ''));
+    }
+
+    if ($baseName === '') {
+        $baseName = 'video-' . (string) ($video['public_id'] ?? '');
+    }
+
+    return ve_remote_sanitize_filename($baseName . '.' . $extension, 'video.' . $extension);
+}
+
+function ve_video_download_post_url(array $video): string
+{
+    return ve_absolute_url('/download/' . rawurlencode((string) ($video['public_id'] ?? '')));
+}
+
+function ve_video_download_label(array $video): string
+{
+    return is_file(ve_video_source_path($video)) ? 'Original' : 'MP4';
+}
+
+function ve_video_download_size_bytes(array $video): int
+{
+    $sourcePath = ve_video_source_path($video);
+
+    if (is_file($sourcePath)) {
+        return (int) (filesize($sourcePath) ?: 0);
+    }
+
+    $downloadPath = ve_video_download_path($video);
+
+    if (is_file($downloadPath)) {
+        return (int) (filesize($downloadPath) ?: 0);
+    }
+
+    $processedBytes = (int) ($video['processed_size_bytes'] ?? 0);
+
+    if ($processedBytes > 0) {
+        return $processedBytes;
+    }
+
+    return (int) ($video['original_size_bytes'] ?? 0);
+}
+
+function ve_video_download_available(array $video): bool
+{
+    if ((string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        return false;
+    }
+
+    if (is_file(ve_video_source_path($video)) || is_file(ve_video_download_path($video))) {
+        return true;
+    }
+
+    return ve_video_processing_available()
+        && is_file(ve_video_playlist_path($video))
+        && is_file(ve_video_key_path($video));
+}
+
+function ve_video_cleanup_download_grants(): void
+{
+    ve_db()->prepare(
+        'DELETE FROM video_download_grants
+         WHERE revoked_at IS NOT NULL
+            OR used_at IS NOT NULL
+            OR expires_at < :now'
+    )->execute([':now' => ve_now()]);
+}
+
+function ve_video_download_request_payload(array $video): array
+{
+    $user = ve_current_user();
+    $waitSeconds = ve_video_download_wait_seconds_for_viewer($user);
+    $now = ve_now();
+    $availableAt = gmdate('Y-m-d H:i:s', ve_timestamp() + $waitSeconds);
+    $expiresAt = gmdate('Y-m-d H:i:s', ve_timestamp() + max(
+        (int) ve_video_config()['download_request_ttl'],
+        $waitSeconds + (int) ve_video_config()['download_ready_ttl']
+    ));
+
+    return [
+        'session_id_hash' => ve_video_download_session_hash(),
+        'ip_hash' => ve_video_playback_signature(ve_client_ip()),
+        'user_agent_hash' => ve_video_playback_signature(substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500)),
+        'viewer_user_id' => is_array($user) ? (int) ($user['id'] ?? 0) : null,
+        'wait_seconds' => $waitSeconds,
+        'available_at' => $availableAt,
+        'expires_at' => $expiresAt,
+        'created_at' => $now,
+    ];
+}
+
+function ve_video_find_active_download_grant(array $video): ?array
+{
+    $request = ve_video_download_request_payload($video);
+    $stmt = ve_db()->prepare(
+        'SELECT * FROM video_download_grants
+         WHERE video_id = :video_id
+           AND session_id_hash = :session_id_hash
+           AND ip_hash = :ip_hash
+           AND user_agent_hash = :user_agent_hash
+           AND revoked_at IS NULL
+           AND used_at IS NULL
+           AND expires_at >= :now
+         ORDER BY id DESC
+         LIMIT 1'
+    );
+    $stmt->execute([
+        ':video_id' => (int) ($video['id'] ?? 0),
+        ':session_id_hash' => (string) $request['session_id_hash'],
+        ':ip_hash' => (string) $request['ip_hash'],
+        ':user_agent_hash' => (string) $request['user_agent_hash'],
+        ':now' => ve_now(),
+    ]);
+    $grant = $stmt->fetch();
+
+    return is_array($grant) ? $grant : null;
+}
+
+function ve_video_issue_download_request(array $video): array
+{
+    ve_video_cleanup_download_grants();
+
+    $existing = ve_video_find_active_download_grant($video);
+
+    if (is_array($existing)) {
+        ve_db()->prepare(
+            'UPDATE video_download_grants
+             SET revoked_at = :revoked_at
+             WHERE id = :id'
+        )->execute([
+            ':revoked_at' => ve_now(),
+            ':id' => (int) ($existing['id'] ?? 0),
+        ]);
+    }
+
+    $requestToken = ve_random_token(24);
+    $payload = ve_video_download_request_payload($video);
+    $stmt = ve_db()->prepare(
+        'INSERT INTO video_download_grants (
+            video_id, viewer_user_id, session_id_hash, request_token_hash, download_token_hash,
+            ip_hash, user_agent_hash, wait_seconds, available_at, expires_at, created_at, issued_at, used_at, revoked_at
+        ) VALUES (
+            :video_id, :viewer_user_id, :session_id_hash, :request_token_hash, NULL,
+            :ip_hash, :user_agent_hash, :wait_seconds, :available_at, :expires_at, :created_at, NULL, NULL, NULL
+        )'
+    );
+    $stmt->execute([
+        ':video_id' => (int) ($video['id'] ?? 0),
+        ':viewer_user_id' => $payload['viewer_user_id'],
+        ':session_id_hash' => (string) $payload['session_id_hash'],
+        ':request_token_hash' => ve_video_playback_signature($requestToken),
+        ':ip_hash' => (string) $payload['ip_hash'],
+        ':user_agent_hash' => (string) $payload['user_agent_hash'],
+        ':wait_seconds' => (int) $payload['wait_seconds'],
+        ':available_at' => (string) $payload['available_at'],
+        ':expires_at' => (string) $payload['expires_at'],
+        ':created_at' => (string) $payload['created_at'],
+    ]);
+
+    return [
+        'request_token' => $requestToken,
+        'wait_seconds' => (int) $payload['wait_seconds'],
+        'remaining_seconds' => (int) $payload['wait_seconds'],
+        'ready' => (int) $payload['wait_seconds'] === 0,
+    ];
+}
+
+function ve_video_validate_download_request(array $video, string $requestToken): ?array
+{
+    if ($requestToken === '') {
+        return null;
+    }
+
+    $stmt = ve_db()->prepare(
+        'SELECT * FROM video_download_grants
+         WHERE video_id = :video_id
+           AND request_token_hash = :request_token_hash
+           AND revoked_at IS NULL
+           AND used_at IS NULL
+           AND expires_at >= :now
+         LIMIT 1'
+    );
+    $stmt->execute([
+        ':video_id' => (int) ($video['id'] ?? 0),
+        ':request_token_hash' => ve_video_playback_signature($requestToken),
+        ':now' => ve_now(),
+    ]);
+    $grant = $stmt->fetch();
+
+    if (!is_array($grant)) {
+        return null;
+    }
+
+    $currentSessionHash = ve_video_download_session_hash();
+    $currentIpHash = ve_video_playback_signature(ve_client_ip());
+    $currentUserAgentHash = ve_video_playback_signature(substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500));
+    $viewerUserId = (int) (($grant['viewer_user_id'] ?? null) ?: 0);
+    $currentUser = ve_current_user();
+    $currentUserId = is_array($currentUser) ? (int) ($currentUser['id'] ?? 0) : 0;
+
+    if (!hash_equals((string) ($grant['session_id_hash'] ?? ''), $currentSessionHash)) {
+        return null;
+    }
+
+    if (!hash_equals((string) ($grant['ip_hash'] ?? ''), $currentIpHash)) {
+        return null;
+    }
+
+    if (!hash_equals((string) ($grant['user_agent_hash'] ?? ''), $currentUserAgentHash)) {
+        return null;
+    }
+
+    if ($viewerUserId > 0 && $viewerUserId !== $currentUserId) {
+        return null;
+    }
+
+    return $grant;
+}
+
+function ve_video_resolve_download_request(array $video, string $requestToken): array
+{
+    $grant = ve_video_validate_download_request($video, $requestToken);
+
+    if (!is_array($grant)) {
+        return [
+            'status' => 'fail',
+            'message' => 'Download session is invalid or expired.',
+        ];
+    }
+
+    $availableAt = strtotime((string) ($grant['available_at'] ?? '')) ?: ve_timestamp();
+    $remainingSeconds = max(0, $availableAt - ve_timestamp());
+
+    if ($remainingSeconds > 0) {
+        return [
+            'status' => 'ok',
+            'ready' => false,
+            'remaining_seconds' => $remainingSeconds,
+            'message' => 'Please wait before requesting the protected download.',
+        ];
+    }
+
+    $downloadToken = ve_random_token(24);
+    $expiresAt = gmdate('Y-m-d H:i:s', ve_timestamp() + (int) ve_video_config()['download_ready_ttl']);
+    $stmt = ve_db()->prepare(
+        'UPDATE video_download_grants
+         SET download_token_hash = :download_token_hash,
+             issued_at = :issued_at,
+             expires_at = :expires_at
+         WHERE id = :id'
+    );
+    $stmt->execute([
+        ':download_token_hash' => ve_video_playback_signature($downloadToken),
+        ':issued_at' => ve_now(),
+        ':expires_at' => $expiresAt,
+        ':id' => (int) ($grant['id'] ?? 0),
+    ]);
+
+    return [
+        'status' => 'ok',
+        'ready' => true,
+        'download_action' => ve_video_download_post_url($video),
+        'download_token' => $downloadToken,
+        'download_label' => ve_video_download_label($video),
+        'size_label' => ve_video_format_bytes(ve_video_download_size_bytes($video)),
+        'expires_at' => $expiresAt,
+    ];
+}
+
+function ve_video_validate_download_grant(array $video, string $downloadToken): ?array
+{
+    if ($downloadToken === '') {
+        return null;
+    }
+
+    $stmt = ve_db()->prepare(
+        'SELECT * FROM video_download_grants
+         WHERE video_id = :video_id
+           AND download_token_hash = :download_token_hash
+           AND revoked_at IS NULL
+           AND used_at IS NULL
+           AND expires_at >= :now
+         LIMIT 1'
+    );
+    $stmt->execute([
+        ':video_id' => (int) ($video['id'] ?? 0),
+        ':download_token_hash' => ve_video_playback_signature($downloadToken),
+        ':now' => ve_now(),
+    ]);
+    $grant = $stmt->fetch();
+
+    if (!is_array($grant)) {
+        return null;
+    }
+
+    if (!hash_equals((string) ($grant['session_id_hash'] ?? ''), ve_video_download_session_hash())) {
+        return null;
+    }
+
+    if (!hash_equals((string) ($grant['ip_hash'] ?? ''), ve_video_playback_signature(ve_client_ip()))) {
+        return null;
+    }
+
+    if (!hash_equals((string) ($grant['user_agent_hash'] ?? ''), ve_video_playback_signature(substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500)))) {
+        return null;
+    }
+
+    $viewerUserId = (int) (($grant['viewer_user_id'] ?? null) ?: 0);
+    $currentUser = ve_current_user();
+    $currentUserId = is_array($currentUser) ? (int) ($currentUser['id'] ?? 0) : 0;
+
+    if ($viewerUserId > 0 && $viewerUserId !== $currentUserId) {
+        return null;
+    }
+
+    return $grant;
+}
+
+function ve_video_prepare_download_path(array $video): ?string
+{
+    if ((string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        return null;
+    }
+
+    $sourcePath = ve_video_source_path($video);
+
+    if (is_file($sourcePath)) {
+        return $sourcePath;
+    }
+
+    $downloadPath = ve_video_download_path($video);
+    clearstatcache(true, $downloadPath);
+
+    if (is_file($downloadPath) && (int) (filesize($downloadPath) ?: 0) > 0) {
+        return $downloadPath;
+    }
+
+    if (!ve_video_processing_available()) {
+        return null;
+    }
+
+    $playlistPath = ve_video_playlist_path($video);
+    $keyPath = ve_video_key_path($video);
+
+    if (!is_file($playlistPath) || !is_file($keyPath)) {
+        return null;
+    }
+
+    $lockHandle = fopen(ve_video_download_lock_path($video), 'c+');
+
+    if ($lockHandle === false) {
+        return null;
+    }
+
+    $buildPlaylistPath = ve_video_download_playlist_path($video);
+    $segmentAliasPaths = [];
+    $directory = ve_video_library_directory((string) ($video['public_id'] ?? ''));
+
+    try {
+        if (!flock($lockHandle, LOCK_EX)) {
+            return null;
+        }
+
+        clearstatcache(true, $downloadPath);
+
+        if (is_file($downloadPath) && (int) (filesize($downloadPath) ?: 0) > 0) {
+            return $downloadPath;
+        }
+
+        $playlistBody = file_get_contents($playlistPath);
+
+        if (!is_string($playlistBody) || $playlistBody === '') {
+            return null;
+        }
+
+        $playlistLines = preg_split('/\r\n|\r|\n/', $playlistBody) ?: [];
+        $segmentIndex = 0;
+
+        foreach ($playlistLines as $index => $line) {
+            $line = trim($line);
+
+            if ($line === '') {
+                $playlistLines[$index] = '';
+                continue;
+            }
+
+            if (str_starts_with($line, '#EXT-X-KEY:')) {
+                $playlistLines[$index] = preg_replace('/URI="[^"]*"/', 'URI="' . basename($keyPath) . '"', $line) ?? $line;
+                continue;
+            }
+
+            if ($line[0] === '#') {
+                $playlistLines[$index] = $line;
+                continue;
+            }
+
+            $sourceSegmentPath = $directory . DIRECTORY_SEPARATOR . basename($line);
+
+            if (!is_file($sourceSegmentPath)) {
+                return null;
+            }
+
+            $aliasName = 'download-segment-' . str_pad((string) $segmentIndex, 5, '0', STR_PAD_LEFT) . '.ts';
+            $aliasPath = $directory . DIRECTORY_SEPARATOR . $aliasName;
+            @unlink($aliasPath);
+
+            if (!@link($sourceSegmentPath, $aliasPath) && !@copy($sourceSegmentPath, $aliasPath)) {
+                return null;
+            }
+
+            $segmentAliasPaths[] = $aliasPath;
+            $playlistLines[$index] = $aliasName;
+            $segmentIndex++;
+        }
+
+        if (@file_put_contents($buildPlaylistPath, implode("\n", $playlistLines)) === false) {
+            return null;
+        }
+
+        $temporaryPath = $directory . DIRECTORY_SEPARATOR . 'download.part.mp4';
+        @unlink($temporaryPath);
+
+        [$exitCode] = ve_video_run_command([
+            (string) ve_video_config()['ffmpeg'],
+            '-y',
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-allowed_extensions',
+            'ALL',
+            '-protocol_whitelist',
+            'file,crypto,data',
+            '-i',
+            $buildPlaylistPath,
+            '-map',
+            '0:v:0',
+            '-map',
+            '0:a:0?',
+            '-c',
+            'copy',
+            '-movflags',
+            '+faststart',
+            $temporaryPath,
+        ]);
+
+        @unlink($buildPlaylistPath);
+
+        if ($exitCode !== 0 || !is_file($temporaryPath) || (int) (filesize($temporaryPath) ?: 0) === 0) {
+            @unlink($temporaryPath);
+            return null;
+        }
+
+        @unlink($downloadPath);
+
+        if (!@rename($temporaryPath, $downloadPath)) {
+            @copy($temporaryPath, $downloadPath);
+            @unlink($temporaryPath);
+        }
+
+        clearstatcache(true, $downloadPath);
+
+        return is_file($downloadPath) && (int) (filesize($downloadPath) ?: 0) > 0
+            ? $downloadPath
+            : null;
+    } finally {
+        @unlink($buildPlaylistPath);
+        foreach ($segmentAliasPaths as $aliasPath) {
+            @unlink($aliasPath);
+        }
+        flock($lockHandle, LOCK_UN);
+        fclose($lockHandle);
+    }
 }
 
 function ve_video_shell_join(array $parts): string
@@ -2378,6 +2905,25 @@ function ve_video_owner_settings(array $video): array
     return ve_get_user_settings((int) ($video['user_id'] ?? 0));
 }
 
+function ve_video_session_uses_premium_bandwidth(array $video): bool
+{
+    $userId = (int) ($video['user_id'] ?? 0);
+
+    if ($userId <= 0) {
+        return false;
+    }
+
+    $settings = ve_video_owner_settings($video);
+
+    if (!ve_premium_bandwidth_settings_configured($settings)) {
+        return false;
+    }
+
+    $bandwidth = ve_premium_bandwidth_totals($userId);
+
+    return (int) ($bandwidth['available_bytes'] ?? 0) > 0;
+}
+
 function ve_video_resolve_poster_asset(array $video): ?array
 {
     $settings = ve_video_owner_settings($video);
@@ -2441,6 +2987,13 @@ function ve_video_is_request_visible(array $video): bool
         return true;
     }
 
+    $user = ve_current_user();
+
+    return is_array($user) && (int) ($user['id'] ?? 0) === (int) ($video['user_id'] ?? 0);
+}
+
+function ve_video_is_owner_viewer(array $video): bool
+{
     $user = ve_current_user();
 
     return is_array($user) && (int) ($user['id'] ?? 0) === (int) ($video['user_id'] ?? 0);
@@ -2592,6 +3145,7 @@ function ve_video_issue_playback_session(array $video): array
     $userAgent = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500);
     $expiresAt = gmdate('Y-m-d H:i:s', ve_timestamp() + (int) ve_video_config()['session_ttl']);
     $user = ve_current_user();
+    $usesPremiumBandwidth = ve_video_session_uses_premium_bandwidth($video) ? 1 : 0;
 
     ve_db()->prepare('DELETE FROM video_playback_sessions WHERE revoked_at IS NOT NULL OR expires_at < :now')
         ->execute([':now' => ve_now()]);
@@ -2599,10 +3153,10 @@ function ve_video_issue_playback_session(array $video): array
     $stmt = ve_db()->prepare(
         'INSERT INTO video_playback_sessions (
             video_id, session_token_hash, owner_user_id, ip_hash, user_agent_hash,
-            expires_at, created_at, last_seen_at, revoked_at
+            expires_at, created_at, last_seen_at, uses_premium_bandwidth, revoked_at
         ) VALUES (
             :video_id, :session_token_hash, :owner_user_id, :ip_hash, :user_agent_hash,
-            :expires_at, :created_at, :last_seen_at, NULL
+            :expires_at, :created_at, :last_seen_at, :uses_premium_bandwidth, NULL
         )'
     );
     $stmt->execute([
@@ -2614,6 +3168,7 @@ function ve_video_issue_playback_session(array $video): array
         ':expires_at' => $expiresAt,
         ':created_at' => ve_now(),
         ':last_seen_at' => ve_now(),
+        ':uses_premium_bandwidth' => $usesPremiumBandwidth,
     ]);
 
     $secure = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
@@ -2631,6 +3186,7 @@ function ve_video_issue_playback_session(array $video): array
     return [
         'token' => $token,
         'manifest_url' => ve_url('/stream/' . rawurlencode((string) $video['public_id']) . '/manifest.m3u8?token=' . rawurlencode($token)),
+        'uses_premium_bandwidth' => $usesPremiumBandwidth === 1,
     ];
 }
 
@@ -2728,6 +3284,7 @@ function ve_video_record_segment_delivery(array $video, array $session, int $byt
     $videoId = (int) ($video['id'] ?? 0);
     $userId = (int) ($video['user_id'] ?? 0);
     $bytes = max(0, $bytes);
+    $premiumBandwidthBytes = ((int) ($session['uses_premium_bandwidth'] ?? 0)) === 1 ? $bytes : 0;
 
     if ($sessionId <= 0 || $videoId <= 0 || $userId <= 0 || $bytes === 0) {
         return;
@@ -2737,16 +3294,18 @@ function ve_video_record_segment_delivery(array $video, array $session, int $byt
 
     $stmt = ve_db()->prepare(
         'UPDATE video_playback_sessions
-         SET bandwidth_bytes_served = bandwidth_bytes_served + :bandwidth_bytes_served
+         SET bandwidth_bytes_served = bandwidth_bytes_served + :bandwidth_bytes_served,
+             premium_bandwidth_bytes_served = premium_bandwidth_bytes_served + :premium_bandwidth_bytes_served
          WHERE id = :id
            AND revoked_at IS NULL'
     );
     $stmt->execute([
         ':bandwidth_bytes_served' => $bytes,
+        ':premium_bandwidth_bytes_served' => $premiumBandwidthBytes,
         ':id' => $sessionId,
     ]);
 
-    ve_dashboard_record_video_bandwidth($videoId, $userId, $bytes);
+    ve_dashboard_record_video_bandwidth($videoId, $userId, $bytes, null, $premiumBandwidthBytes);
 }
 
 function ve_video_stream_access_denied(): void
@@ -2893,6 +3452,209 @@ function ve_video_emit_private_file(string $path, string $mime, int $maxAge = 30
     exit;
 }
 
+function ve_video_emit_download_file(string $path, string $downloadName): void
+{
+    if (!is_file($path)) {
+        ve_not_found();
+    }
+
+    $safeName = ve_remote_sanitize_filename($downloadName, 'video.mp4');
+    header('Content-Type: ' . ve_detect_file_mime_type($path));
+    header('Content-Length: ' . (string) filesize($path));
+    header('Content-Disposition: attachment; filename="' . addcslashes($safeName, "\\\"") . '"; filename*=UTF-8\'\'' . rawurlencode($safeName));
+    header('Cache-Control: private, no-store, no-cache, must-revalidate');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+    header('X-Content-Type-Options: nosniff');
+    readfile($path);
+    exit;
+}
+
+function ve_video_render_download_unavailable(string $title, string $message, int $status = 503): void
+{
+    $safeTitle = ve_h($title);
+    $safeMessage = ve_h($message);
+
+    ve_html(<<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{$safeTitle}</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: #111;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+        .ve-download-card {
+            max-width: 720px;
+            width: 100%;
+            padding: 28px;
+            background: #1c1c1c;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            text-align: center;
+        }
+        .ve-download-card h1 {
+            margin: 0 0 12px;
+            font-size: 1.3rem;
+        }
+        .ve-download-card p {
+            margin: 0;
+            color: rgba(255,255,255,0.78);
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="ve-download-card">
+        <h1>{$safeTitle}</h1>
+        <p>{$safeMessage}</p>
+    </div>
+</body>
+</html>
+HTML, $status);
+}
+
+function ve_video_download_request_api(string $publicId): void
+{
+    if (!ve_is_method('POST')) {
+        ve_method_not_allowed(['POST']);
+    }
+
+    ve_require_csrf(ve_request_csrf_token());
+
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || !ve_video_is_request_visible($video)) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Video not found.',
+        ], 404);
+    }
+
+    if (!ve_video_download_available($video)) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'This video is not available for protected download yet.',
+        ], 409);
+    }
+
+    $request = ve_video_issue_download_request($video);
+
+    if (($request['ready'] ?? false) === true) {
+        $resolved = ve_video_resolve_download_request($video, (string) ($request['request_token'] ?? ''));
+        ve_json($resolved, ($resolved['status'] ?? 'fail') === 'ok' ? 200 : 409);
+    }
+
+    ve_json([
+        'status' => 'ok',
+        'ready' => false,
+        'request_token' => (string) ($request['request_token'] ?? ''),
+        'wait_seconds' => (int) ($request['wait_seconds'] ?? 0),
+        'remaining_seconds' => (int) ($request['remaining_seconds'] ?? 0),
+        'is_premium' => ve_video_download_wait_seconds_for_viewer() === 0,
+    ]);
+}
+
+function ve_video_download_resolve_api(string $publicId): void
+{
+    if (!ve_is_method('POST')) {
+        ve_method_not_allowed(['POST']);
+    }
+
+    ve_require_csrf(ve_request_csrf_token());
+
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || !ve_video_is_request_visible($video)) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Video not found.',
+        ], 404);
+    }
+
+    $requestToken = trim((string) ($_POST['request_token'] ?? ''));
+    $resolved = ve_video_resolve_download_request($video, $requestToken);
+    ve_json($resolved, ($resolved['status'] ?? 'fail') === 'ok' ? 200 : 409);
+}
+
+function ve_video_download_consume_file(string $publicId, string $downloadToken, string $requestedName = ''): void
+{
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || !ve_video_is_request_visible($video)) {
+        ve_not_found();
+    }
+
+    $title = trim((string) ($video['title'] ?? 'Untitled video'));
+
+    if ((string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        ve_video_render_download_unavailable($title, ve_video_public_status_message($video), 409);
+    }
+
+    $grant = ve_video_validate_download_grant($video, $downloadToken);
+
+    if (!is_array($grant)) {
+        ve_video_render_download_unavailable(
+            $title,
+            'This protected download link is invalid or has expired. Return to the watch page and request a new one.',
+            403
+        );
+    }
+
+    $path = ve_video_prepare_download_path($video);
+
+    if (!is_string($path) || $path === '') {
+        ve_video_render_download_unavailable(
+            $title,
+            'The downloadable file could not be prepared right now. Please try again in a moment.',
+            503
+        );
+    }
+
+    $downloadName = ve_video_download_filename($video);
+
+    if ($requestedName !== '') {
+        $requestedName = trim(rawurldecode($requestedName));
+
+        if ($requestedName !== '' && strcasecmp($requestedName, $downloadName) === 0) {
+            $downloadName = $requestedName;
+        }
+    }
+
+    ve_db()->prepare(
+        'UPDATE video_download_grants
+         SET used_at = :used_at
+         WHERE id = :id'
+    )->execute([
+        ':used_at' => ve_now(),
+        ':id' => (int) ($grant['id'] ?? 0),
+    ]);
+
+    ve_video_emit_download_file($path, $downloadName);
+}
+
+function ve_video_download_file(string $publicId): void
+{
+    if (!ve_is_method('POST')) {
+        ve_method_not_allowed(['POST']);
+    }
+
+    ve_require_csrf(ve_request_csrf_token());
+    $downloadToken = trim((string) ($_POST['download_token'] ?? ''));
+    $requestedName = trim((string) ($_POST['filename'] ?? ''));
+    ve_video_download_consume_file($publicId, $downloadToken, $requestedName);
+}
+
 function ve_video_stream_poster(string $publicId): void
 {
     $video = ve_video_get_by_public_id($publicId);
@@ -3036,7 +3798,9 @@ function ve_video_secure_player_script(array $session, ?string $previewVttUrl = 
             }
 
             state.textContent = message || '';
-            state.className = isError ? 've-player-state is-error' : 've-player-state';
+            state.className = 've-player-state'
+                + (message ? ' is-visible' : '')
+                + (isError ? ' is-error' : '');
         }
 
         function attemptAutoplay() {
@@ -3146,7 +3910,7 @@ function ve_video_public_status_message(array $video): string
     return match ((string) ($video['status'] ?? VE_VIDEO_STATUS_QUEUED)) {
         VE_VIDEO_STATUS_FAILED => (string) (($video['processing_error'] ?? '') !== '' ? $video['processing_error'] : 'This video could not be processed.'),
         VE_VIDEO_STATUS_PROCESSING => 'This video is still being compressed and secured for streaming.',
-        VE_VIDEO_STATUS_READY => 'Direct file download is disabled. Playback uses token-protected HLS sessions and encrypted segments.',
+        VE_VIDEO_STATUS_READY => 'This video is ready for playback.',
         default => 'This video is queued for processing.',
     };
 }
@@ -3178,15 +3942,18 @@ function ve_render_secure_watch_page(string $publicId): void
     }
 
     $ownerSettings = ve_video_owner_settings($video);
+    $isOwnerView = ve_video_is_owner_viewer($video);
     $title = trim((string) ($video['title'] ?? 'Untitled video'));
     $status = (string) ($video['status'] ?? VE_VIDEO_STATUS_QUEUED);
     $durationLabel = ve_video_duration_label(isset($video['duration_seconds']) ? (float) $video['duration_seconds'] : null);
     $lengthLabel = $durationLabel !== '' ? $durationLabel : ucfirst($status);
     $processedBytes = (int) ($video['processed_size_bytes'] ?? 0);
     $originalBytes = (int) ($video['original_size_bytes'] ?? 0);
-    $displayBytes = $processedBytes > 0 ? $processedBytes : $originalBytes;
+    $downloadAvailable = ve_video_download_available($video);
+    $downloadBytes = $downloadAvailable ? ve_video_download_size_bytes($video) : 0;
+    $displayBytes = $downloadBytes > 0 ? $downloadBytes : ($processedBytes > 0 ? $processedBytes : $originalBytes);
     $sizeLabel = $displayBytes > 0 ? ve_video_format_bytes($displayBytes) : 'Protected stream';
-    $uploadDateLabel = trim((string) ($video['created_at'] ?? ''));
+    $uploadDateLabel = ve_video_legacy_date_label((string) ($video['created_at'] ?? ''));
     $statusCopy = ve_video_public_status_message($video);
     $pageTitle = ve_h($title . ' - DoodStream');
     $safeTitle = ve_h($title);
@@ -3202,20 +3969,108 @@ function ve_render_secure_watch_page(string $publicId): void
     $bootstrapCssUrl = ve_h(ve_url('/assets/css/bootstrap.min.css'));
     $styleCssUrl = ve_h(ve_url('/assets/css/style.min.css'));
     $bootstrapJsUrl = ve_h('https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js');
-    $posterMeta = ve_h(ve_absolute_url('/assets/img/logo-s.png'));
-    $streamHeading = $status === VE_VIDEO_STATUS_READY ? 'Encrypted HLS playback' : ucfirst($status) . ' queue';
-    $streamSummary = 'Playback runs through short-lived signed sessions. Raw MP4 file delivery is disabled.';
+    $posterMeta = ve_h(
+        is_array(ve_video_resolve_public_image_asset($video, 'single'))
+            ? ve_video_public_thumbnail_url($video, 'single')
+            : ve_absolute_url('/assets/img/logo-s.png')
+    );
+    $downloadWaitSeconds = $downloadAvailable ? ve_video_download_wait_seconds_for_viewer() : 0;
+    $downloadLabelText = ve_video_download_label($video);
+    $downloadButtonIdleText = $downloadWaitSeconds === 0 ? 'Instant Download' : 'Download Now';
+    $downloadStatusText = $downloadWaitSeconds === 0
+        ? 'Premium account detected. Instant protected download is available.'
+        : 'Free download unlocks after ' . $downloadWaitSeconds . ' seconds.';
+    $downloadActionUrl = $downloadAvailable
+        ? ve_h(ve_absolute_url('/download/' . rawurlencode($publicId)))
+        : '';
+    $downloadRequestUrl = $downloadAvailable
+        ? ve_h(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/download/request'))
+        : '';
+    $downloadResolveUrl = $downloadAvailable
+        ? ve_h(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/download/resolve'))
+        : '';
+    $downloadMetaText = ve_h($downloadLabelText . ' | ' . $sizeLabel);
+    $safeDownloadButtonIdleText = ve_h($downloadButtonIdleText);
+    $safeDownloadStatusText = ve_h($downloadStatusText);
+    $downloadCsrfToken = ve_h(ve_csrf_token());
+    $downloadActionUrlJs = json_encode($downloadAvailable ? ve_absolute_url('/download/' . rawurlencode($publicId)) : '', JSON_UNESCAPED_SLASHES);
+    $downloadRequestUrlJs = json_encode($downloadAvailable ? ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/download/request') : '', JSON_UNESCAPED_SLASHES);
+    $downloadResolveUrlJs = json_encode($downloadAvailable ? ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/download/resolve') : '', JSON_UNESCAPED_SLASHES);
+    $downloadIdleLabelJs = json_encode($downloadButtonIdleText, JSON_UNESCAPED_SLASHES);
+    $downloadLabelJs = json_encode($downloadLabelText, JSON_UNESCAPED_SLASHES);
+    $downloadStatusTextJs = json_encode($downloadStatusText, JSON_UNESCAPED_SLASHES);
+    $downloadCsrfTokenJs = json_encode(ve_csrf_token(), JSON_UNESCAPED_SLASHES);
+    $safeStatusCopy = ve_h($statusCopy);
+    $ownFileBanner = '';
+    $exportPanel = '';
 
-    if ($processedBytes > 0 && $originalBytes > 0) {
-        $savedPercent = max(0, (1 - ($processedBytes / $originalBytes)) * 100);
-        $streamSummary = 'Compressed from ' . ve_video_format_bytes($originalBytes) . ' to ' . ve_video_format_bytes($processedBytes) . ' (' . number_format($savedPercent, 1) . '% saved).';
-    } elseif ($originalBytes > 0) {
-        $streamSummary = 'Source size ' . ve_video_format_bytes($originalBytes) . '. Compression and packaging update this once processing finishes.';
+    if ($isOwnerView) {
+        $ownFileBanner = <<<HTML
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-12 pt-2">
+                <p class="own-file text-center"><i class="fad fa-smile"></i><b>WoW!</b> as it is your own file we will not show any ads or adblock warnings, you can enjoy your file ad-free.</p>
+            </div>
+        </div>
+    </div>
+HTML;
+
+        $exportPanel = <<<HTML
+    <div class="container my-3">
+        <div class="video-content text-center">
+            <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
+                <li class="nav-item">
+                    <a class="nav-link active" id="pills-dr-tab" data-toggle="pill" href="#pills-dr" role="tab" aria-controls="pills-dr" aria-selected="true">Download link</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="pills-el-tab" data-toggle="pill" href="#pills-el" role="tab" aria-controls="pills-el" aria-selected="false">Embed link</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" id="pills-elc-tab" data-toggle="pill" href="#pills-elc" role="tab" aria-controls="pills-elc" aria-selected="false">Embed code</a>
+                </li>
+            </ul>
+            <div class="tab-content" id="pills-tabContent">
+                <div class="v-owner">only visible to the file owner</div>
+                <div class="tab-pane fade show active buttonInside" id="pills-dr" role="tabpanel" aria-labelledby="pills-dr-tab">
+                    <textarea id="code_txt" class="form-control export-txt">{$watchPageUrl}</textarea>
+                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt">copy</button>
+                </div>
+                <div class="tab-pane fade buttonInside" id="pills-el" role="tabpanel" aria-labelledby="pills-el-tab">
+                    <textarea id="code_txt_e" class="form-control export-txt">{$localEmbedUrl}</textarea>
+                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt_e">copy</button>
+                </div>
+                <div class="tab-pane fade buttonInside" id="pills-elc" role="tabpanel" aria-labelledby="pills-elc-tab">
+                    <textarea id="code_txt_ec" class="form-control export-txt">{$iframeCode}</textarea>
+                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt_ec">copy</button>
+                </div>
+            </div>
+        </div>
+    </div>
+HTML;
     }
 
-    $safeStatusCopy = ve_h($statusCopy);
-    $safeStreamHeading = ve_h($streamHeading);
-    $safeStreamSummary = ve_h($streamSummary);
+    $downloadPanel = $downloadAvailable
+        ? <<<HTML
+    <div class="container">
+        <div class="video-content text-center">
+            <div id="ve-download-status" class="countdown">{$safeDownloadStatusText}</div>
+            <div class="download-action-shell">
+                <a href="#download_now" id="ve-download-button" class="btn btn-primary download_vd" data-ready="0">{$safeDownloadButtonIdleText} <i class="fad fa-arrow-right ml-2"></i></a>
+            </div>
+            <div id="ve-download-meta" class="download-meta" hidden>
+                <label class="label-playlist d-block">Protected download</label>
+                <div class="download-meta-copy">{$downloadMetaText}</div>
+            </div>
+        </div>
+    </div>
+HTML
+        : <<<HTML
+    <div class="container">
+        <div class="video-content text-center">
+            <div class="countdown">{$safeStatusCopy}</div>
+        </div>
+    </div>
+HTML;
 
     ve_html(<<<HTML
 <!doctype html>
@@ -3255,6 +4110,19 @@ function ve_render_secure_watch_page(string $publicId): void
             min-height: 260px;
             border: 0;
         }
+        .own-file {
+            color: #12a701;
+            border: 2px dashed #15bf00;
+            padding: 10px 0 10px 40px;
+            font-size: 15px;
+            background: transparent;
+        }
+        .own-file .fad {
+            font-size: 25px;
+            position: absolute;
+            margin-top: -1px;
+            margin-left: -30px;
+        }
         .title-wrap { background: #1c1c1c; }
         .nav-pills .nav-item { margin-right: 15px; }
         .nav-pills .nav-item .nav-link.active { background: #f90; color: #fff; }
@@ -3292,16 +4160,39 @@ function ve_render_secure_watch_page(string $publicId): void
             resize: none;
             padding-right: 68px;
         }
-        .ve-stream-summary {
-            display: block;
+        .download-action-shell {
+            min-height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 12px;
         }
-        .ve-stream-summary .btn {
-            cursor: default;
+        .download_vd {
+            min-width: 260px;
+        }
+        .download_vd.disabled,
+        .download_vd.loading {
             pointer-events: none;
-            gap: 12px;
         }
-        .ve-stream-summary small {
-            opacity: 0.9;
+        .download-meta {
+            margin-top: 14px;
+        }
+        .download-meta-copy {
+            color: #c7c7c7;
+            font-weight: 600;
+        }
+        .spinner-inline {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin .75s linear infinite;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
         @media (max-width: 767.98px) {
             .copy-in {
@@ -3317,6 +4208,7 @@ function ve_render_secure_watch_page(string $publicId): void
     </style>
 </head>
 <body>
+    {$ownFileBanner}
     <div class="player-wrap container">
         <div style="--aspect-ratio: 16/9;" id="os_player">
             <iframe src="{$localEmbedUrl}" scrolling="no" frameborder="0" allowfullscreen="true"></iframe>
@@ -3343,49 +4235,8 @@ function ve_render_secure_watch_page(string $publicId): void
         </div>
     </div>
 
-    <div class="container my-3">
-        <div class="video-content text-center">
-            <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
-                <li class="nav-item">
-                    <a class="nav-link active" id="pills-wl-tab" data-toggle="pill" href="#pills-wl" role="tab" aria-controls="pills-wl" aria-selected="true">Watch link</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" id="pills-el-tab" data-toggle="pill" href="#pills-el" role="tab" aria-controls="pills-el" aria-selected="false">Embed link</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" id="pills-elc-tab" data-toggle="pill" href="#pills-elc" role="tab" aria-controls="pills-elc" aria-selected="false">Embed code</a>
-                </li>
-            </ul>
-            <div class="tab-content" id="pills-tabContent">
-                <div class="v-owner">Stream URLs stay session-bound and are never exposed here.</div>
-                <div class="tab-pane fade show active buttonInside" id="pills-wl" role="tabpanel" aria-labelledby="pills-wl-tab">
-                    <textarea id="code_txt" class="form-control export-txt">{$watchPageUrl}</textarea>
-                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt">copy</button>
-                </div>
-                <div class="tab-pane fade buttonInside" id="pills-el" role="tabpanel" aria-labelledby="pills-el-tab">
-                    <textarea id="code_txt_e" class="form-control export-txt">{$localEmbedUrl}</textarea>
-                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt_e">copy</button>
-                </div>
-                <div class="tab-pane fade buttonInside" id="pills-elc" role="tabpanel" aria-labelledby="pills-elc-tab">
-                    <textarea id="code_txt_ec" class="form-control export-txt">{$iframeCode}</textarea>
-                    <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt_ec">copy</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="container">
-        <div class="video-content text-center">
-            <div class="countdown">{$safeStatusCopy}</div>
-            <div class="download-content ve-stream-summary">
-                <label class="label-playlist d-block">Streaming security</label>
-                <div class="btn btn-primary d-flex align-items-center justify-content-between" role="presentation">
-                    <span>{$safeStreamHeading}<small class="d-block">{$safeStreamSummary}</small></span>
-                    <i class="fad fa-shield-check"></i>
-                </div>
-            </div>
-        </div>
-    </div>
+    {$exportPanel}
+    {$downloadPanel}
 
     <script src="{$bootstrapJsUrl}"></script>
     <script>
@@ -3418,6 +4269,250 @@ function ve_render_secure_watch_page(string $publicId): void
                     copyText(button.getAttribute('data-copy-target'), button);
                 });
             });
+
+            var downloadRequestUrl = {$downloadRequestUrlJs};
+            var downloadResolveUrl = {$downloadResolveUrlJs};
+            var downloadActionUrl = {$downloadActionUrlJs};
+            var downloadIdleLabel = {$downloadIdleLabelJs};
+            var downloadLabel = {$downloadLabelJs};
+            var downloadStatusText = {$downloadStatusTextJs};
+            var downloadCsrfToken = {$downloadCsrfTokenJs};
+            var downloadWaitSeconds = {$downloadWaitSeconds};
+            var downloadButton = document.getElementById('ve-download-button');
+            var downloadStatus = document.getElementById('ve-download-status');
+            var downloadMeta = document.getElementById('ve-download-meta');
+            var countdownTimer = null;
+            var activeRequestToken = '';
+            var activeDownloadToken = '';
+            var requestInFlight = false;
+
+            function updateDownloadStatus(message) {
+                if (downloadStatus) {
+                    downloadStatus.textContent = message;
+                }
+            }
+
+            function setDownloadButtonMarkup(label, iconClass) {
+                if (!downloadButton) {
+                    return;
+                }
+
+                downloadButton.innerHTML = label + ' <i class="' + iconClass + ' ml-2"></i>';
+            }
+
+            function setDownloadIdleState() {
+                requestInFlight = false;
+
+                if (!downloadButton) {
+                    return;
+                }
+
+                downloadButton.setAttribute('data-ready', '0');
+                downloadButton.setAttribute('href', '#download_now');
+                downloadButton.classList.remove('loading', 'disabled', 'download-ready');
+                setDownloadButtonMarkup(downloadIdleLabel, 'fad fa-arrow-right');
+                activeDownloadToken = '';
+            }
+
+            function setDownloadBusyState() {
+                if (!downloadButton) {
+                    return;
+                }
+
+                downloadButton.classList.add('loading', 'disabled');
+                downloadButton.classList.remove('download-ready');
+                downloadButton.setAttribute('data-ready', '0');
+                downloadButton.setAttribute('href', '#download_now');
+                downloadButton.innerHTML = '<span class="spinner-inline" aria-hidden="true"></span>';
+            }
+
+            function submitProtectedDownload() {
+                if (!downloadActionUrl || !activeDownloadToken) {
+                    setDownloadIdleState();
+                    updateDownloadStatus('The protected download session expired. Request a new one.');
+                    return;
+                }
+
+                var form = document.createElement('form');
+                var tokenInput = document.createElement('input');
+                var csrfInput = document.createElement('input');
+                form.method = 'POST';
+                form.action = downloadActionUrl;
+                form.style.display = 'none';
+
+                tokenInput.type = 'hidden';
+                tokenInput.name = 'download_token';
+                tokenInput.value = activeDownloadToken;
+                form.appendChild(tokenInput);
+
+                csrfInput.type = 'hidden';
+                csrfInput.name = 'token';
+                csrfInput.value = downloadCsrfToken;
+                form.appendChild(csrfInput);
+
+                document.body.appendChild(form);
+                form.submit();
+                document.body.removeChild(form);
+
+                setDownloadIdleState();
+                updateDownloadStatus('Protected download started. Request a new one if you need another copy.');
+            }
+
+            function setDownloadReadyState(downloadToken, sizeLabel) {
+                requestInFlight = false;
+
+                if (!downloadButton) {
+                    return;
+                }
+
+                activeDownloadToken = downloadToken;
+                downloadButton.classList.remove('loading', 'disabled');
+                downloadButton.classList.add('download-ready');
+                downloadButton.setAttribute('data-ready', '1');
+                downloadButton.setAttribute('href', '#download_now');
+                setDownloadButtonMarkup('Download ' + downloadLabel, 'fad fa-cloud-download');
+                updateDownloadStatus('Protected download is ready. This one-time link expires quickly after first use.');
+
+                if (downloadMeta) {
+                    downloadMeta.hidden = false;
+                    downloadMeta.querySelector('.download-meta-copy').textContent = downloadLabel + ' | ' + sizeLabel;
+                }
+            }
+
+            function postDownloadForm(url, payload) {
+                return fetch(url, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        Accept: 'application/json',
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    },
+                    body: new URLSearchParams(payload).toString(),
+                }).then(function (response) {
+                    return response.json().catch(function () {
+                        return {};
+                    }).then(function (data) {
+                        return {
+                            ok: response.ok,
+                            status: response.status,
+                            payload: data,
+                        };
+                    });
+                });
+            }
+
+            function startDownloadCountdown(seconds) {
+                var remaining = Math.max(0, seconds);
+
+                if (countdownTimer !== null) {
+                    window.clearInterval(countdownTimer);
+                }
+
+                updateDownloadStatus('Please wait ' + remaining + ' seconds before the protected download link is issued.');
+
+                countdownTimer = window.setInterval(function () {
+                    remaining -= 1;
+
+                    if (remaining > 0) {
+                        updateDownloadStatus('Please wait ' + remaining + ' seconds before the protected download link is issued.');
+                        return;
+                    }
+
+                    window.clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    resolveProtectedDownload();
+                }, 1000);
+            }
+
+            function resolveProtectedDownload() {
+                if (!downloadResolveUrl || !activeRequestToken) {
+                    setDownloadIdleState();
+                    updateDownloadStatus('The protected download session is missing. Request a new one.');
+                    return;
+                }
+
+                setDownloadBusyState();
+                updateDownloadStatus('Finalizing protected download link...');
+
+                postDownloadForm(downloadResolveUrl, {
+                    token: downloadCsrfToken,
+                    request_token: activeRequestToken,
+                }).then(function (result) {
+                    if (!result.ok || !result.payload || result.payload.status !== 'ok') {
+                        setDownloadIdleState();
+                        updateDownloadStatus((result.payload && result.payload.message) || 'The protected download could not be issued.');
+                        return;
+                    }
+
+                    if (result.payload.ready !== true || !result.payload.download_token) {
+                        var retrySeconds = Number(result.payload.remaining_seconds || 0);
+                        setDownloadBusyState();
+                        startDownloadCountdown(retrySeconds > 0 ? retrySeconds : 1);
+                        return;
+                    }
+
+                    setDownloadReadyState(result.payload.download_token, result.payload.size_label || '{$safeSize}');
+                }).catch(function () {
+                    setDownloadIdleState();
+                    updateDownloadStatus('The protected download could not be issued.');
+                });
+            }
+
+            if (downloadButton) {
+                downloadButton.addEventListener('click', function (event) {
+                    if (downloadButton.getAttribute('data-ready') === '1' && activeDownloadToken) {
+                        event.preventDefault();
+                        submitProtectedDownload();
+                        return;
+                    }
+
+                    event.preventDefault();
+
+                    if (requestInFlight) {
+                        return;
+                    }
+
+                    requestInFlight = true;
+                    activeRequestToken = '';
+                    setDownloadBusyState();
+                    updateDownloadStatus(downloadWaitSeconds === 0
+                        ? 'Issuing protected premium download link...'
+                        : 'Starting protected download timer...');
+
+                    postDownloadForm(downloadRequestUrl, {
+                        token: downloadCsrfToken,
+                    }).then(function (result) {
+                        if (!result.ok || !result.payload || result.payload.status !== 'ok') {
+                            setDownloadIdleState();
+                            updateDownloadStatus((result.payload && result.payload.message) || 'The protected download could not be started.');
+                            return;
+                        }
+
+                        if (result.payload.ready === true && result.payload.download_token) {
+                            setDownloadReadyState(result.payload.download_token, result.payload.size_label || '{$safeSize}');
+
+                            if (downloadWaitSeconds === 0) {
+                                submitProtectedDownload();
+                            }
+
+                            return;
+                        }
+
+                        activeRequestToken = result.payload.request_token || '';
+
+                        if (!activeRequestToken) {
+                            setDownloadIdleState();
+                            updateDownloadStatus('The protected download session could not be started.');
+                            return;
+                        }
+
+                        startDownloadCountdown(Number(result.payload.remaining_seconds || result.payload.wait_seconds || downloadWaitSeconds || 1));
+                    }).catch(function () {
+                        setDownloadIdleState();
+                        updateDownloadStatus('The protected download could not be started.');
+                    });
+                });
+            }
 
             $(document).on('click', '.player_lights', function (event) {
                 event.preventDefault();
@@ -3510,7 +4605,6 @@ HTML);
         ? '/stream/' . rawurlencode($publicId) . '/preview.vtt?token=' . rawurlencode((string) $session['token'])
         : null;
     $script = ve_video_secure_player_script($session, $previewVttUrl);
-    $showEmbedTitle = (bool) ($ownerSettings['show_embed_title'] ?? false);
     $playerColour = strtolower(trim((string) ($ownerSettings['player_colour'] ?? 'ff9900')));
 
     if (!preg_match('/^[a-f0-9]{6}$/', $playerColour)) {
@@ -3533,7 +4627,7 @@ HTML);
         $logoBadge = '<img class="ve-logo-badge" src="' . $logoBadgeUrl . '" alt="Player logo">';
     }
 
-    $titleMarkup = $showEmbedTitle ? '<div class="ve-embed-title">' . $title . '</div>' : '';
+    $titleMarkup = '';
 
     ve_html(<<<HTML
 <!doctype html>
@@ -3585,13 +4679,6 @@ HTML);
             pointer-events: none;
             filter: drop-shadow(0 10px 22px rgba(0,0,0,0.45));
         }
-        .ve-embed-title {
-            padding: 10px 14px;
-            font-size: 0.95rem;
-            font-weight: 600;
-            background: #111;
-            border-top: 1px solid rgba(255,255,255,0.08);
-        }
         .ve-player-state {
             position: absolute;
             left: 16px;
@@ -3603,6 +4690,14 @@ HTML);
             border-radius: 12px;
             color: #f4f4f4;
             font-size: 0.92rem;
+            opacity: 0;
+            transform: translateY(8px);
+            pointer-events: none;
+            transition: opacity .2s ease, transform .2s ease;
+        }
+        .ve-player-state.is-visible {
+            opacity: 1;
+            transform: translateY(0);
         }
         .ve-player-state.is-error {
             border-color: rgba(255, 85, 85, 0.35);
@@ -3873,7 +4968,7 @@ function ve_render_home_page(): void
     $html = str_replace('</head>', ve_video_portal_assets() . "\n</head>", $html);
 
     if (is_array($user)) {
-        $logoutForm = '<form method="POST" action="' . ve_h(ve_url('/logout')) . '" class="form-inline ml-0 ml-sm-3">' .
+        $logoutForm = '<form method="POST" action="' . ve_h(ve_url('/api/auth/logout')) . '" class="form-inline ml-0 ml-sm-3">' .
             '<input type="hidden" name="token" value="' . ve_h(ve_csrf_token()) . '">' .
             '<button type="submit" class="btn btn-primary">Logout</button>' .
             '</form>';

@@ -206,19 +206,20 @@ function seed_report_stats(string $dbPath, string $username): void
 function assert_reports_page_markup(string $html): void
 {
     $textSample = preg_replace('/\s+/', ' ', strip_tags($html)) ?? '';
-    assert_true(str_contains($html, 'name="op" value="my_reports"'), 'Reports page should preserve the original reports form.');
-    assert_true(str_contains($html, 'name="date1" id="date1" value="2026-02-20"'), 'Reports page should backfill the from date.');
-    assert_true(str_contains($html, 'name="date2" id="date2" value="2026-02-22"'), 'Reports page should backfill the to date.');
-    assert_true(str_contains($html, '<table id="datatable" class="table table-striped" data-page-length="31">'), 'Reports page should preserve the original reports table.');
+    assert_true(str_contains($html, 'data-dashboard-reports'), 'Reports page should render the managed reports root.');
+    assert_true(str_contains($html, 'data-report-endpoint="/api/dashboard/reports"'), 'Reports page should advertise the new reports API endpoint.');
+    assert_true(str_contains($html, 'action="/dashboard/reports"'), 'Reports page should submit to the canonical dashboard route.');
+    assert_true(str_contains($html, 'name="from" id="reports-from" value="2026-02-20"'), 'Reports page should backfill the from date.');
+    assert_true(str_contains($html, 'name="to" id="reports-to" value="2026-02-22"'), 'Reports page should backfill the to date.');
+    assert_true(str_contains($html, '<table id="datatable" class="table table-striped reports-table" data-page-length="31">'), 'Reports page should render the managed reports table.');
     assert_true(str_contains($html, '$0.70000'), 'Reports page should render the view-profit total. Sample: ' . substr($textSample, 0, 1200));
     assert_true(str_contains($html, '$0.12000'), 'Reports page should render the referral-share total. Sample: ' . substr($textSample, 0, 1200));
     assert_true(str_contains($html, '$0.82000'), 'Reports page should render the combined total. Sample: ' . substr($textSample, 0, 1200));
     assert_true(str_contains($html, '6.5 GB'), 'Reports page should render traffic totals. Sample: ' . substr($textSample, 0, 1200));
     assert_true(str_contains($html, '2026-02-20'), 'Reports page should render seeded report rows.');
     assert_true(str_contains($html, '2026-02-22'), 'Reports page should render the full seeded range.');
-    assert_true(str_contains($html, 'Morris.Line'), 'Reports page should initialize the chart from live data.');
-    assert_true(!str_contains($html, 'data-dashboard-reports'), 'Reports page should not render the replacement reports shell.');
-    assert_true(!str_contains($html, '/assets/js/dashboard_reports.js'), 'Reports page should not load the removed reports bundle.');
+    assert_true(!str_contains($html, 'Loading...</td>'), 'Reports page should server-render the current report rows.');
+    assert_true(str_contains($html, '/assets/js/dashboard_reports.js'), 'Reports page should load the managed reports bundle.');
 }
 
 $root = dirname(__DIR__);
@@ -256,7 +257,7 @@ try {
     assert_true($homePage['status'] === 200, 'Home page should load.');
     $csrf = extract_runtime_token($homePage['body']);
 
-    $registration = json_response($client->request('POST', '/register', [
+    $registration = json_response($client->request('POST', '/api/auth/register', [
         'form' => [
             'usr_login' => 'reports_case',
             'usr_email' => 'reports@example.com',
@@ -267,7 +268,7 @@ try {
     ]));
     assert_true(($registration['status'] ?? null) === 'ok', 'Reports test registration should succeed.');
 
-    $login = json_response($client->request('POST', '/login', [
+    $login = json_response($client->request('POST', '/api/auth/login', [
         'form' => [
             'login' => 'reports@example.com',
             'password' => 'Start123',
@@ -301,10 +302,10 @@ try {
     );
 
     $legacyRedirect = $client->request('GET', '/?op=my_reports&date1=2026-02-20&date2=2026-02-22');
-    assert_true(in_array($legacyRedirect['status'], [301, 302], true), 'Legacy my_reports requests should redirect.');
+    assert_true($legacyRedirect['status'] === 410, 'Legacy my_reports requests should be disabled.');
     assert_true(
-        ($legacyRedirect['headers']['location'] ?? '') === '/dashboard/reports?from=2026-02-20&to=2026-02-22',
-        'Legacy my_reports redirect should preserve the requested range.'
+        ($legacyRedirect['headers']['x-replacement-endpoint'] ?? '') === '/api/dashboard/reports',
+        'Legacy my_reports responses should advertise the new dashboard reports API endpoint.'
     );
 
     echo "Reports page tests passed.\n";

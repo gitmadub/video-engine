@@ -101,7 +101,7 @@ function requiredEnv(name) {
           status: response.status,
           payload,
         };
-    }, { username, password, token, loginUrl: appPath('/login') });
+    }, { username, password, token, loginUrl: appPath('/api/auth/login') });
 
     if (loginResult.status !== 200 || loginResult.payload.status !== 'redirect') {
       throw new Error(`Login failed: ${JSON.stringify(loginResult)}`);
@@ -209,13 +209,24 @@ function requiredEnv(name) {
       throw new Error(`Premium summary API did not respond successfully before checkout: ${JSON.stringify(summaryBefore)}`);
     }
 
+    if (Number(summaryBefore.payload.summary && summaryBefore.payload.summary.used_bw) !== 0) {
+      throw new Error(`Regular dashboard traffic should not be counted as premium bandwidth usage. Received: ${JSON.stringify(summaryBefore.payload.summary || null)}`);
+    }
+
+    const premiumCardTitles = await page.locator('[data-premium-overview] [data-premium-card-title]').allTextContents();
+    const expectedCardTitles = ['Premium account', 'Premium bandwidth', 'Premium bandwidth usage'];
+
+    if (premiumCardTitles.join('|') !== expectedCardTitles.join('|')) {
+      throw new Error(`Premium overview cards did not render in the expected order. Received: ${JSON.stringify(premiumCardTitles)}`);
+    }
+
     const balanceBefore = Number(summaryBefore.payload.summary && summaryBefore.payload.summary.balance_micro_usd);
 
     if (!Number.isFinite(balanceBefore) || balanceBefore <= 0) {
       throw new Error(`Premium summary balance should be positive before checkout. Received: ${JSON.stringify(summaryBefore.payload.summary || null)}`);
     }
 
-    const quoteResponse = await requestJson('/api/premium/checkout/quote', 'POST', {
+    const quoteResponse = await requestJson('/api/billing/quote', 'POST', {
       token: premiumToken,
       purchase_type: 'account',
       package_id: 'monthly',

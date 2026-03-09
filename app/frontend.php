@@ -265,9 +265,13 @@ function ve_not_found(): void
 }
 
 require __DIR__ . '/backend.php';
+require __DIR__ . '/modules/auth.php';
+require __DIR__ . '/modules/reports.php';
 require __DIR__ . '/referrals.php';
 require __DIR__ . '/video.php';
 require __DIR__ . '/remote_upload.php';
+require __DIR__ . '/routes/api.php';
+require __DIR__ . '/routes/legacy.php';
 
 function ve_dashboard_stats(?int $userId = null): array
 {
@@ -713,115 +717,7 @@ function ve_legacy_endpoint_removed(string $replacementPath, array $allowedMetho
 
 function ve_handle_op(string $op, string $path): bool
 {
-    switch ($op) {
-        case 'notifications':
-            ve_legacy_endpoint_removed('/api/notifications', ['GET']);
-
-        case 'login_ajax':
-            ve_legacy_endpoint_removed('/login', ['POST']);
-
-        case 'registration_ajax':
-            ve_legacy_endpoint_removed('/register', ['POST']);
-
-        case 'forgot_pass_ajax':
-            ve_legacy_endpoint_removed('/password/forgot', ['POST']);
-
-        case 'logout':
-            ve_legacy_endpoint_removed('/logout', ['POST']);
-
-        case 'my_password':
-            ve_legacy_endpoint_removed('/account/password', ['POST']);
-
-        case 'my_email':
-            ve_legacy_endpoint_removed('/account/email', ['POST']);
-
-        case 'upload_logo':
-            ve_legacy_endpoint_removed('/account/player', ['POST']);
-
-        case 'premium_settings':
-            ve_legacy_endpoint_removed('/account/advertising', ['POST']);
-
-        case 'custom_domain_list':
-            ve_legacy_endpoint_removed('/api/domains', ['GET']);
-
-        case 'custom_domain_add':
-            ve_legacy_endpoint_removed('/api/domains', ['POST']);
-
-        case 'custom_domain_delete':
-            ve_legacy_endpoint_removed('/api/domains/{domain}', ['DELETE']);
-
-        case 'delete_account':
-            ve_legacy_endpoint_removed('/account/delete', ['POST']);
-
-        case 'dmca_manager':
-            if (isset($_GET['loadmore'])) {
-                ve_html('NOK');
-            }
-            return false;
-
-        case 'videos_json':
-            ve_handle_legacy_videos_json();
-
-        case 'remote_upload_json':
-            ve_handle_remote_upload_json();
-
-        case 'upload_get_srv':
-            ve_handle_legacy_upload_get_server();
-
-        case 'pass_file':
-            ve_handle_legacy_pass_file();
-
-        case 'upload_results_json':
-            ve_handle_legacy_upload_results();
-
-        case 'add_srt':
-            ve_handle_legacy_add_srt();
-
-        case 'change_thumbnail':
-            ve_handle_legacy_change_thumbnail();
-
-        case 'folder_sharing':
-            ve_handle_legacy_folder_sharing();
-
-        case 'marker':
-            ve_handle_legacy_marker();
-
-        case 'payments':
-            ve_legacy_endpoint_removed('/api/premium/checkout/balance', ['POST']);
-
-        case 'crypto_payments':
-            ve_legacy_endpoint_removed('/api/premium/checkout/crypto', ['POST']);
-
-        case 'register_save':
-        case 'my_account':
-            ve_legacy_endpoint_removed($op === 'register_save' ? '/register' : '/account/settings', ['POST']);
-
-        case 'my_reports':
-            $query = [];
-
-            if (isset($_GET['date1']) && is_string($_GET['date1']) && trim($_GET['date1']) !== '') {
-                $query['from'] = trim($_GET['date1']);
-            }
-
-            if (isset($_GET['date2']) && is_string($_GET['date2']) && trim($_GET['date2']) !== '') {
-                $query['to'] = trim($_GET['date2']);
-            }
-
-            $target = ve_url('/dashboard/reports');
-
-            if ($query !== []) {
-                $target .= '?' . http_build_query($query);
-            }
-
-            ve_redirect($target);
-
-        case 'forgot_pass':
-        case 'request_money':
-            ve_back_redirect($path === '/' ? ve_url('/dashboard') : ve_url($path));
-
-        default:
-            return false;
-    }
+    return ve_dispatch_legacy_route($op, $path);
 }
 
 function ve_dispatch(): void
@@ -829,6 +725,10 @@ function ve_dispatch(): void
     ve_bootstrap();
     $path = ve_request_path();
     $op = $_REQUEST['op'] ?? null;
+
+    if (ve_dispatch_api_routes($path)) {
+        return;
+    }
 
     if ($path === '/login') {
         if (!ve_is_method('POST')) {
@@ -1244,6 +1144,10 @@ function ve_dispatch(): void
         ve_redirect($file['embed_url']);
     }
 
+    if (preg_match('#^/download/([A-Za-z0-9_-]+)$#', $path, $matches) === 1) {
+        ve_video_download_file($matches[1]);
+    }
+
     if (preg_match('#^/stream/([A-Za-z0-9_-]+)/manifest\.m3u8$#', $path, $matches) === 1) {
         ve_video_stream_manifest($matches[1]);
     }
@@ -1291,7 +1195,8 @@ function ve_dispatch(): void
 
     foreach (VE_LEGACY_DASHBOARD_ROUTES as $legacy => $target) {
         if ($path === '/' . $legacy || $path === '/' . $legacy . '.html') {
-            ve_redirect('/dashboard/' . $target);
+            $query = trim((string) ($_SERVER['QUERY_STRING'] ?? ''));
+            ve_redirect('/dashboard/' . $target . ($query !== '' ? '?' . $query : ''));
         }
     }
 

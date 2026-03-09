@@ -79,7 +79,7 @@ $(document).ready(function() {
         }
 
         if (op == 'login_ajax') {
-            url = veAppUrl('/login');
+            url = veAppUrl('/api/auth/login');
             formData = {
                 'login': login,
                 'password': password,
@@ -88,7 +88,7 @@ $(document).ready(function() {
             };
             button = 'Login <i class="fad fa-arrow-right ml-2"></i>';
         } else if (op == 'register_save') {
-            url = veAppUrl('/register');
+            url = veAppUrl('/api/auth/register');
             formData = {
                 'usr_login': _form.find('input[name="usr_login"]').val(),
                 'usr_email': _form.find('input[name="usr_email"]').val(),
@@ -98,14 +98,14 @@ $(document).ready(function() {
             };
             button = 'Sign up <i class="fad fa-arrow-right ml-2"></i>';
         } else if (op == 'forgot_pass') {
-            url = veAppUrl('/password/forgot');
+            url = veAppUrl('/api/auth/forgot');
             formData = {
                 'usr_login': _form.find('input[name="usr_login"]').val(),
                 'token': veCsrfToken()
             };
             button = 'Send me instructions <i class="fad fa-arrow-right ml-2"></i>';
         } else if (op == 'reset_pass') {
-            url = veAppUrl('/password/reset');
+            url = veAppUrl('/api/auth/reset');
             formData = {
                 'sess_id': _form.find('input[name="sess_id"]').val(),
                 'password': _form.find('input[name="password"]').val(),
@@ -212,7 +212,7 @@ $(document).ready(function() {
     $(document).on('click', 'a.logout', function(e) {
         e.preventDefault();
 
-        var form = $('<form method="POST" action="' + veAppUrl('/logout') + '"></form>');
+        var form = $('<form method="POST" action="' + veAppUrl('/api/auth/logout') + '"></form>');
         form.append('<input type="hidden" name="token" value="' + veCsrfToken() + '">');
         $('body').append(form);
         form.trigger('submit');

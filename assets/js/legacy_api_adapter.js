@@ -1,0 +1,154 @@
+(function () {
+    'use strict';
+
+    function appUrl(path) {
+        var basePath = window.VE_BASE_PATH || '';
+
+        if (!path) {
+            return basePath || '/';
+        }
+
+        if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(path)) {
+            return path;
+        }
+
+        if (basePath && (path === basePath || path.indexOf(basePath + '/') === 0)) {
+            return path;
+        }
+
+        if (path.charAt(0) !== '/') {
+            path = '/' + path;
+        }
+
+        return basePath + path;
+    }
+
+    function normalizedPath(pathname) {
+        var basePath = window.VE_BASE_PATH || '';
+
+        if (basePath && pathname.indexOf(basePath) === 0) {
+            pathname = pathname.slice(basePath.length) || '/';
+        }
+
+        return pathname;
+    }
+
+    function buildReplacementUrl(path, params) {
+        var query = params.toString();
+        return appUrl(path) + (query ? '?' + query : '');
+    }
+
+    function rewriteLegacyUrl(rawUrl) {
+        if (!rawUrl) {
+            return null;
+        }
+
+        var url;
+
+        try {
+            url = new URL(rawUrl, window.location.origin);
+        } catch (error) {
+            return null;
+        }
+
+        var path = normalizedPath(url.pathname);
+        var params = new URLSearchParams(url.search);
+        var op = params.get('op');
+
+        if (!op || (path !== '/' && path !== '/index.php')) {
+            return null;
+        }
+
+        params.delete('op');
+
+        switch (op) {
+            case 'videos_json':
+                return buildReplacementUrl('/api/videos/actions', params);
+            case 'remote_upload_json':
+                return buildReplacementUrl('/api/remote/jobs', params);
+            case 'upload_get_srv':
+                return buildReplacementUrl('/api/videos/upload-target', params);
+            case 'pass_file':
+                return buildReplacementUrl('/api/uploads/check', params);
+            case 'upload_results_json':
+                return buildReplacementUrl('/api/uploads/result', params);
+            case 'add_srt':
+                return buildReplacementUrl('/api/videos/subtitles', params);
+            case 'change_thumbnail':
+                return buildReplacementUrl('/api/videos/thumbnail', params);
+            case 'folder_sharing':
+                return buildReplacementUrl('/api/folders/share', params);
+            case 'marker':
+                return buildReplacementUrl('/api/videos/markers', params);
+            case 'dmca_manager':
+                return buildReplacementUrl('/api/dmca', params);
+            case 'payments':
+                return buildReplacementUrl('/api/billing/paypal', params);
+            case 'crypto_payments':
+                return buildReplacementUrl('/api/billing/crypto', params);
+            default:
+                return null;
+        }
+    }
+
+    function installJqueryAdapter() {
+        var $ = window.jQuery;
+
+        if (!$ || $.__veLegacyApiAdapterInstalled) {
+            return !!$;
+        }
+
+        $.ajaxPrefilter(function (options, originalOptions) {
+            var replacementUrl = rewriteLegacyUrl(
+                options && options.url ? options.url : (originalOptions && originalOptions.url ? originalOptions.url : '')
+            );
+
+            if (!replacementUrl) {
+                return;
+            }
+
+            options.url = replacementUrl;
+        });
+
+        $.__veLegacyApiAdapterInstalled = true;
+        return true;
+    }
+
+    function installWindowOpenAdapter() {
+        if (window.__veLegacyWindowOpenAdapterInstalled) {
+            return;
+        }
+
+        var originalOpen = window.open;
+
+        window.open = function (url, target, features) {
+            var replacementUrl = rewriteLegacyUrl(url);
+            return originalOpen.call(window, replacementUrl || url, target, features);
+        };
+
+        window.__veLegacyWindowOpenAdapterInstalled = true;
+    }
+
+    function boot() {
+        installWindowOpenAdapter();
+
+        if (installJqueryAdapter()) {
+            return;
+        }
+
+        var attempts = 0;
+        var timer = window.setInterval(function () {
+            attempts += 1;
+
+            if (installJqueryAdapter() || attempts > 80) {
+                window.clearInterval(timer);
+            }
+        }, 100);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
+    }
+}());

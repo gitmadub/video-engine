@@ -411,6 +411,28 @@ function ve_run_database_migrations(PDO $pdo): void
         )'
     );
 
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS video_download_grants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            video_id INTEGER NOT NULL,
+            viewer_user_id INTEGER DEFAULT NULL,
+            session_id_hash TEXT NOT NULL,
+            request_token_hash TEXT NOT NULL UNIQUE,
+            download_token_hash TEXT DEFAULT NULL UNIQUE,
+            ip_hash TEXT NOT NULL,
+            user_agent_hash TEXT NOT NULL,
+            wait_seconds INTEGER NOT NULL DEFAULT 0,
+            available_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            issued_at TEXT DEFAULT NULL,
+            used_at TEXT DEFAULT NULL,
+            revoked_at TEXT DEFAULT NULL,
+            FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
+            FOREIGN KEY (viewer_user_id) REFERENCES users (id) ON DELETE SET NULL
+        )'
+    );
+
     ve_add_column_if_missing($pdo, 'videos', 'folder_id', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'videos', 'is_public', 'INTEGER NOT NULL DEFAULT 1');
 
@@ -436,8 +458,25 @@ function ve_run_database_migrations(PDO $pdo): void
     ve_add_column_if_missing($pdo, 'remote_uploads', 'completed_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'remote_uploads', 'deleted_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'user_stats_daily', 'referral_earned_micro_usd', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'user_stats_daily', 'premium_bandwidth_bytes', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'video_stats_daily', 'premium_bandwidth_bytes', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'playback_started_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'bandwidth_bytes_served', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'uses_premium_bandwidth', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'premium_bandwidth_bytes_served', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'viewer_user_id', 'INTEGER DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'session_id_hash', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'request_token_hash', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'download_token_hash', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'ip_hash', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'user_agent_hash', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'wait_seconds', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'available_at', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'expires_at', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'created_at', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'issued_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'used_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'video_download_grants', 'revoked_at', 'TEXT DEFAULT NULL');
 
     $users = $pdo->query('SELECT id, api_key_encrypted, created_at, updated_at, api_key_hash, api_key_last_rotated_at FROM users')->fetchAll();
 
@@ -487,6 +526,8 @@ function ve_run_database_migrations(PDO $pdo): void
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_account_balance_ledger_source_entry ON account_balance_ledger(source_type, source_key, entry_type)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_premium_orders_user_created ON premium_orders(user_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_premium_orders_status_created ON premium_orders(status, created_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_download_grants_video_expiry ON video_download_grants(video_id, expires_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_download_grants_session_created ON video_download_grants(session_id_hash, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_folders_user_parent_name ON video_folders(user_id, parent_id, name)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_folders_user_parent_created ON video_folders(user_id, parent_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_videos_user_folder_created ON videos(user_id, folder_id, created_at DESC)');
@@ -896,7 +937,7 @@ function ve_player_splash_preview_html(array $settings): string
     }
 
     $updatedAt = (string) ($settings['updated_at'] ?? ve_timestamp());
-    $splashPreviewUrl = ve_h(ve_url('/account/player/splash-preview?ts=' . rawurlencode($updatedAt)));
+    $splashPreviewUrl = ve_h(ve_url('/api/account/player/preview?ts=' . rawurlencode($updatedAt)));
 
     return '<div class="small text-muted mb-2">Current protected splash image</div>'
         . '<img src="' . $splashPreviewUrl . '" alt="Splash preview" style="display:block;width:100%;max-width:100%;border-radius:12px;border:1px solid rgba(255,255,255,0.08);background:#0c0c0c;">';
@@ -917,6 +958,12 @@ function ve_player_settings_payload(int $userId, ?array $settings = null): array
         'splash_image_path' => (string) ($settings['splash_image_path'] ?? ''),
         'splash_preview_html' => ve_player_splash_preview_html($settings),
     ];
+}
+
+function ve_premium_bandwidth_settings_configured(array $settings): bool
+{
+    return trim((string) ($settings['vast_url'] ?? '')) !== ''
+        || trim((string) ($settings['pop_url'] ?? '')) !== '';
 }
 
 function ve_find_user_by_login(string $login): ?array
@@ -1304,9 +1351,10 @@ function ve_dashboard_increment_daily_stat_row(
     string $statDate,
     int $viewDelta,
     int $earnedDelta,
-    int $bandwidthDelta
+    int $bandwidthDelta,
+    int $premiumBandwidthDelta = 0
 ): void {
-    if ($keyValue <= 0 || ($viewDelta === 0 && $earnedDelta === 0 && $bandwidthDelta === 0)) {
+    if ($keyValue <= 0 || ($viewDelta === 0 && $earnedDelta === 0 && $bandwidthDelta === 0 && $premiumBandwidthDelta === 0)) {
         return;
     }
 
@@ -1326,6 +1374,7 @@ function ve_dashboard_increment_daily_stat_row(
          SET views = views + :views,
              earned_micro_usd = earned_micro_usd + :earned_micro_usd,
              bandwidth_bytes = bandwidth_bytes + :bandwidth_bytes,
+             premium_bandwidth_bytes = premium_bandwidth_bytes + :premium_bandwidth_bytes,
              updated_at = :updated_at
          WHERE ' . $keyColumn . ' = :key_value
            AND stat_date = :stat_date'
@@ -1334,6 +1383,7 @@ function ve_dashboard_increment_daily_stat_row(
         ':views' => $viewDelta,
         ':earned_micro_usd' => $earnedDelta,
         ':bandwidth_bytes' => $bandwidthDelta,
+        ':premium_bandwidth_bytes' => $premiumBandwidthDelta,
         ':updated_at' => $now,
         ':key_value' => $keyValue,
         ':stat_date' => $statDate,
@@ -1346,9 +1396,9 @@ function ve_dashboard_increment_daily_stat_row(
 
     $insert = $pdo->prepare(
         'INSERT INTO ' . $table . ' (
-            ' . $keyColumn . ', stat_date, views, earned_micro_usd, bandwidth_bytes, created_at, updated_at
+            ' . $keyColumn . ', stat_date, views, earned_micro_usd, bandwidth_bytes, premium_bandwidth_bytes, created_at, updated_at
          ) VALUES (
-            :key_value, :stat_date, :views, :earned_micro_usd, :bandwidth_bytes, :created_at, :updated_at
+            :key_value, :stat_date, :views, :earned_micro_usd, :bandwidth_bytes, :premium_bandwidth_bytes, :created_at, :updated_at
          )'
     );
 
@@ -1359,6 +1409,7 @@ function ve_dashboard_increment_daily_stat_row(
             ':views' => $viewDelta,
             ':earned_micro_usd' => $earnedDelta,
             ':bandwidth_bytes' => $bandwidthDelta,
+            ':premium_bandwidth_bytes' => $premiumBandwidthDelta,
             ':created_at' => $now,
             ':updated_at' => $now,
         ]);
@@ -1397,18 +1448,19 @@ function ve_dashboard_record_video_view(
     }
 }
 
-function ve_dashboard_record_video_bandwidth(int $videoId, int $userId, int $bytes, ?string $statDate = null): void
+function ve_dashboard_record_video_bandwidth(int $videoId, int $userId, int $bytes, ?string $statDate = null, int $premiumBandwidthBytes = 0): void
 {
     $bytes = max(0, $bytes);
+    $premiumBandwidthBytes = max(0, min($bytes, $premiumBandwidthBytes));
 
-    if ($bytes === 0) {
+    if ($bytes === 0 && $premiumBandwidthBytes === 0) {
         return;
     }
 
     $statDate = is_string($statDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $statDate) === 1 ? $statDate : gmdate('Y-m-d');
 
-    ve_dashboard_increment_daily_stat_row('video_stats_daily', 'video_id', $videoId, $statDate, 0, 0, $bytes);
-    ve_dashboard_increment_daily_stat_row('user_stats_daily', 'user_id', $userId, $statDate, 0, 0, $bytes);
+    ve_dashboard_increment_daily_stat_row('video_stats_daily', 'video_id', $videoId, $statDate, 0, 0, $bytes, $premiumBandwidthBytes);
+    ve_dashboard_increment_daily_stat_row('user_stats_daily', 'user_id', $userId, $statDate, 0, 0, $bytes, $premiumBandwidthBytes);
 }
 
 function ve_dashboard_record_referral_earning(int $userId, int $amountMicroUsd, ?string $statDate = null): void
@@ -1464,12 +1516,12 @@ function ve_dashboard_record_referral_earning(int $userId, int $amountMicroUsd, 
 }
 
 /**
- * @return array<string, array{views:int,earned_micro_usd:int,referral_earned_micro_usd:int,bandwidth_bytes:int}>
+ * @return array<string, array{views:int,earned_micro_usd:int,referral_earned_micro_usd:int,bandwidth_bytes:int,premium_bandwidth_bytes:int}>
  */
 function ve_dashboard_user_stats_map(int $userId, string $fromDate, string $toDate): array
 {
     $stmt = ve_db()->prepare(
-        'SELECT stat_date, views, earned_micro_usd, referral_earned_micro_usd, bandwidth_bytes
+        'SELECT stat_date, views, earned_micro_usd, referral_earned_micro_usd, bandwidth_bytes, premium_bandwidth_bytes
          FROM user_stats_daily
          WHERE user_id = :user_id
            AND stat_date BETWEEN :from_date AND :to_date
@@ -1499,6 +1551,7 @@ function ve_dashboard_user_stats_map(int $userId, string $fromDate, string $toDa
             'earned_micro_usd' => (int) ($row['earned_micro_usd'] ?? 0),
             'referral_earned_micro_usd' => (int) ($row['referral_earned_micro_usd'] ?? 0),
             'bandwidth_bytes' => (int) ($row['bandwidth_bytes'] ?? 0),
+            'premium_bandwidth_bytes' => (int) ($row['premium_bandwidth_bytes'] ?? 0),
         ];
     }
 
@@ -1506,7 +1559,7 @@ function ve_dashboard_user_stats_map(int $userId, string $fromDate, string $toDa
 }
 
 /**
- * @return array<int, array{time:string,views:int,profit:string,traffic:string,earned_micro_usd:int,referral_profit:string,referral_earned_micro_usd:int,total_profit:string,total_profit_micro_usd:int,bandwidth_bytes:int}>
+ * @return array<int, array{time:string,views:int,profit:string,traffic:string,earned_micro_usd:int,referral_profit:string,referral_earned_micro_usd:int,total_profit:string,total_profit_micro_usd:int,bandwidth_bytes:int,premium_bandwidth_bytes:int}>
  */
 function ve_dashboard_chart_series(int $userId, string $fromDate, string $toDate): array
 {
@@ -1519,6 +1572,7 @@ function ve_dashboard_chart_series(int $userId, string $fromDate, string $toDate
             'earned_micro_usd' => 0,
             'referral_earned_micro_usd' => 0,
             'bandwidth_bytes' => 0,
+            'premium_bandwidth_bytes' => 0,
         ];
         $earnedMicroUsd = (int) ($row['earned_micro_usd'] ?? 0);
         $referralMicroUsd = (int) ($row['referral_earned_micro_usd'] ?? 0);
@@ -1535,6 +1589,7 @@ function ve_dashboard_chart_series(int $userId, string $fromDate, string $toDate
             'total_profit' => number_format($totalMicroUsd / 1000000, 5, '.', ''),
             'total_profit_micro_usd' => $totalMicroUsd,
             'bandwidth_bytes' => (int) $row['bandwidth_bytes'],
+            'premium_bandwidth_bytes' => (int) $row['premium_bandwidth_bytes'],
         ];
     }
 
@@ -1821,7 +1876,7 @@ function ve_premium_bandwidth_totals(int $userId): array
     $purchasedBytes = (int) $purchasedStmt->fetchColumn();
 
     $usedStmt = ve_db()->prepare(
-        'SELECT COALESCE(SUM(bandwidth_bytes), 0)
+        'SELECT COALESCE(SUM(premium_bandwidth_bytes), 0)
          FROM user_stats_daily
          WHERE user_id = :user_id'
     );
@@ -1832,6 +1887,43 @@ function ve_premium_bandwidth_totals(int $userId): array
         'purchased_bytes' => $purchasedBytes,
         'used_bytes' => $usedBytes,
         'available_bytes' => max(0, $purchasedBytes - $usedBytes),
+    ];
+}
+
+function ve_premium_bandwidth_feature_state(int $userId, ?array $settings = null, ?array $bandwidth = null): array
+{
+    $settings = is_array($settings) ? $settings : ve_get_user_settings($userId);
+    $bandwidth = is_array($bandwidth) ? $bandwidth : ve_premium_bandwidth_totals($userId);
+    $configured = ve_premium_bandwidth_settings_configured($settings);
+    $purchasedBytes = max(0, (int) ($bandwidth['purchased_bytes'] ?? 0));
+    $availableBytes = max(0, (int) ($bandwidth['available_bytes'] ?? 0));
+    $active = $configured && $availableBytes > 0;
+
+    if (!$configured) {
+        return [
+            'configured' => false,
+            'active' => false,
+            'status_label' => $purchasedBytes > 0 ? 'Ready' : 'Inactive',
+            'detail' => 'Only traffic served while own adverts are enabled counts against premium bandwidth.',
+        ];
+    }
+
+    if ($active) {
+        return [
+            'configured' => true,
+            'active' => true,
+            'status_label' => 'Active',
+            'detail' => 'Own adverts are enabled and premium-bandwidth traffic is being tracked separately.',
+        ];
+    }
+
+    return [
+        'configured' => true,
+        'active' => false,
+        'status_label' => $purchasedBytes > 0 ? 'Paused' : 'Inactive',
+        'detail' => $purchasedBytes > 0
+            ? 'Own adverts are configured, but premium bandwidth is exhausted until more credit is added.'
+            : 'Own adverts are configured, but no premium bandwidth has been purchased yet.',
     ];
 }
 
@@ -1848,7 +1940,7 @@ function ve_premium_chart_payload(int $userId, int $lookbackDays = 7): array
         }
 
         $labels[] = (string) ($entry['time'] ?? '');
-        $stats[] = round(((int) ($entry['bandwidth_bytes'] ?? 0)) / (1024 * 1024), 2);
+        $stats[] = round(((int) ($entry['premium_bandwidth_bytes'] ?? 0)) / (1024 * 1024), 2);
     }
 
     return [
@@ -1860,10 +1952,15 @@ function ve_premium_chart_payload(int $userId, int $lookbackDays = 7): array
 function ve_premium_page_payload(int $userId): array
 {
     $user = ve_get_user_by_id($userId);
+    $settings = is_array($user) ? ve_get_user_settings((int) $user['id']) : [];
     $balanceMicroUsd = ve_dashboard_balance_micro_usd($userId);
     $bandwidth = ve_premium_bandwidth_totals($userId);
+    $feature = ve_premium_bandwidth_feature_state($userId, $settings, $bandwidth);
     $chart = ve_premium_chart_payload($userId, 7);
     $premiumUntil = is_array($user) ? trim((string) ($user['premium_until'] ?? '')) : '';
+    $usedBytes = (int) ($bandwidth['used_bytes'] ?? 0);
+    $availableBytes = (int) ($bandwidth['available_bytes'] ?? 0);
+    $purchasedBytes = (int) ($bandwidth['purchased_bytes'] ?? 0);
 
     return [
         'usr_money' => number_format($balanceMicroUsd / 1000000, 5, '.', ''),
@@ -1871,14 +1968,21 @@ function ve_premium_page_payload(int $userId): array
         'balance_label' => ve_dashboard_format_currency_micro_usd($balanceMicroUsd),
         'rand' => strtolower(substr(ve_random_token(6), 0, 6)),
         'accept_paypal' => 0,
-        'used_bw' => (int) ($bandwidth['used_bytes'] ?? 0),
-        'available_bw' => (int) ($bandwidth['available_bytes'] ?? 0),
-        'purchased_bw' => (int) ($bandwidth['purchased_bytes'] ?? 0),
+        'used_bw' => $usedBytes,
+        'used_bw_label' => ve_human_bytes($usedBytes),
+        'available_bw' => $availableBytes,
+        'available_bw_label' => ve_human_bytes($availableBytes),
+        'purchased_bw' => $purchasedBytes,
+        'purchased_bw_label' => ve_human_bytes($purchasedBytes),
         'stats' => $chart['stats'],
         'labels' => $chart['labels'],
         'plan_label' => is_array($user) && ve_user_is_premium($user) ? 'Premium active' : 'Free account',
         'premium_until_raw' => $premiumUntil,
         'premium_until_label' => $premiumUntil !== '' ? ve_format_datetime_label($premiumUntil, 'Active') : 'No active renewal',
+        'premium_bandwidth_configured' => (bool) ($feature['configured'] ?? false),
+        'premium_bandwidth_active' => (bool) ($feature['active'] ?? false),
+        'premium_bandwidth_status_label' => (string) ($feature['status_label'] ?? 'Inactive'),
+        'premium_bandwidth_status_detail' => (string) ($feature['detail'] ?? ''),
     ];
 }
 
@@ -2565,187 +2669,6 @@ function ve_api_send_rate_limit_headers(array $state): void
     }
 }
 
-function ve_handle_login_ajax(): void
-{
-    ve_require_csrf(ve_request_csrf_token());
-    $login = trim((string) ($_POST['login'] ?? ''));
-    $password = (string) ($_POST['password'] ?? '');
-
-    if ($login === '' || $password === '') {
-        ve_json([
-            'status' => 'fail',
-            'message' => 'Enter your username/email and password.',
-        ]);
-    }
-
-    $user = ve_find_user_by_login($login);
-
-    if (!is_array($user) || $user['status'] !== 'active' || $user['deleted_at'] !== null || !password_verify($password, (string) $user['password_hash'])) {
-        ve_json([
-            'status' => 'fail',
-            'message' => 'Invalid login credentials.',
-        ]);
-    }
-
-    ve_login_user($user);
-    ve_add_notification((int) $user['id'], 'New login', 'A new dashboard session was started successfully.');
-    ve_json([
-        'status' => 'redirect',
-        'message' => ve_url('/dashboard'),
-    ]);
-}
-
-function ve_handle_registration_ajax(): void
-{
-    ve_require_csrf(ve_request_csrf_token());
-    $username = trim((string) ($_POST['usr_login'] ?? ''));
-    $email = strtolower(trim((string) ($_POST['usr_email'] ?? '')));
-    $password = (string) ($_POST['usr_password'] ?? '');
-    $password2 = (string) ($_POST['usr_password2'] ?? '');
-
-    $error = ve_validate_username($username)
-        ?? ve_validate_email($email)
-        ?? ve_validate_password($password, $password2);
-
-    if ($error !== null) {
-        ve_json([
-            'status' => 'fail',
-            'message' => $error,
-        ]);
-    }
-
-    if (ve_find_user_by_login($username) !== null) {
-        ve_json([
-            'status' => 'fail',
-            'message' => 'That username is already taken.',
-        ]);
-    }
-
-    $stmt = ve_db()->prepare('SELECT id FROM users WHERE lower(email) = lower(:email) LIMIT 1');
-    $stmt->execute([':email' => $email]);
-
-    if ($stmt->fetchColumn() !== false) {
-        ve_json([
-            'status' => 'fail',
-            'message' => 'That email address is already in use.',
-        ]);
-    }
-
-    $user = ve_create_user($username, $email, $password);
-
-    if (is_array($user) && function_exists('ve_referral_apply_pending_to_user')) {
-        ve_referral_apply_pending_to_user((int) $user['id']);
-    }
-
-    ve_json([
-        'status' => 'ok',
-        'message' => 'Registration completed. You can log in now.',
-    ]);
-}
-
-function ve_get_valid_reset_token(string $rawToken): ?array
-{
-    $stmt = ve_db()->prepare(
-        'SELECT * FROM password_reset_tokens
-         WHERE token_hash = :token_hash AND used_at IS NULL AND expires_at >= :now
-         ORDER BY id DESC
-         LIMIT 1'
-    );
-    $stmt->execute([
-        ':token_hash' => hash('sha256', $rawToken),
-        ':now' => ve_now(),
-    ]);
-    $token = $stmt->fetch();
-
-    return is_array($token) ? $token : null;
-}
-
-function ve_handle_forgot_password_ajax(): void
-{
-    ve_require_csrf(ve_request_csrf_token());
-    $token = trim((string) ($_POST['sess_id'] ?? ''));
-
-    if ($token !== '') {
-        $password = (string) ($_POST['password'] ?? '');
-        $password2 = (string) ($_POST['password2'] ?? '');
-        $error = ve_validate_password($password, $password2);
-
-        if ($error !== null) {
-            ve_json([
-                'status' => 'fail',
-                'message' => $error,
-            ]);
-        }
-
-        $reset = ve_get_valid_reset_token($token);
-
-        if (!is_array($reset)) {
-            ve_json([
-                'status' => 'fail',
-                'message' => 'This password reset link is invalid or expired.',
-            ]);
-        }
-
-        $stmt = ve_db()->prepare('UPDATE users SET password_hash = :password_hash, updated_at = :updated_at WHERE id = :id');
-        $stmt->execute([
-            ':password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            ':updated_at' => ve_now(),
-            ':id' => (int) $reset['user_id'],
-        ]);
-
-        $consume = ve_db()->prepare('UPDATE password_reset_tokens SET used_at = :used_at WHERE id = :id');
-        $consume->execute([
-            ':used_at' => ve_now(),
-            ':id' => (int) $reset['id'],
-        ]);
-
-        ve_add_notification((int) $reset['user_id'], 'Password updated', 'Your account password was reset successfully.');
-
-        ve_json([
-            'status' => 'ok',
-            'message' => 'Password updated successfully. You can log in now.',
-        ]);
-    }
-
-    $login = trim((string) ($_POST['usr_login'] ?? ''));
-
-    if ($login === '') {
-        ve_json([
-            'status' => 'fail',
-            'message' => 'Enter your username or email address.',
-        ]);
-    }
-
-    $user = ve_find_user_by_login($login);
-
-    if (!is_array($user) || $user['deleted_at'] !== null) {
-        ve_json([
-            'status' => 'ok',
-            'message' => 'If the account exists, password reset instructions were generated.',
-        ]);
-    }
-
-    $rawToken = ve_random_token(24);
-    $stmt = ve_db()->prepare(
-        'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, used_at, created_at)
-         VALUES (:user_id, :token_hash, :expires_at, NULL, :created_at)'
-    );
-    $stmt->execute([
-        ':user_id' => (int) $user['id'],
-        ':token_hash' => hash('sha256', $rawToken),
-        ':expires_at' => gmdate('Y-m-d H:i:s', ve_timestamp() + 3600),
-        ':created_at' => ve_now(),
-    ]);
-
-    $resetUrl = ve_absolute_url('/reset-password?token=' . rawurlencode($rawToken));
-    ve_add_notification((int) $user['id'], 'Password reset requested', 'A password reset link was generated for your account.');
-
-    ve_json([
-        'status' => 'ok',
-        'message' => 'Reset link generated. <a href="' . ve_h($resetUrl) . '">Open the password reset page</a>.',
-    ]);
-}
-
 function ve_normalize_domain_list(string $rawDomains): array
 {
     $domains = preg_split('/\s*,\s*/', trim($rawDomains), -1, PREG_SPLIT_NO_EMPTY);
@@ -3216,6 +3139,23 @@ function ve_save_ad_settings(int $userId): void
 
     if (!in_array($popType, ['1', '2'], true)) {
         ve_fail_form_submission('Choose a valid popup type.', '/dashboard/settings#premium_settings');
+    }
+
+    $advertisingEnabled = ve_premium_bandwidth_settings_configured([
+        'vast_url' => $vastUrl,
+        'pop_url' => $popUrl,
+    ]);
+
+    if ($advertisingEnabled) {
+        $bandwidth = ve_premium_bandwidth_totals($userId);
+
+        if ((int) ($bandwidth['purchased_bytes'] ?? 0) <= 0) {
+            ve_fail_form_submission(
+                'Own adverts require premium bandwidth. Purchase premium bandwidth before enabling VAST or popup ads.',
+                '/dashboard/settings#premium_settings',
+                403
+            );
+        }
     }
 
     $stmt = ve_db()->prepare(
@@ -3882,11 +3822,20 @@ function ve_runtime_script_tag(): string
 function ve_runtime_html_transform(string $html, string $relativePath = ''): string
 {
     $runtimeScript = ve_runtime_script_tag();
+    $mainScriptUrl = ve_h(ve_url('/assets/js/main.js'));
+    $legacyAdapterTag = '<script src="' . ve_h(ve_url('/assets/js/legacy_api_adapter.js')) . '"></script>';
 
     if (str_contains($html, '</head>')) {
         $html = str_replace('</head>', $runtimeScript . '</head>', $html);
     } else {
         $html = $runtimeScript . $html;
+    }
+
+    $html = str_replace('src="/assets/js/main__q_8bb33b25bfc8.js"', 'src="' . $mainScriptUrl . '"', $html);
+    $html = str_replace('src="/assets/js/main__q_1404624346b5.js"', 'src="' . $mainScriptUrl . '"', $html);
+
+    if ($relativePath !== '' && str_starts_with($relativePath, 'dashboard/') && str_contains($html, '</head>')) {
+        $html = str_replace('</head>', $legacyAdapterTag . '</head>', $html);
     }
 
     if ($relativePath !== '' && str_starts_with($relativePath, 'dashboard/')) {
@@ -3897,24 +3846,32 @@ function ve_runtime_html_transform(string $html, string $relativePath = ''): str
         }
 
         $html = str_replace('href="/?op=logout"', 'href="/logout"', $html);
+        $html = str_replace('href="/logout" class="nav-link"', 'href="/logout" class="nav-link logout"', $html);
+        $html = str_replace('href="/logout" class="dropdown-item"', 'href="/logout" class="dropdown-item logout"', $html);
+        $html = str_replace("href='/logout' class='nav-link'", "href='/logout' class='nav-link logout'", $html);
+        $html = str_replace("href='/logout' class='dropdown-item'", "href='/logout' class='dropdown-item logout'", $html);
     }
 
     if ($relativePath === 'index.html') {
         $html = str_replace(
             '<form method="POST" action="/" name="FL" class="js_auth">',
-            '<form method="POST" action="/login" name="FL" class="js_auth">',
+            '<form method="POST" action="/api/auth/login" name="FL" class="js_auth">',
             $html
         );
         $html = str_replace(
             '<form method="POST" onSubmit="return CheckForm(this)" class="js_auth">',
-            '<form method="POST" action="/register" onSubmit="return CheckForm(this)" class="js_auth">',
+            '<form method="POST" action="/api/auth/register" onSubmit="return CheckForm(this)" class="js_auth">',
             $html
         );
         $html = str_replace(
             '<form method="POST" class="js_auth">',
-            '<form method="POST" action="/password/forgot" class="js_auth">',
+            '<form method="POST" action="/api/auth/forgot" class="js_auth">',
             $html
         );
+    }
+
+    if ($relativePath === 'dashboard/request-payout.html') {
+        $html = str_replace('<form method="POST">', '<form method="POST" action="/api/payouts/request">', $html);
     }
 
     return $html;
@@ -4015,7 +3972,7 @@ function ve_settings_bind_delete_account_form(string $html): string
         $attributes = $matches[1];
         $attributes = preg_replace('/\saction="[^"]*"/i', '', $attributes) ?? $attributes;
 
-        return '<form class="delete-account-form js-settings-form"' . $attributes . ' action="/account/delete">' . "\n                        "
+        return '<form class="delete-account-form js-settings-form"' . $attributes . ' action="/api/account/delete">' . "\n                        "
             . '<input type="hidden" name="token" value="' . $token . '">' . "\n                        "
             . '<div class="settings-inline-feedback alert d-none js-form-feedback" role="alert"></div>' . "\n                        ";
     }, $html, 1);
@@ -4280,7 +4237,7 @@ function ve_settings_script(): string
         }
 
         function isManagedSettingsAction(action) {
-            return /^\/account\/(settings|password|email|player|advertising|api-settings)$/.test(action || '');
+            return /^\/api\/account\/(profile|password|email|player|ads|api)$/.test(action || '');
         }
 
         function handleAjaxError(xhr, fallbackMessage) {
@@ -4670,11 +4627,11 @@ function ve_settings_script(): string
             }).done(function (response) {
                 var messageType = response.status === 'warning' ? 'warning' : 'success';
 
-                if (action === '/account/player' && response.player) {
+                if (action === '/api/account/player' && response.player) {
                     applyPlayerSnapshot(response.player);
                 }
 
-                if (action === '/account/api-settings' && response.api) {
+                if (action === '/api/account/api' && response.api) {
                     applyApiSnapshot(response.api);
                 }
 
@@ -4685,21 +4642,21 @@ function ve_settings_script(): string
 
                 showFormFeedback(\$form, messageType, response.message || 'Saved successfully.');
 
-                if (action === '/account/password') {
+                if (action === '/api/account/password') {
                     \$form.trigger('reset');
                 }
 
-                if (action === '/account/email' && response.email) {
+                if (action === '/api/account/email' && response.email) {
                     \$form.closest('.settings-panel').find('p.mb-4').html('Current email: <b>' + escapeHtml(response.email) + '</b>');
                     \$form.find('input[name="usr_email"], input[name="usr_email2"]').val('');
                 }
 
-                if (action === '/account/player') {
+                if (action === '/api/account/player') {
                     resetCustomFileInput(\$form.find('#logo_image'));
                     resetCustomFileInput(\$form.find('#splash_image'));
                 }
             }).fail(function (xhr) {
-                if (action === '/account/player' && xhr && xhr.responseJSON && xhr.responseJSON.player) {
+                if (action === '/api/account/player' && xhr && xhr.responseJSON && xhr.responseJSON.player) {
                     applyPlayerSnapshot(xhr.responseJSON.player);
                     resetCustomFileInput(\$form.find('#logo_image'));
                     resetCustomFileInput(\$form.find('#splash_image'));
@@ -4733,7 +4690,7 @@ function ve_settings_script(): string
 
             $.ajax({
                 type: 'POST',
-                url: appUrl('/account/delete'),
+                url: appUrl('/api/account/delete'),
                 dataType: 'json',
                 headers: csrfAjaxHeaders(),
                 data: $.param(payload)
@@ -4807,7 +4764,7 @@ function ve_settings_script(): string
 
             $.ajax({
                 type: 'POST',
-                url: appUrl('/account/api-key/regenerate'),
+                url: appUrl('/api/account/key'),
                 dataType: 'json',
                 headers: csrfAjaxHeaders(),
                 data: {
@@ -4913,12 +4870,12 @@ function ve_render_settings_page(): void
         'This workflow immediately closes the account, revokes active sessions, and prevents future logins.',
         $html
     );
-    $html = ve_settings_bind_form($html, 'my_account', '/account/settings');
-    $html = ve_settings_bind_form($html, 'my_password', '/account/password');
-    $html = ve_settings_bind_form($html, 'my_email', '/account/email');
-    $html = ve_settings_bind_form($html, 'upload_logo', '/account/player');
-    $html = ve_settings_bind_form($html, 'premium_settings', '/account/advertising');
-    $html = ve_settings_bind_form($html, 'api_settings', '/account/api-settings');
+    $html = ve_settings_bind_form($html, 'my_account', '/api/account/profile');
+    $html = ve_settings_bind_form($html, 'my_password', '/api/account/password');
+    $html = ve_settings_bind_form($html, 'my_email', '/api/account/email');
+    $html = ve_settings_bind_form($html, 'upload_logo', '/api/account/player');
+    $html = ve_settings_bind_form($html, 'premium_settings', '/api/account/ads');
+    $html = ve_settings_bind_form($html, 'api_settings', '/api/account/api');
     $html = ve_settings_bind_delete_account_form($html);
     $html = str_replace('<div id="delete-account-feedback" class="settings-inline-feedback"></div>', '', $html);
     $html = preg_replace('/\sdisabled(?:="disabled")?/i', '', $html) ?? $html;
@@ -4975,12 +4932,12 @@ function ve_dashboard_premium_plans_content(array $user): string
     $planCode = ucfirst(ve_user_plan_code($user));
     $premiumUntil = trim((string) ($user['premium_until'] ?? ''));
     $renewalLabel = $premiumUntil !== '' ? ve_format_datetime_label($premiumUntil, 'Active') : (ve_user_is_premium($user) ? 'Active' : 'Upgrade any time');
-    $monthlyCheckoutUrl = ve_h(ve_url('/?op=payments&amount=7.99'));
-    $halfYearCheckoutUrl = ve_h(ve_url('/?op=payments&amount=37.99'));
-    $yearlyCheckoutUrl = ve_h(ve_url('/?op=payments&amount=77.99'));
-    $bandwidth500Url = ve_h(ve_url('/?op=payments&amount=9.99'));
-    $bandwidth2000Url = ve_h(ve_url('/?op=payments&amount=24.99'));
-    $bandwidth5000Url = ve_h(ve_url('/?op=payments&amount=54.99'));
+    $monthlyCheckoutUrl = ve_h(ve_url('/api/billing/paypal?amount=7.99'));
+    $halfYearCheckoutUrl = ve_h(ve_url('/api/billing/paypal?amount=37.99'));
+    $yearlyCheckoutUrl = ve_h(ve_url('/api/billing/paypal?amount=77.99'));
+    $bandwidth500Url = ve_h(ve_url('/api/billing/paypal?amount=9.99&premium_bw=1'));
+    $bandwidth2000Url = ve_h(ve_url('/api/billing/paypal?amount=24.99&premium_bw=1'));
+    $bandwidth5000Url = ve_h(ve_url('/api/billing/paypal?amount=54.99&premium_bw=1'));
 
     return <<<HTML
 <style type="text/css">
@@ -5348,106 +5305,6 @@ function ve_render_premium_plans_page(): void
     ve_html(ve_rewrite_html_paths($html));
 }
 
-function ve_dashboard_reports_rows_html(array $rows): string
-{
-    $htmlRows = [];
-
-    foreach ($rows as $row) {
-        if (!is_array($row)) {
-            continue;
-        }
-
-        $htmlRows[] = sprintf(
-            '<tr> <td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td> </tr>',
-            ve_h((string) ($row['date'] ?? '')),
-            number_format((int) ($row['views'] ?? 0)),
-            ve_h((string) ($row['profit'] ?? '$0.00000')),
-            ve_h((string) ($row['referral_share'] ?? '$0.00000')),
-            ve_h((string) ($row['traffic'] ?? '0 B')),
-            ve_h((string) ($row['total'] ?? '$0.00000'))
-        );
-    }
-
-    if ($htmlRows === []) {
-        return '<tr> <td></td> <td>0</td> <td>$0.00000</td> <td>$0.00000</td> <td>0 B</td> <td>$0.00000</td> </tr>';
-    }
-
-    return implode(' ', $htmlRows);
-}
-
-function ve_dashboard_reports_footer_html(array $totals): string
-{
-    return sprintf(
-        '<tr> <td></td> <td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td> <td>%s</td> </tr>',
-        number_format((int) ($totals['views'] ?? 0)),
-        ve_h((string) ($totals['profit'] ?? '$0.00000')),
-        ve_h((string) ($totals['referral_share'] ?? '$0.00000')),
-        ve_h((string) ($totals['traffic'] ?? '0 B')),
-        ve_h((string) ($totals['total'] ?? '$0.00000'))
-    );
-}
-
-function ve_dashboard_reports_chart_script(array $chart): string
-{
-    $points = [];
-
-    foreach ($chart as $entry) {
-        if (!is_array($entry)) {
-            continue;
-        }
-
-        $points[] = [
-            'time' => (string) ($entry['time'] ?? ''),
-            'views' => (int) ($entry['views'] ?? 0),
-            'refs' => round(((int) ($entry['earned_micro_usd'] ?? 0)) / 1000000, 5),
-        ];
-    }
-
-    $chartJson = json_encode($points, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-
-    if (!is_string($chartJson)) {
-        $chartJson = '[]';
-    }
-
-    return '<script type="text/javascript"> $(document).ready(function() { var data = ' . $chartJson
-        . '; if (!window.Morris || !Array.isArray(data)) { return; } Morris.Line({ element: \'reports_chart\', data: data, xkey: \'time\', ykeys: [\'views\', \'refs\'], labels: [\'Views \', \'Profit \'], hideHover: \'auto\', behaveLikeLine: true, resize: true, parseTime: false, pointFillColors:[\'#ff9900\',\'#42b983\'], pointStrokeColors: [\'#ff9900\',\'#42b983\'], lineColors:[\'#ff9900\',\'#42b983\'] }); }); </script>';
-}
-
-function ve_render_reports_page(): void
-{
-    $user = ve_require_auth();
-    $from = isset($_GET['from']) ? (string) $_GET['from'] : (isset($_GET['date1']) ? (string) $_GET['date1'] : null);
-    $to = isset($_GET['to']) ? (string) $_GET['to'] : (isset($_GET['date2']) ? (string) $_GET['date2'] : null);
-    $snapshot = ve_dashboard_reports_snapshot((int) $user['id'], $from, $to);
-    $range = is_array($snapshot['range'] ?? null) ? $snapshot['range'] : ['from' => gmdate('Y-m-d'), 'to' => gmdate('Y-m-d')];
-    $html = (string) file_get_contents(ve_root_path('dashboard', 'reports.html'));
-    $html = ve_runtime_html_transform($html, 'dashboard/reports.html');
-    $html = ve_html_set_input_value($html, 'date1', (string) ($range['from'] ?? ''));
-    $html = ve_html_set_input_value($html, 'date2', (string) ($range['to'] ?? ''));
-    $rowsHtml = ve_dashboard_reports_rows_html((array) ($snapshot['rows'] ?? []));
-    $footerHtml = ve_dashboard_reports_footer_html((array) ($snapshot['totals'] ?? []));
-    $html = preg_replace_callback(
-        '/(<table id="datatable"[^>]*>[\s\S]*?<tbody>)[\s\S]*?(<\/tbody>)/i',
-        static fn (array $matches): string => $matches[1] . ' ' . $rowsHtml . ' ' . $matches[2],
-        $html,
-        1
-    ) ?? $html;
-    $html = preg_replace_callback(
-        '/(<table id="datatable"[^>]*>[\s\S]*?<tfoot>)[\s\S]*?(<\/tfoot>)/i',
-        static fn (array $matches): string => $matches[1] . ' ' . $footerHtml . ' ' . $matches[2],
-        $html,
-        1
-    ) ?? $html;
-    $html = preg_replace(
-        '/<script type="text\/javascript">\s*\$\(document\)\.ready\(function\(\)\s*\{[\s\S]*?<\/script>/i',
-        ve_dashboard_reports_chart_script((array) ($snapshot['chart'] ?? [])),
-        $html,
-        1
-    ) ?? $html;
-
-    ve_html(ve_rewrite_html_paths($html));
-}
-
 function ve_render_dashboard_file(string $relativePath): void
 {
     if ($relativePath === 'dashboard/premium-plans.html') {
@@ -5467,6 +5324,7 @@ function ve_render_reset_password_page(string $token): void
 {
     $reset = ve_get_valid_reset_token($token);
     $homeUrl = ve_url('/');
+    $resetUrl = ve_url('/api/auth/reset');
     $mainJsUrl = ve_url('/assets/js/main.js');
     $bootstrapCss = ve_url('/assets/css/bootstrap.min.css');
     $styleCss = ve_url('/assets/css/style.min.css');
@@ -5512,7 +5370,7 @@ HTML);
                 <h4 class="title">Reset your password</h4>
                 <p class="text-light">Choose a new password for your dashboard account.</p>
             </div>
-            <form method="POST" class="js_auth" style="flex:1 1 360px;">
+            <form method="POST" action="{$resetUrl}" class="js_auth" style="flex:1 1 360px;">
                 <input type="hidden" name="op" value="reset_pass">
                 <input type="hidden" name="sess_id" value="{$token}">
                 <div class="form-group">
