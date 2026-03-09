@@ -1063,6 +1063,61 @@ function ve_admin_request_page(): int
     return max(1, $page);
 }
 
+function ve_admin_backend_subview_catalog(): array
+{
+    return [
+        'overview-service' => ['section' => 'overview'],
+        'overview-users' => ['section' => 'overview'],
+        'overview-usage' => ['section' => 'overview'],
+        'overview-traffic' => ['section' => 'overview'],
+        'users-directory' => ['section' => 'users'],
+        'users-profile' => ['section' => 'users'],
+        'users-charts' => ['section' => 'users'],
+        'users-sessions' => ['section' => 'users'],
+        'users-billing' => ['section' => 'users'],
+        'users-related' => ['section' => 'users'],
+        'videos-library' => ['section' => 'videos'],
+        'videos-detail' => ['section' => 'videos'],
+        'remote-uploads-queue' => ['section' => 'remote-uploads'],
+        'remote-uploads-detail' => ['section' => 'remote-uploads'],
+        'dmca-queue' => ['section' => 'dmca'],
+        'dmca-detail' => ['section' => 'dmca'],
+        'dmca-events' => ['section' => 'dmca'],
+        'payouts-queue' => ['section' => 'payouts'],
+        'payouts-detail' => ['section' => 'payouts'],
+        'payouts-transfer' => ['section' => 'payouts'],
+        'domains-directory' => ['section' => 'domains'],
+        'domains-detail' => ['section' => 'domains'],
+        'app-general' => ['section' => 'app'],
+        'app-roles' => ['section' => 'app'],
+        'app-permissions' => ['section' => 'app'],
+        'infra-nodes' => ['section' => 'infrastructure'],
+        'infra-volumes' => ['section' => 'infrastructure'],
+        'infra-endpoints' => ['section' => 'infrastructure'],
+        'infra-delivery' => ['section' => 'infrastructure'],
+        'infra-maintenance' => ['section' => 'infrastructure'],
+        'audit-feed' => ['section' => 'audit'],
+        'audit-detail' => ['section' => 'audit'],
+    ];
+}
+
+function ve_admin_default_subview(string $section, int $resourceId = 0): string
+{
+    return match ($section) {
+        'overview' => 'overview-service',
+        'users' => $resourceId > 0 ? 'users-profile' : 'users-directory',
+        'videos' => $resourceId > 0 ? 'videos-detail' : 'videos-library',
+        'remote-uploads' => $resourceId > 0 ? 'remote-uploads-detail' : 'remote-uploads-queue',
+        'dmca' => $resourceId > 0 ? 'dmca-detail' : 'dmca-queue',
+        'payouts' => $resourceId > 0 ? 'payouts-detail' : 'payouts-queue',
+        'domains' => $resourceId > 0 ? 'domains-detail' : 'domains-directory',
+        'app' => 'app-general',
+        'infrastructure' => 'infra-nodes',
+        'audit' => $resourceId > 0 ? 'audit-detail' : 'audit-feed',
+        default => $section,
+    };
+}
+
 function ve_admin_request_path_info(): array
 {
     $path = ve_request_path();
@@ -1078,15 +1133,29 @@ function ve_admin_request_path_info(): array
 
     $suffix = trim(substr($path, strlen($prefix)) ?: '', '/');
     $segments = $suffix === '' ? [] : array_values(array_filter(explode('/', $suffix), static fn ($segment): bool => $segment !== ''));
-    $section = $segments[0] ?? 'overview';
+    $catalog = ve_admin_backend_subview_catalog();
+    $firstSegment = $segments[0] ?? '';
+    $subsection = '';
+    $section = 'overview';
+    $resource = '';
 
-    if ($section === 'overview') {
-        $section = 'overview';
+    if ($firstSegment === '') {
+        $subsection = ve_admin_default_subview('overview');
+    } elseif (isset($catalog[$firstSegment])) {
+        $subsection = $firstSegment;
+        $section = (string) ($catalog[$firstSegment]['section'] ?? 'overview');
+        $resource = isset($segments[1]) ? rawurldecode((string) $segments[1]) : '';
+    } else {
+        $section = $firstSegment;
+        $resource = isset($segments[1]) ? rawurldecode((string) $segments[1]) : '';
+        $resourceId = ctype_digit($resource) ? (int) $resource : 0;
+        $subsection = ve_admin_default_subview($section, $resourceId);
     }
 
     return [
         'section' => $section,
-        'resource' => isset($segments[1]) ? rawurldecode((string) $segments[1]) : '',
+        'subsection' => $subsection,
+        'resource' => $resource,
         'segments' => $segments,
     ];
 }
@@ -1100,6 +1169,48 @@ function ve_admin_current_resource_id(): int
 {
     $resource = ve_admin_current_resource_token();
     return ctype_digit($resource) ? (int) $resource : 0;
+}
+
+function ve_admin_current_subview_slug(?string $section = null): string
+{
+    $pathInfo = ve_admin_request_path_info();
+    $resourceId = ve_admin_current_resource_id();
+    $currentSection = (string) ($pathInfo['section'] ?? 'overview');
+    $subsection = trim((string) ($pathInfo['subsection'] ?? ''));
+
+    if ($section !== null && $section !== '' && $section !== $currentSection) {
+        return ve_admin_default_subview($section, $resourceId);
+    }
+
+    if ($subsection !== '') {
+        return $subsection;
+    }
+
+    return ve_admin_default_subview($currentSection, $resourceId);
+}
+
+function ve_admin_subsection_url(string $subsection, string|int|null $resource = null, array $overrides = [], bool $preserveCurrent = false): string
+{
+    $params = $preserveCurrent ? $_GET : [];
+
+    foreach ($overrides as $key => $value) {
+        if ($value === null || $value === '') {
+            unset($params[$key]);
+            continue;
+        }
+
+        $params[$key] = $value;
+    }
+
+    $path = '/backend/' . rawurlencode($subsection);
+
+    if ($resource !== null && (string) $resource !== '') {
+        $path .= '/' . rawurlencode((string) $resource);
+    }
+
+    $query = http_build_query($params);
+
+    return ve_url($path . ($query !== '' ? '?' . $query : ''));
 }
 
 function ve_admin_url(array $overrides = [], bool $preserveCurrent = true): string
@@ -1154,10 +1265,15 @@ function ve_admin_pagination_html(int $page, int $totalRows, int $pageSize): str
     }
 
     $items = [];
+    $pathInfo = ve_admin_request_path_info();
+    $currentSubsection = trim((string) ($pathInfo['subsection'] ?? ''));
+    $currentResource = trim((string) ($pathInfo['resource'] ?? ''));
 
     for ($i = 1; $i <= $totalPages; $i++) {
         $active = $i === $page ? ' active' : '';
-        $url = ve_h(ve_admin_url(['page' => $i]));
+        $url = $currentSubsection !== ''
+            ? ve_h(ve_admin_subsection_url($currentSubsection, $currentResource !== '' ? $currentResource : null, ['page' => $i], true))
+            : ve_h(ve_admin_url(['page' => $i]));
         $items[] = '<li class="page-item' . $active . '"><a class="page-link" href="' . $url . '">' . $i . '</a></li>';
     }
 
@@ -2647,7 +2763,7 @@ function ve_admin_backend_header_nav_html(array $actorUser, string $activeSectio
         $icon = ve_h((string) ($section['icon'] ?? 'fa-circle'));
         $label = ve_h((string) ($section['label'] ?? ucfirst($code)));
         $url = ve_h(ve_admin_url(['section' => $code, 'resource' => null, 'page' => null], false));
-        $items[] = '<li class="nav-item"><a href="' . $url . '" class="nav-link' . $activeClass . '"><i class="fad ' . $icon . '"></i><span>' . $label . '</span></a></li>';
+        $items[] = '<li class="nav-item"><a href="' . $url . '" data-admin-nav="1" class="nav-link' . $activeClass . '"><i class="fad ' . $icon . '"></i><span>' . $label . '</span></a></li>';
     }
 
     return implode('', $items);
@@ -2945,10 +3061,46 @@ function ve_admin_dashboard_shell(
             color: #8f8f8f;
             margin-bottom: 18px;
         }
+        .admin-shell .admin-chart-frame {
+            position: relative;
+        }
         .admin-shell .admin-chart-svg {
             width: 100%;
             height: auto;
             display: block;
+        }
+        .admin-shell .admin-chart-hit {
+            pointer-events: all;
+        }
+        .admin-shell .admin-chart-tooltip {
+            position: absolute;
+            left: 0;
+            top: 0;
+            z-index: 4;
+            min-width: 148px;
+            padding: 10px 12px;
+            background: #101010;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #f2f2f2;
+            pointer-events: none;
+            transform: translate(-50%, calc(-100% - 12px));
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+        }
+        .admin-shell .admin-chart-tooltip strong,
+        .admin-shell .admin-chart-tooltip span,
+        .admin-shell .admin-chart-tooltip small {
+            display: block;
+        }
+        .admin-shell .admin-chart-tooltip span {
+            color: #ffb347;
+            font-size: .78rem;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+        }
+        .admin-shell .admin-chart-tooltip small {
+            color: #8f8f8f;
+            margin-top: 4px;
         }
         .admin-shell .admin-chart-grid line {
             stroke: rgba(255, 255, 255, 0.08);
@@ -3048,6 +3200,10 @@ function ve_admin_dashboard_shell(
             flex-wrap: wrap;
             gap: 10px;
             margin-top: 18px;
+        }
+        .admin-shell.is-loading {
+            opacity: .6;
+            transition: opacity .18s ease;
         }
         .admin-shell .admin-list-tight li {
             padding: 12px 0;
@@ -3178,7 +3334,7 @@ CSS;
         <div class="container-fluid"><ul class="nav justify-content-center">{$currentUser['mobile_nav_html']}</ul></div>
     </nav>
 
-    <div class="container-fluid pt-3 pt-sm-5 mt-sm-5 admin-shell">
+    <div class="container-fluid pt-3 pt-sm-5 mt-sm-5 admin-shell" data-admin-shell="1">
         {$widgetsHtml}
         {$impersonationBanner}
         {$flashHtml}
@@ -3356,7 +3512,14 @@ HTML;
 
 function ve_admin_return_to_input_html(): string
 {
-    return '<input type="hidden" name="return_to" value="' . ve_h(ve_admin_url([], true)) . '">';
+    $pathInfo = ve_admin_request_path_info();
+    $subsection = trim((string) ($pathInfo['subsection'] ?? ''));
+    $resource = trim((string) ($pathInfo['resource'] ?? ''));
+    $url = $subsection !== ''
+        ? ve_admin_subsection_url($subsection, $resource !== '' ? $resource : null, [], true)
+        : ve_admin_url([], true);
+
+    return '<input type="hidden" name="return_to" value="' . ve_h($url) . '">';
 }
 
 function ve_admin_backend_sidebar_intro_html(array $actorUser, string $activeSection): string
@@ -3381,6 +3544,7 @@ function ve_admin_backend_sidebar_menu_html(array $actorUser, string $activeSect
     unset($actorUser);
 
     $resourceId = ve_admin_current_resource_id();
+    $activeSubview = ve_admin_current_subview_slug($activeSection);
     $items = [];
     $selectedVideo = $activeSection === 'videos' && $resourceId > 0 ? ve_admin_video_detail($resourceId) : null;
     $selectedRemote = $activeSection === 'remote-uploads' && $resourceId > 0 ? ve_admin_remote_upload_detail($resourceId) : null;
@@ -3389,72 +3553,74 @@ function ve_admin_backend_sidebar_menu_html(array $actorUser, string $activeSect
 
     $definitions = match ($activeSection) {
         'overview' => [
-            ['label' => 'Service totals', 'icon' => 'fa-chart-network', 'url' => '#overview-service', 'active' => true],
-            ['label' => 'User trends', 'icon' => 'fa-users', 'url' => '#overview-users'],
-            ['label' => 'Usage trends', 'icon' => 'fa-waveform-path', 'url' => '#overview-usage'],
-            ['label' => 'Traffic trends', 'icon' => 'fa-signal-stream', 'url' => '#overview-traffic'],
+            ['label' => 'Service totals', 'icon' => 'fa-chart-network', 'slug' => 'overview-service'],
+            ['label' => 'User trends', 'icon' => 'fa-users', 'slug' => 'overview-users'],
+            ['label' => 'Usage trends', 'icon' => 'fa-waveform-path', 'slug' => 'overview-usage'],
+            ['label' => 'Traffic trends', 'icon' => 'fa-signal-stream', 'slug' => 'overview-traffic'],
         ],
         'users' => [
-            ['label' => 'Directory', 'icon' => 'fa-list', 'url' => '#users-directory', 'active' => true],
-            ['label' => 'Profile', 'icon' => 'fa-id-card', 'url' => $resourceId > 0 ? '#users-profile' : '#users-directory'],
-            ['label' => 'Charts', 'icon' => 'fa-chart-line', 'url' => $resourceId > 0 ? '#users-charts' : '#users-directory'],
-            ['label' => 'Sessions', 'icon' => 'fa-user-clock', 'url' => $resourceId > 0 ? '#users-sessions' : '#users-directory'],
-            ['label' => 'Billing', 'icon' => 'fa-wallet', 'url' => $resourceId > 0 ? '#users-billing' : '#users-directory'],
-            ['label' => 'Related records', 'icon' => 'fa-diagram-project', 'url' => $resourceId > 0 ? '#users-related' : '#users-directory'],
+            ['label' => 'Directory', 'icon' => 'fa-list', 'slug' => 'users-directory'],
+            ['label' => 'Profile', 'icon' => 'fa-id-card', 'slug' => $resourceId > 0 ? 'users-profile' : 'users-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Charts', 'icon' => 'fa-chart-line', 'slug' => $resourceId > 0 ? 'users-charts' : 'users-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Sessions', 'icon' => 'fa-user-clock', 'slug' => $resourceId > 0 ? 'users-sessions' : 'users-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Billing', 'icon' => 'fa-wallet', 'slug' => $resourceId > 0 ? 'users-billing' : 'users-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Related records', 'icon' => 'fa-diagram-project', 'slug' => $resourceId > 0 ? 'users-related' : 'users-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
         ],
         'videos' => [
-            ['label' => 'Library', 'icon' => 'fa-photo-video', 'url' => '#videos-library', 'active' => true],
-            ['label' => 'Selected file', 'icon' => 'fa-file-video', 'url' => $resourceId > 0 ? '#videos-detail' : '#videos-library'],
-            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedVideo) ? ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($selectedVideo['user_id'] ?? 0)], false) : '#videos-library'],
+            ['label' => 'Library', 'icon' => 'fa-photo-video', 'slug' => 'videos-library'],
+            ['label' => 'Selected file', 'icon' => 'fa-file-video', 'slug' => $resourceId > 0 ? 'videos-detail' : 'videos-library', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedVideo) ? ve_admin_subsection_url('users-profile', (int) ($selectedVideo['user_id'] ?? 0)) : ve_admin_subsection_url('videos-library')],
         ],
         'remote-uploads' => [
-            ['label' => 'Queue', 'icon' => 'fa-list-check', 'url' => '#remote-uploads-queue', 'active' => true],
-            ['label' => 'Selected job', 'icon' => 'fa-cloud-arrow-down', 'url' => $resourceId > 0 ? '#remote-uploads-detail' : '#remote-uploads-queue'],
-            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedRemote) ? ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($selectedRemote['user_id'] ?? 0)], false) : '#remote-uploads-queue'],
+            ['label' => 'Queue', 'icon' => 'fa-list-check', 'slug' => 'remote-uploads-queue'],
+            ['label' => 'Selected job', 'icon' => 'fa-cloud-arrow-down', 'slug' => $resourceId > 0 ? 'remote-uploads-detail' : 'remote-uploads-queue', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedRemote) ? ve_admin_subsection_url('users-profile', (int) ($selectedRemote['user_id'] ?? 0)) : ve_admin_subsection_url('remote-uploads-queue')],
         ],
         'dmca' => [
-            ['label' => 'Case queue', 'icon' => 'fa-folder-times', 'url' => '#dmca-queue', 'active' => true],
-            ['label' => 'Case detail', 'icon' => 'fa-scale-balanced', 'url' => $resourceId > 0 ? '#dmca-detail' : '#dmca-queue'],
-            ['label' => 'Event log', 'icon' => 'fa-timeline', 'url' => $resourceId > 0 ? '#dmca-events' : '#dmca-queue'],
+            ['label' => 'Case queue', 'icon' => 'fa-folder-times', 'slug' => 'dmca-queue'],
+            ['label' => 'Case detail', 'icon' => 'fa-scale-balanced', 'slug' => $resourceId > 0 ? 'dmca-detail' : 'dmca-queue', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Event log', 'icon' => 'fa-timeline', 'slug' => $resourceId > 0 ? 'dmca-events' : 'dmca-queue', 'resource' => $resourceId > 0 ? $resourceId : null],
         ],
         'payouts' => [
-            ['label' => 'Queue', 'icon' => 'fa-wallet', 'url' => '#payouts-queue', 'active' => true],
-            ['label' => 'Request detail', 'icon' => 'fa-file-invoice-dollar', 'url' => $resourceId > 0 ? '#payouts-detail' : '#payouts-queue'],
-            ['label' => 'Transfer record', 'icon' => 'fa-money-check-dollar', 'url' => $resourceId > 0 ? '#payouts-transfer' : '#payouts-queue'],
+            ['label' => 'Queue', 'icon' => 'fa-wallet', 'slug' => 'payouts-queue'],
+            ['label' => 'Request detail', 'icon' => 'fa-file-invoice-dollar', 'slug' => $resourceId > 0 ? 'payouts-detail' : 'payouts-queue', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Transfer record', 'icon' => 'fa-money-check-dollar', 'slug' => $resourceId > 0 ? 'payouts-transfer' : 'payouts-queue', 'resource' => $resourceId > 0 ? $resourceId : null],
         ],
         'domains' => [
-            ['label' => 'Directory', 'icon' => 'fa-globe', 'url' => '#domains-directory', 'active' => true],
-            ['label' => 'Domain detail', 'icon' => 'fa-magnifying-glass', 'url' => $resourceId > 0 ? '#domains-detail' : '#domains-directory'],
-            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedDomain) ? ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($selectedDomain['user_id'] ?? 0)], false) : '#domains-directory'],
+            ['label' => 'Directory', 'icon' => 'fa-globe', 'slug' => 'domains-directory'],
+            ['label' => 'Domain detail', 'icon' => 'fa-magnifying-glass', 'slug' => $resourceId > 0 ? 'domains-detail' : 'domains-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedDomain) ? ve_admin_subsection_url('users-profile', (int) ($selectedDomain['user_id'] ?? 0)) : ve_admin_subsection_url('domains-directory')],
         ],
         'app' => [
-            ['label' => 'General', 'icon' => 'fa-sliders-h', 'url' => '#app-general', 'active' => true],
-            ['label' => 'Roles', 'icon' => 'fa-user-shield', 'url' => '#app-roles'],
-            ['label' => 'Permissions', 'icon' => 'fa-key-skeleton-left-right', 'url' => '#app-permissions'],
+            ['label' => 'General', 'icon' => 'fa-sliders-h', 'slug' => 'app-general'],
+            ['label' => 'Roles', 'icon' => 'fa-user-shield', 'slug' => 'app-roles'],
+            ['label' => 'Permissions', 'icon' => 'fa-key-skeleton-left-right', 'slug' => 'app-permissions'],
         ],
         'infrastructure' => [
-            ['label' => 'Nodes', 'icon' => 'fa-server', 'url' => '#infra-nodes', 'active' => true],
-            ['label' => 'Volumes', 'icon' => 'fa-hard-drive', 'url' => '#infra-volumes'],
-            ['label' => 'Upload endpoints', 'icon' => 'fa-arrow-up-from-bracket', 'url' => '#infra-endpoints'],
-            ['label' => 'Delivery domains', 'icon' => 'fa-globe-pointer', 'url' => '#infra-delivery'],
-            ['label' => 'Maintenance', 'icon' => 'fa-screwdriver-wrench', 'url' => '#infra-maintenance'],
+            ['label' => 'Nodes', 'icon' => 'fa-server', 'slug' => 'infra-nodes'],
+            ['label' => 'Volumes', 'icon' => 'fa-hard-drive', 'slug' => 'infra-volumes'],
+            ['label' => 'Upload endpoints', 'icon' => 'fa-arrow-up-from-bracket', 'slug' => 'infra-endpoints'],
+            ['label' => 'Delivery domains', 'icon' => 'fa-globe-pointer', 'slug' => 'infra-delivery'],
+            ['label' => 'Maintenance', 'icon' => 'fa-screwdriver-wrench', 'slug' => 'infra-maintenance'],
         ],
         'audit' => [
-            ['label' => 'Log feed', 'icon' => 'fa-clipboard-list', 'url' => '#audit-feed', 'active' => true],
-            ['label' => 'Selected event', 'icon' => 'fa-magnifying-glass-chart', 'url' => $resourceId > 0 ? '#audit-detail' : '#audit-feed'],
-            ['label' => 'Target record', 'icon' => 'fa-arrow-up-right-from-square', 'url' => is_array($selectedAudit) ? ve_admin_audit_target_url($selectedAudit) : '#audit-feed'],
+            ['label' => 'Log feed', 'icon' => 'fa-clipboard-list', 'slug' => 'audit-feed'],
+            ['label' => 'Selected event', 'icon' => 'fa-magnifying-glass-chart', 'slug' => $resourceId > 0 ? 'audit-detail' : 'audit-feed', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Target record', 'icon' => 'fa-arrow-up-right-from-square', 'url' => is_array($selectedAudit) ? ve_admin_audit_target_url($selectedAudit) : ve_admin_subsection_url('audit-feed')],
         ],
         default => [
-            ['label' => 'Section', 'icon' => 'fa-circle', 'url' => '#', 'active' => true],
+            ['label' => 'Section', 'icon' => 'fa-circle', 'slug' => ve_admin_default_subview($activeSection)],
         ],
     };
 
-    foreach ($definitions as $index => $definition) {
-        $url = trim((string) ($definition['url'] ?? '#'));
-        $activeClass = !empty($definition['active']) || ($index === 0 && !array_key_exists('active', $definition)) ? ' active' : '';
+    foreach ($definitions as $definition) {
+        $slug = trim((string) ($definition['slug'] ?? ''));
+        $resource = $definition['resource'] ?? null;
+        $url = trim((string) ($definition['url'] ?? ($slug !== '' ? ve_admin_subsection_url($slug, is_int($resource) && $resource > 0 ? $resource : $resource) : '#')));
+        $activeClass = $slug !== '' && $slug === $activeSubview ? ' active' : '';
         $icon = ve_h((string) ($definition['icon'] ?? 'fa-circle'));
         $label = ve_h((string) ($definition['label'] ?? 'Link'));
-        $items[] = '<li><a href="' . ve_h($url) . '" class="d-flex flex-wrap align-items-center' . $activeClass . '"><i class="fad ' . $icon . '"></i><span>' . $label . '</span></a></li>';
+        $items[] = '<li><a href="' . ve_h($url) . '" data-admin-nav="1" class="d-flex flex-wrap align-items-center' . $activeClass . '"><i class="fad ' . $icon . '"></i><span>' . $label . '</span></a></li>';
     }
 
     return implode('', $items);
@@ -4183,6 +4349,59 @@ function ve_admin_service_trend_snapshot(int $lookbackDays = 14): array
     ];
 }
 
+function ve_admin_request_range_days(int $default = 14): int
+{
+    $requested = (int) ($_GET['days'] ?? $default);
+    $allowed = [7, 14, 30, 90];
+
+    return in_array($requested, $allowed, true) ? $requested : $default;
+}
+
+function ve_admin_period_switch_html(array $options, int $currentDays, string $subsection, string|int|null $resource = null): string
+{
+    $items = [];
+
+    foreach ($options as $days) {
+        $className = $days === $currentDays ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-secondary';
+        $items[] = '<a href="' . ve_h(ve_admin_subsection_url($subsection, $resource, ['days' => $days], false)) . '" data-admin-nav="1" class="' . $className . '">' . ve_h((string) $days) . ' days</a>';
+    }
+
+    return '<div class="admin-actions admin-period-switch">' . implode('', $items) . '</div>';
+}
+
+function ve_admin_chart_value_label(int $value, string $format): string
+{
+    return match ($format) {
+        'bytes' => ve_human_bytes($value),
+        'currency' => ve_dashboard_format_currency_micro_usd($value),
+        default => ve_admin_number_label((float) $value, 0),
+    };
+}
+
+function ve_admin_active_subsection_html(string $activeSubview, array $panels, string $fallbackSubview): string
+{
+    if (isset($panels[$activeSubview]) && is_string($panels[$activeSubview])) {
+        return (string) $panels[$activeSubview];
+    }
+
+    if (isset($panels[$fallbackSubview]) && is_string($panels[$fallbackSubview])) {
+        return (string) $panels[$fallbackSubview];
+    }
+
+    foreach ($panels as $panelHtml) {
+        if (is_string($panelHtml) && $panelHtml !== '') {
+            return $panelHtml;
+        }
+    }
+
+    return '';
+}
+
+function ve_admin_subsection_notice_html(string $message): string
+{
+    return '<div class="admin-subsection"><p class="admin-empty">' . ve_h($message) . '</p></div>';
+}
+
 function ve_admin_chart_svg_html(array $points, array $seriesDefinitions): string
 {
     $width = 720.0;
@@ -4222,6 +4441,7 @@ function ve_admin_chart_svg_html(array $points, array $seriesDefinitions): strin
     }
 
     $seriesHtml = '';
+    $hitHtml = '';
 
     foreach ($seriesDefinitions as $series) {
         $key = (string) ($series['key'] ?? '');
@@ -4234,6 +4454,8 @@ function ve_admin_chart_svg_html(array $points, array $seriesDefinitions): strin
         $fill = (string) ($series['fill'] ?? 'none');
         $strokeWidth = (float) ($series['stroke_width'] ?? 2);
         $pointRadius = (float) ($series['point_radius'] ?? 2.5);
+        $seriesLabel = (string) ($series['label'] ?? ucwords(str_replace('_', ' ', $key)));
+        $valueFormat = (string) ($series['format'] ?? 'number');
         $polylinePoints = [];
 
         foreach (array_values($points) as $index => $point) {
@@ -4258,9 +4480,12 @@ function ve_admin_chart_svg_html(array $points, array $seriesDefinitions): strin
 
         foreach (array_values($points) as $index => $point) {
             $value = is_array($point) ? (int) ($point[$key] ?? 0) : 0;
+            $date = is_array($point) ? (string) ($point['date'] ?? '') : '';
+            $dateLabel = $date !== '' ? gmdate('M j, Y', strtotime($date . ' 00:00:00 UTC')) : 'Unknown date';
             $x = $paddingLeft + ($stepX * $index);
             $y = $paddingTop + $plotHeight - (($value / $maxValue) * $plotHeight);
             $seriesHtml .= '<circle cx="' . ve_h((string) $x) . '" cy="' . ve_h((string) $y) . '" r="' . ve_h((string) $pointRadius) . '" fill="' . ve_h($stroke) . '"></circle>';
+            $hitHtml .= '<circle class="admin-chart-hit" cx="' . ve_h((string) $x) . '" cy="' . ve_h((string) $y) . '" r="11" fill="transparent" data-series-label="' . ve_h($seriesLabel) . '" data-date-label="' . ve_h($dateLabel) . '" data-value-label="' . ve_h(ve_admin_chart_value_label($value, $valueFormat)) . '"></circle>';
         }
     }
 
@@ -4279,11 +4504,15 @@ function ve_admin_chart_svg_html(array $points, array $seriesDefinitions): strin
     }
 
     return <<<HTML
-<svg class="admin-chart-svg" viewBox="0 0 720 230" role="img" aria-hidden="true">
-    <g class="admin-chart-grid">{$gridHtml}</g>
-    <g class="admin-chart-series">{$seriesHtml}</g>
-    <g class="admin-chart-labels">{$labels}</g>
-</svg>
+<div class="admin-chart-frame">
+    <svg class="admin-chart-svg" viewBox="0 0 720 230" role="img" aria-hidden="true">
+        <g class="admin-chart-grid">{$gridHtml}</g>
+        <g class="admin-chart-series">{$seriesHtml}</g>
+        <g class="admin-chart-hits">{$hitHtml}</g>
+        <g class="admin-chart-labels">{$labels}</g>
+    </svg>
+    <div class="admin-chart-tooltip" hidden></div>
+</div>
 HTML;
 }
 
@@ -4450,7 +4679,9 @@ function ve_admin_audit_target_url(array $row): string
 function ve_admin_render_overview_section_deep(): string
 {
     $snapshot = ve_admin_overview_snapshot();
-    $trend = ve_admin_service_trend_snapshot(14);
+    $activeSubview = ve_admin_current_subview_slug('overview');
+    $rangeDays = ve_admin_request_range_days();
+    $trend = ve_admin_service_trend_snapshot($rangeDays);
     $points = (array) ($trend['points'] ?? []);
     $range = (array) ($trend['range'] ?? []);
     $rangeLabel = ve_h(
@@ -4463,17 +4694,20 @@ function ve_admin_render_overview_section_deep(): string
     $premiumTrafficLabel = ve_h(ve_human_bytes((int) ($trend['premium_traffic_total_bytes'] ?? 0)));
     $revenueLabel = ve_h(ve_dashboard_format_currency_micro_usd((int) ($trend['earned_total_micro_usd'] ?? 0)));
     $payoutDemandLabel = ve_h(ve_dashboard_format_currency_micro_usd((int) ($trend['payout_amount_total_micro_usd'] ?? 0)));
+    $uploadedBytesLabel = ve_h(ve_human_bytes((int) ($trend['uploaded_bytes_total'] ?? 0)));
+    $rangeDaysLabel = ve_h((string) $rangeDays);
+    $periodSwitchHtml = ve_admin_period_switch_html([7, 14, 30, 90], $rangeDays, $activeSubview);
     $userChart = ve_admin_chart_svg_html($points, [
-        ['key' => 'new_users', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
-        ['key' => 'active_users', 'stroke' => '#d6d6d6'],
+        ['key' => 'new_users', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'New users', 'format' => 'number'],
+        ['key' => 'active_users', 'stroke' => '#d6d6d6', 'label' => 'Active users', 'format' => 'number'],
     ]);
     $usageChart = ve_admin_chart_svg_html($points, [
-        ['key' => 'views', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
-        ['key' => 'uploads', 'stroke' => '#8f8f8f'],
+        ['key' => 'views', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'Views', 'format' => 'number'],
+        ['key' => 'uploads', 'stroke' => '#8f8f8f', 'label' => 'Uploads', 'format' => 'number'],
     ]);
     $trafficChart = ve_admin_chart_svg_html($points, [
-        ['key' => 'bandwidth_bytes', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
-        ['key' => 'premium_bandwidth_bytes', 'stroke' => '#8ad0ff'],
+        ['key' => 'bandwidth_bytes', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'Traffic', 'format' => 'bytes'],
+        ['key' => 'premium_bandwidth_bytes', 'stroke' => '#8ad0ff', 'label' => 'Premium traffic', 'format' => 'bytes'],
     ]);
     $avgNewUsers = ve_h(ve_admin_number_label(ve_admin_series_average($points, 'new_users'), 1));
     $peakActiveUsers = ve_h((string) ve_admin_series_peak($points, 'active_users'));
@@ -4481,55 +4715,89 @@ function ve_admin_render_overview_section_deep(): string
     $uploadsTotal = ve_h((string) ve_admin_series_total($points, 'uploads'));
     $trafficPeakLabel = ve_h(ve_human_bytes((int) ($trend['traffic_peak_bytes'] ?? 0)));
 
-    return <<<HTML
-<div class="data settings-panel active" id="overview">
-    <div class="settings-panel-title">Service overview</div>
-    <p class="settings-panel-subtitle">A backend summary focused only on platform-wide numbers, traffic movement, and daily operating trends.</p>
-
-    <div class="admin-overview-grid" id="overview-service">
+    $panels = [
+        'overview-service' => <<<HTML
+<div class="admin-subsection" id="overview-service">
+    <div class="admin-actions justify-content-between align-items-center mb-3">
+        <div>
+            <h5 class="mb-1">Service totals</h5>
+            <p class="admin-chart-copy mb-0">Platform-level capacity, traffic, revenue, and workload totals across {$rangeDaysLabel} days.</p>
+        </div>
+        {$periodSwitchHtml}
+    </div>
+    <div class="admin-overview-grid">
         <div class="admin-overview-stat"><span>Active accounts</span><strong>{$snapshot['users']['active_users']}</strong><small>{$snapshot['users']['users_today']} new today</small></div>
         <div class="admin-overview-stat"><span>Total accounts</span><strong>{$snapshot['users']['total_users']}</strong><small>{$snapshot['users']['suspended_users']} suspended</small></div>
         <div class="admin-overview-stat"><span>Stored files</span><strong>{$snapshot['videos']['total_videos']}</strong><small>{$snapshot['videos']['ready_videos']} ready</small></div>
-        <div class="admin-overview-stat"><span>Stored media</span><strong>{$storageLabel}</strong><small>{$trend['uploads_total']} uploads in last 14 days</small></div>
+        <div class="admin-overview-stat"><span>Stored media</span><strong>{$storageLabel}</strong><small>{$uploadedBytesLabel} uploaded in window</small></div>
         <div class="admin-overview-stat"><span>Live viewers</span><strong>{$trend['live_watchers']}</strong><small>{$trend['active_sessions']} active signed-in sessions</small></div>
-        <div class="admin-overview-stat"><span>14-day views</span><strong>{$trend['views_total']}</strong><small>Peak {$trend['views_peak']} in one day</small></div>
-        <div class="admin-overview-stat"><span>14-day traffic</span><strong>{$trafficLabel}</strong><small>Peak {$trafficPeakLabel}</small></div>
+        <div class="admin-overview-stat"><span>Traffic served</span><strong>{$trafficLabel}</strong><small>Peak {$trafficPeakLabel}</small></div>
         <div class="admin-overview-stat"><span>Premium traffic</span><strong>{$premiumTrafficLabel}</strong><small>Tracked over {$rangeLabel}</small></div>
-        <div class="admin-overview-stat"><span>Open remote jobs</span><strong>{$snapshot['remote']['queued_jobs']}</strong><small>{$snapshot['remote']['error_jobs']} failed jobs</small></div>
-        <div class="admin-overview-stat"><span>Compliance and payouts</span><strong>{$snapshot['dmca']['open_notices']}</strong><small>{$snapshot['payouts']['open_payouts']} payout requests open</small></div>
+        <div class="admin-overview-stat"><span>Views served</span><strong>{$trend['views_total']}</strong><small>Peak {$trend['views_peak']} in one day</small></div>
+        <div class="admin-overview-stat"><span>New accounts</span><strong>{$trend['new_users_total']}</strong><small>{$trend['active_users_peak']} peak active users</small></div>
+        <div class="admin-overview-stat"><span>Uploads</span><strong>{$trend['uploads_total']}</strong><small>{$snapshot['remote']['queued_jobs']} queued remote jobs</small></div>
+        <div class="admin-overview-stat"><span>Open DMCA</span><strong>{$snapshot['dmca']['open_notices']}</strong><small>{$snapshot['payouts']['open_payouts']} payout requests open</small></div>
         <div class="admin-overview-stat"><span>Revenue generated</span><strong>{$revenueLabel}</strong><small>{$payoutDemandLabel} requested for payout</small></div>
-        <div class="admin-overview-stat"><span>Delivery footprint</span><strong>{$snapshot['infrastructure']['active_delivery_domains']}</strong><small>{$snapshot['infrastructure']['storage_nodes']} nodes / {$snapshot['infrastructure']['active_upload_endpoints']} upload endpoints</small></div>
+        <div class="admin-overview-stat"><span>Delivery footprint</span><strong>{$snapshot['infrastructure']['active_delivery_domains']}</strong><small>{$snapshot['infrastructure']['storage_nodes']} nodes / {$snapshot['infrastructure']['active_upload_endpoints']} endpoints</small></div>
     </div>
+</div>
+HTML,
+        'overview-users' => <<<HTML
+<div class="admin-chart-card" id="overview-users">
+    <div class="admin-actions justify-content-between align-items-center mb-3">
+        <div>
+            <h5 class="mb-1">Daily users</h5>
+            <p class="admin-chart-copy mb-0">Account creation and active upload or earning behavior across {$rangeLabel}.</p>
+        </div>
+        {$periodSwitchHtml}
+    </div>
+    {$userChart}
+    <div class="admin-chart-legend">
+        <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch"></i>New users</span><strong>{$avgNewUsers} avg/day</strong></div>
+        <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch" style="background:#d6d6d6;"></i>Active users</span><strong>{$peakActiveUsers} peak/day</strong></div>
+    </div>
+</div>
+HTML,
+        'overview-usage' => <<<HTML
+<div class="admin-chart-card" id="overview-usage">
+    <div class="admin-actions justify-content-between align-items-center mb-3">
+        <div>
+            <h5 class="mb-1">Daily usage</h5>
+            <p class="admin-chart-copy mb-0">Views served and files added to the library over {$rangeLabel}.</p>
+        </div>
+        {$periodSwitchHtml}
+    </div>
+    {$usageChart}
+    <div class="admin-chart-legend">
+        <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch"></i>Views</span><strong>{$avgViews} avg/day</strong></div>
+        <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch" style="background:#8f8f8f;"></i>Uploads</span><strong>{$uploadsTotal} total</strong></div>
+    </div>
+</div>
+HTML,
+        'overview-traffic' => <<<HTML
+<div class="admin-chart-card" id="overview-traffic">
+    <div class="admin-actions justify-content-between align-items-center mb-3">
+        <div>
+            <h5 class="mb-1">Daily traffic</h5>
+            <p class="admin-chart-copy mb-0">Delivered traffic, including premium-served bandwidth, across {$rangeLabel}.</p>
+        </div>
+        {$periodSwitchHtml}
+    </div>
+    {$trafficChart}
+    <div class="admin-chart-legend">
+        <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch"></i>Total traffic</span><strong>{$trafficLabel}</strong></div>
+        <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch" style="background:#8ad0ff;"></i>Premium traffic</span><strong>{$premiumTrafficLabel}</strong></div>
+    </div>
+</div>
+HTML,
+    ];
+    $panelHtml = ve_admin_active_subsection_html($activeSubview, $panels, 'overview-service');
 
-    <div class="admin-section-grid">
-        <div class="admin-chart-card" id="overview-users">
-            <h5 class="mb-2">Daily users</h5>
-            <p class="admin-chart-copy">Account creation and active earning or upload activity across {$rangeLabel}.</p>
-            {$userChart}
-            <div class="admin-chart-legend">
-                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch"></i>New users</span><strong>{$avgNewUsers} avg/day</strong></div>
-                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch" style="background:#d6d6d6;"></i>Active users</span><strong>{$peakActiveUsers} peak/day</strong></div>
-            </div>
-        </div>
-        <div class="admin-chart-card" id="overview-usage">
-            <h5 class="mb-2">Daily usage</h5>
-            <p class="admin-chart-copy">Views served and files added to the library during the same window.</p>
-            {$usageChart}
-            <div class="admin-chart-legend">
-                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch"></i>Views</span><strong>{$avgViews} avg/day</strong></div>
-                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch" style="background:#8f8f8f;"></i>Uploads</span><strong>{$uploadsTotal} total</strong></div>
-            </div>
-        </div>
-        <div class="admin-chart-card" id="overview-traffic">
-            <h5 class="mb-2">Daily traffic</h5>
-            <p class="admin-chart-copy">Delivered traffic, including premium-served bandwidth, over {$rangeLabel}.</p>
-            {$trafficChart}
-            <div class="admin-chart-legend">
-                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch"></i>Total traffic</span><strong>{$trafficLabel}</strong></div>
-                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch" style="background:#8ad0ff;"></i>Premium traffic</span><strong>{$premiumTrafficLabel}</strong></div>
-            </div>
-        </div>
-    </div>
+    return <<<HTML
+<div class="data settings-panel active" id="overview">
+    <div class="settings-panel-title">Service overview</div>
+    <p class="settings-panel-subtitle">Platform-wide service numbers, traffic totals, and daily trend panels that can be switched without leaving the backend shell.</p>
+    {$panelHtml}
 </div>
 HTML;
 }
@@ -4540,11 +4808,13 @@ function ve_admin_render_users_section_deep(): string
     $status = trim((string) ($_GET['status'] ?? ''));
     $roleCode = trim((string) ($_GET['role'] ?? ''));
     $page = ve_admin_request_page();
+    $activeSubview = ve_admin_current_subview_slug('users');
     $selectedUserId = ve_admin_current_resource_id();
     $list = ve_admin_list_users($query, $status, $roleCode, $page);
     $profile = $selectedUserId > 0 ? ve_admin_user_profile_snapshot($selectedUserId) : null;
     $detail = is_array($profile) ? (array) ($profile['detail'] ?? []) : null;
     $sectionUrl = ve_h(ve_admin_url(['section' => 'users', 'resource' => null, 'page' => null], false));
+    $directoryUrl = ve_h(ve_admin_subsection_url('users-directory'));
     $statusOptions = ve_admin_select_options_html([
         'active' => 'Active',
         'suspended' => 'Suspended',
@@ -4626,13 +4896,13 @@ function ve_admin_render_users_section_deep(): string
         $premiumState = is_array($profile) ? (array) ($profile['premium_state'] ?? []) : [];
         $premiumBandwidth = is_array($profile) ? (array) ($profile['premium_bandwidth'] ?? []) : [];
         $viewsChart = ve_admin_chart_svg_html($chart, [
-            ['key' => 'views', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
+            ['key' => 'views', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'Views', 'format' => 'number'],
         ]);
         $trafficChart = ve_admin_chart_svg_html($chart, [
-            ['key' => 'bandwidth_bytes', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
+            ['key' => 'bandwidth_bytes', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'Traffic', 'format' => 'bytes'],
         ]);
         $revenueChart = ve_admin_chart_svg_html($chart, [
-            ['key' => 'total_profit_micro_usd', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
+            ['key' => 'total_profit_micro_usd', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'Revenue', 'format' => 'currency'],
         ]);
         $sessionRows = '';
         $ledgerRows = '';
@@ -4804,7 +5074,7 @@ function ve_admin_render_users_section_deep(): string
         $payoutTotalLabel = ve_h((string) ($counts['payout_total'] ?? 0));
         $liveViewersLabel = ve_h((string) ($profile['online_watchers'] ?? 0));
         $sessionCountLabel = ve_h((string) count((array) ($profile['recent_sessions'] ?? [])));
-        $detailHtml = <<<HTML
+        $profileHtml = <<<HTML
 <div class="admin-subsection" id="users-profile">
     <div class="admin-profile-head">
         <div class="admin-profile-card admin-profile-identity">
@@ -4906,79 +5176,104 @@ function ve_admin_render_users_section_deep(): string
         <div class="admin-overview-stat"><span>API requests today</span><strong>{$apiRequestsTodayLabel}</strong><small>{$apiRequestsHourLabel} in the last hour</small></div>
         <div class="admin-overview-stat"><span>Live viewers</span><strong>{$liveViewersLabel}</strong><small>{$sessionCountLabel} tracked sessions shown</small></div>
     </div>
-    <div class="admin-section-grid" id="users-charts">
-        <div class="admin-chart-card">
-            <h5 class="mb-2">Daily views</h5>
-            <p class="admin-chart-copy">View activity for the selected account.</p>
-            {$viewsChart}
-        </div>
-        <div class="admin-chart-card">
-            <h5 class="mb-2">Daily traffic</h5>
-            <p class="admin-chart-copy">Traffic served over the reporting window.</p>
-            {$trafficChart}
-        </div>
-        <div class="admin-chart-card">
-            <h5 class="mb-2">Daily revenue</h5>
-            <p class="admin-chart-copy">Combined direct and referral earnings.</p>
-            {$revenueChart}
-        </div>
+</div>
+HTML;
+        $chartsHtml = <<<HTML
+<div class="admin-section-grid" id="users-charts">
+    <div class="admin-chart-card">
+        <h5 class="mb-2">Daily views</h5>
+        <p class="admin-chart-copy">View activity for the selected account.</p>
+        {$viewsChart}
     </div>
-    <div class="admin-detail-panels">
-        <div class="admin-detail-panel" id="users-sessions">
-            <h5>Recent sessions</h5>
-            <div class="settings-table-wrap">
-                <table class="table">
-                    <thead><tr><th>Last seen</th><th>IP</th><th>User agent</th><th>Started</th></tr></thead>
-                    <tbody>{$sessionRows}</tbody>
-                </table>
-            </div>
-        </div>
-        <div class="admin-detail-panel" id="users-billing">
-            <h5>Balance ledger</h5>
-            <div class="settings-table-wrap">
-                <table class="table">
-                    <thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Amount</th><th>Description</th></tr></thead>
-                    <tbody>{$ledgerRows}</tbody>
-                </table>
-            </div>
-        </div>
+    <div class="admin-chart-card">
+        <h5 class="mb-2">Daily traffic</h5>
+        <p class="admin-chart-copy">Traffic served over the reporting window.</p>
+        {$trafficChart}
     </div>
-    <div class="admin-detail-panels" id="users-related">
-        <div class="admin-detail-panel"><h5>Top files</h5><ul class="admin-mini-list admin-list-tight">{$topFilesList}</ul></div>
-        <div class="admin-detail-panel"><h5>Recent files</h5><ul class="admin-mini-list admin-list-tight">{$videoList}</ul></div>
-        <div class="admin-detail-panel"><h5>Remote uploads</h5><ul class="admin-mini-list admin-list-tight">{$remoteList}</ul></div>
-        <div class="admin-detail-panel"><h5>DMCA cases</h5><ul class="admin-mini-list admin-list-tight">{$dmcaList}</ul></div>
-        <div class="admin-detail-panel"><h5>Payouts</h5><ul class="admin-mini-list admin-list-tight">{$payoutList}</ul></div>
-        <div class="admin-detail-panel"><h5>Domains</h5><ul class="admin-mini-list admin-list-tight">{$domainList}</ul></div>
-        <div class="admin-detail-panel"><h5>Audit trail</h5><ul class="admin-mini-list admin-list-tight">{$auditList}</ul></div>
+    <div class="admin-chart-card">
+        <h5 class="mb-2">Daily revenue</h5>
+        <p class="admin-chart-copy">Combined direct and referral earnings.</p>
+        {$revenueChart}
     </div>
 </div>
 HTML;
+        $sessionsHtml = <<<HTML
+<div class="admin-detail-panel" id="users-sessions">
+    <h5>Recent sessions</h5>
+    <div class="settings-table-wrap">
+        <table class="table">
+            <thead><tr><th>Last seen</th><th>IP</th><th>User agent</th><th>Started</th></tr></thead>
+            <tbody>{$sessionRows}</tbody>
+        </table>
+    </div>
+</div>
+HTML;
+        $billingHtml = <<<HTML
+<div class="admin-detail-panel" id="users-billing">
+    <h5>Balance ledger</h5>
+    <div class="settings-table-wrap">
+        <table class="table">
+            <thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Amount</th><th>Description</th></tr></thead>
+            <tbody>{$ledgerRows}</tbody>
+        </table>
+    </div>
+</div>
+HTML;
+        $relatedHtml = <<<HTML
+<div class="admin-detail-panels" id="users-related">
+    <div class="admin-detail-panel"><h5>Top files</h5><ul class="admin-mini-list admin-list-tight">{$topFilesList}</ul></div>
+    <div class="admin-detail-panel"><h5>Recent files</h5><ul class="admin-mini-list admin-list-tight">{$videoList}</ul></div>
+    <div class="admin-detail-panel"><h5>Remote uploads</h5><ul class="admin-mini-list admin-list-tight">{$remoteList}</ul></div>
+    <div class="admin-detail-panel"><h5>DMCA cases</h5><ul class="admin-mini-list admin-list-tight">{$dmcaList}</ul></div>
+    <div class="admin-detail-panel"><h5>Payouts</h5><ul class="admin-mini-list admin-list-tight">{$payoutList}</ul></div>
+    <div class="admin-detail-panel"><h5>Domains</h5><ul class="admin-mini-list admin-list-tight">{$domainList}</ul></div>
+    <div class="admin-detail-panel"><h5>Audit trail</h5><ul class="admin-mini-list admin-list-tight">{$auditList}</ul></div>
+</div>
+HTML;
+        $detailPanels = [
+            'users-profile' => $profileHtml,
+            'users-charts' => $chartsHtml,
+            'users-sessions' => $sessionsHtml,
+            'users-billing' => $billingHtml,
+            'users-related' => $relatedHtml,
+        ];
+        $detailHtml = ve_admin_active_subsection_html($activeSubview, $detailPanels, 'users-profile');
     }
 
     $pagination = ve_admin_pagination_html((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()));
     $queryValue = ve_h($query);
+    $directoryHtml = <<<HTML
+<form method="GET" action="{$directoryUrl}" class="admin-toolbar" id="users-directory">
+    <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Username, email, or user ID"></div>
+    <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
+    <div class="form-group"><label>Role</label><select name="role" class="form-control">{$roleFilterOptions}</select></div>
+    <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
+    <div class="form-group form-group--action"><a href="{$directoryUrl}" class="btn btn-secondary">Reset</a></div>
+</form>
+<div class="settings-table-wrap">
+    <table class="table">
+        <thead><tr><th>ID</th><th>User</th><th>Status</th><th>Role</th><th>Plan</th><th>Files</th><th>Storage</th><th>Last login</th></tr></thead>
+        <tbody>{$rowsHtml}</tbody>
+    </table>
+</div>
+{$pagination}
+HTML;
+    $bodyHtml = $detailHtml;
+
+    if ($activeSubview === 'users-directory' || $selectedUserId <= 0 || !is_array($detail)) {
+        $bodyHtml = $directoryHtml . ($detailHtml !== '' && $activeSubview !== 'users-directory' ? $detailHtml : '');
+    }
+
+    if ($activeSubview !== 'users-directory' && $selectedUserId > 0 && !is_array($detail)) {
+        $bodyHtml = ve_admin_subsection_notice_html('Select a valid user from the directory to open this subsection.');
+    }
 
     return <<<HTML
 <div class="data settings-panel" id="users">
     <div class="settings-panel-title">User management</div>
     <p class="settings-panel-subtitle">Search for accounts quickly, then open a detailed operator profile with traffic, billing, sessions, and related records.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="users-directory">
-        <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Username, email, or user ID"></div>
-        <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
-        <div class="form-group"><label>Role</label><select name="role" class="form-control">{$roleFilterOptions}</select></div>
-        <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
-        <div class="form-group form-group--action"><a href="{$sectionUrl}" class="btn btn-secondary">Reset</a></div>
-    </form>
-    <div class="settings-table-wrap">
-        <table class="table">
-            <thead><tr><th>ID</th><th>User</th><th>Status</th><th>Role</th><th>Plan</th><th>Files</th><th>Storage</th><th>Last login</th></tr></thead>
-            <tbody>{$rowsHtml}</tbody>
-        </table>
-    </div>
-    {$pagination}
-    {$detailHtml}
+    {$bodyHtml}
 </div>
 HTML;
 }
@@ -4989,10 +5284,12 @@ function ve_admin_render_videos_section_deep(): string
     $status = trim((string) ($_GET['status'] ?? ''));
     $userId = max(0, (int) ($_GET['user_id'] ?? 0));
     $page = ve_admin_request_page();
+    $activeSubview = ve_admin_current_subview_slug('videos');
     $selectedVideoId = ve_admin_current_resource_id();
     $list = ve_admin_list_videos($query, $status, $userId, $page);
     $detail = $selectedVideoId > 0 ? ve_admin_video_detail($selectedVideoId) : null;
     $sectionUrl = ve_h(ve_admin_url(['section' => 'videos', 'resource' => null, 'page' => null], false));
+    $libraryUrl = ve_h(ve_admin_subsection_url('videos-library'));
     $statusOptions = ve_admin_select_options_html([
         'queued' => 'Queued',
         'processing' => 'Processing',
@@ -5111,27 +5408,34 @@ function ve_admin_render_videos_section_deep(): string
     $pagination = ve_admin_pagination_html((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()));
     $userIdInput = $userId > 0 ? '<input type="hidden" name="user_id" value="' . $userId . '">' : '';
     $queryValue = ve_h($query);
+    $libraryHtml = <<<HTML
+<form method="GET" action="{$libraryUrl}" class="admin-toolbar" id="videos-library">
+    {$userIdInput}
+    <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Title, public ID, or owner"></div>
+    <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
+    <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
+    <div class="form-group form-group--action"><a href="{$libraryUrl}" class="btn btn-secondary">Reset</a></div>
+</form>
+<div class="settings-table-wrap">
+    <table class="table">
+        <thead><tr><th>ID</th><th>File</th><th>Owner</th><th>Status</th><th>Size</th><th>Access</th><th>Created</th></tr></thead>
+        <tbody>{$rowsHtml}</tbody>
+    </table>
+</div>
+{$pagination}
+HTML;
+    $bodyHtml = $libraryHtml;
+
+    if ($activeSubview === 'videos-detail') {
+        $bodyHtml = $detailHtml !== '' ? $detailHtml : ve_admin_subsection_notice_html('Select a valid file from the library to open file detail.');
+    }
 
     return <<<HTML
 <div class="data settings-panel" id="videos">
     <div class="settings-panel-title">Files and videos</div>
     <p class="settings-panel-subtitle">Moderate uploader content, inspect processing state, and control public visibility without leaving the backend shell.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="videos-library">
-        {$userIdInput}
-        <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Title, public ID, or owner"></div>
-        <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
-        <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
-        <div class="form-group form-group--action"><a href="{$sectionUrl}" class="btn btn-secondary">Reset</a></div>
-    </form>
-    <div class="settings-table-wrap">
-        <table class="table">
-            <thead><tr><th>ID</th><th>File</th><th>Owner</th><th>Status</th><th>Size</th><th>Access</th><th>Created</th></tr></thead>
-            <tbody>{$rowsHtml}</tbody>
-        </table>
-    </div>
-    {$pagination}
-    {$detailHtml}
+    {$bodyHtml}
 </div>
 HTML;
 }
@@ -5142,10 +5446,12 @@ function ve_admin_render_remote_uploads_section_deep(): string
     $status = trim((string) ($_GET['status'] ?? ''));
     $userId = max(0, (int) ($_GET['user_id'] ?? 0));
     $page = ve_admin_request_page();
+    $activeSubview = ve_admin_current_subview_slug('remote-uploads');
     $selectedJobId = ve_admin_current_resource_id();
     $list = ve_admin_list_remote_uploads($query, $status, $userId, $page);
     $detail = $selectedJobId > 0 ? ve_admin_remote_upload_detail($selectedJobId) : null;
     $sectionUrl = ve_h(ve_admin_url(['section' => 'remote-uploads', 'resource' => null, 'page' => null], false));
+    $queueUrl = ve_h(ve_admin_subsection_url('remote-uploads-queue'));
     $statusOptions = ve_admin_select_options_html([
         VE_REMOTE_STATUS_PENDING => 'Pending',
         VE_REMOTE_STATUS_RESOLVING => 'Resolving',
@@ -5250,27 +5556,34 @@ function ve_admin_render_remote_uploads_section_deep(): string
     $pagination = ve_admin_pagination_html((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()));
     $userIdInput = $userId > 0 ? '<input type="hidden" name="user_id" value="' . $userId . '">' : '';
     $queryValue = ve_h($query);
+    $queueHtml = <<<HTML
+<form method="GET" action="{$queueUrl}" class="admin-toolbar" id="remote-uploads-queue">
+    {$userIdInput}
+    <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Source URL, video public ID, or owner"></div>
+    <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
+    <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
+    <div class="form-group form-group--action"><a href="{$queueUrl}" class="btn btn-secondary">Reset</a></div>
+</form>
+<div class="settings-table-wrap">
+    <table class="table">
+        <thead><tr><th>ID</th><th>User</th><th>Source</th><th>Status</th><th>Progress</th><th>Attempts</th><th>Updated</th></tr></thead>
+        <tbody>{$rowsHtml}</tbody>
+    </table>
+</div>
+{$pagination}
+HTML;
+    $bodyHtml = $queueHtml;
+
+    if ($activeSubview === 'remote-uploads-detail') {
+        $bodyHtml = $detailHtml !== '' ? $detailHtml : ve_admin_subsection_notice_html('Select a valid remote upload job to open detail.');
+    }
 
     return <<<HTML
 <div class="data settings-panel" id="remote_uploads">
     <div class="settings-panel-title">Remote uploads</div>
     <p class="settings-panel-subtitle">Inspect ingest jobs deeply enough to see queue state, worker progress, source normalization, and linked file creation.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="remote-uploads-queue">
-        {$userIdInput}
-        <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Source URL, video public ID, or owner"></div>
-        <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
-        <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
-        <div class="form-group form-group--action"><a href="{$sectionUrl}" class="btn btn-secondary">Reset</a></div>
-    </form>
-    <div class="settings-table-wrap">
-        <table class="table">
-            <thead><tr><th>ID</th><th>User</th><th>Source</th><th>Status</th><th>Progress</th><th>Attempts</th><th>Updated</th></tr></thead>
-            <tbody>{$rowsHtml}</tbody>
-        </table>
-    </div>
-    {$pagination}
-    {$detailHtml}
+    {$bodyHtml}
 </div>
 HTML;
 }
@@ -5280,10 +5593,12 @@ function ve_admin_render_dmca_section_deep(): string
     $query = trim((string) ($_GET['q'] ?? ''));
     $status = trim((string) ($_GET['status'] ?? 'open'));
     $page = ve_admin_request_page();
+    $activeSubview = ve_admin_current_subview_slug('dmca');
     $selectedNoticeId = ve_admin_current_resource_id();
     $list = ve_admin_list_dmca_notices($status, $query, $page);
     $detail = $selectedNoticeId > 0 ? ve_admin_dmca_detail($selectedNoticeId) : null;
     $sectionUrl = ve_h(ve_admin_url(['section' => 'dmca', 'resource' => null, 'page' => null], false));
+    $queueUrl = ve_h(ve_admin_subsection_url('dmca-queue'));
     $statusOptions = ['open' => 'Open', 'resolved' => 'Resolved'];
 
     foreach (ve_dmca_notice_status_catalog() as $code => $meta) {
@@ -5338,6 +5653,7 @@ function ve_admin_render_dmca_section_deep(): string
         ['label' => 'Filter', 'value' => $status === '' ? 'All statuses' : str_replace('_', ' ', $status)],
     ]);
     $detailHtml = '';
+    $eventsHtml = '';
 
     if ($selectedNoticeId > 0 && !is_array($detail)) {
         $detailHtml = '<div class="alert alert-warning">The selected DMCA case could not be found.</div>';
@@ -5396,6 +5712,7 @@ function ve_admin_render_dmca_section_deep(): string
                 . '</div>'
             : '<p class="admin-empty">No uploader response has been stored.</p>';
 
+        $eventsHtml = '<div class="admin-subsection" id="dmca-events"><h5>Case timeline</h5><ul class="admin-timeline">' . $timelineHtml . '</ul></div>';
         $detailHtml = '<div class="admin-subsection" id="dmca-detail">'
             . '<h5>DMCA case: ' . ve_h((string) ($payload['case_code'] ?? '')) . '</h5>'
             . '<div class="admin-meta-grid mb-4">'
@@ -5441,32 +5758,38 @@ function ve_admin_render_dmca_section_deep(): string
             . '</div></div>'
             . '<div class="admin-detail-panel"><h5>Uploader response</h5>' . $uploaderResponseHtml . '</div>'
             . '</div>'
-            . '<div class="admin-detail-panel mt-4" id="dmca-events"><h5>Timeline</h5><ul class="admin-timeline">' . $timelineHtml . '</ul></div>'
             . '</div>';
     }
 
     $pagination = ve_admin_pagination_html((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()));
     $queryValue = ve_h($query);
+    $queueHtml = <<<HTML
+<form method="GET" action="{$queueUrl}" class="admin-toolbar" id="dmca-queue">
+    <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Case code, URL, title, or uploader"></div>
+    <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusSelectOptions}</select></div>
+    <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
+    <div class="form-group form-group--action"><a href="{$queueUrl}" class="btn btn-secondary">Reset</a></div>
+</form>
+<div class="settings-table-wrap">
+    <table class="table">
+        <thead><tr><th>Case</th><th>Uploader</th><th>Video</th><th>Status</th><th>Received</th><th>Deadline</th></tr></thead>
+        <tbody>{$rowsHtml}</tbody>
+    </table>
+</div>
+{$pagination}
+HTML;
+    $bodyHtml = match ($activeSubview) {
+        'dmca-detail' => $detailHtml !== '' ? $detailHtml : ve_admin_subsection_notice_html('Select a valid DMCA case to open detail.'),
+        'dmca-events' => $eventsHtml !== '' ? $eventsHtml : ve_admin_subsection_notice_html('Select a valid DMCA case to inspect the case timeline.'),
+        default => $queueHtml,
+    };
 
     return <<<HTML
 <div class="data settings-panel" id="dmca">
     <div class="settings-panel-title">DMCA operations</div>
     <p class="settings-panel-subtitle">Work the complaint queue with full visibility into complainant data, uploader response state, deletion deadlines, and event history.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="dmca-queue">
-        <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Case code, URL, title, or uploader"></div>
-        <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusSelectOptions}</select></div>
-        <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
-        <div class="form-group form-group--action"><a href="{$sectionUrl}" class="btn btn-secondary">Reset</a></div>
-    </form>
-    <div class="settings-table-wrap">
-        <table class="table">
-            <thead><tr><th>Case</th><th>Uploader</th><th>Video</th><th>Status</th><th>Received</th><th>Deadline</th></tr></thead>
-            <tbody>{$rowsHtml}</tbody>
-        </table>
-    </div>
-    {$pagination}
-    {$detailHtml}
+    {$bodyHtml}
 </div>
 HTML;
 }
@@ -5476,11 +5799,13 @@ function ve_admin_render_payouts_section_deep(): string
     $status = trim((string) ($_GET['status'] ?? ''));
     $userId = max(0, (int) ($_GET['user_id'] ?? 0));
     $page = ve_admin_request_page();
+    $activeSubview = ve_admin_current_subview_slug('payouts');
     $selectedRequestId = ve_admin_current_resource_id();
     $list = ve_admin_list_payouts($status, $userId, $page);
     $detail = $selectedRequestId > 0 ? ve_admin_payout_request_by_id($selectedRequestId) : null;
     $transfer = is_array($detail) ? ve_admin_payout_transfer_by_request_id((int) ($detail['id'] ?? 0)) : null;
     $sectionUrl = ve_h(ve_admin_url(['section' => 'payouts', 'resource' => null, 'page' => null], false));
+    $queueUrl = ve_h(ve_admin_subsection_url('payouts-queue'));
     $statusOptions = ve_admin_select_options_html([
         'pending' => 'Pending',
         'approved' => 'Approved',
@@ -5532,6 +5857,7 @@ function ve_admin_render_payouts_section_deep(): string
         ['label' => 'Visible amount', 'value' => ve_dashboard_format_currency_micro_usd($visibleAmount)],
     ]);
     $detailHtml = '';
+    $transferHtml = '';
 
     if ($selectedRequestId > 0 && !is_array($detail)) {
         $detailHtml = '<div class="alert alert-warning">The selected payout request could not be found.</div>';
@@ -5540,6 +5866,12 @@ function ve_admin_render_payouts_section_deep(): string
         $detailId = (int) ($detail['id'] ?? 0);
         $detailActionUrl = ve_h(ve_admin_url(['section' => 'payouts', 'resource' => (string) $detailId], false));
         $closeUrl = $sectionUrl;
+        $transferHtml = '<div class="admin-detail-panel" id="payouts-transfer"><h5>Transfer tracking</h5><div class="admin-meta-grid">'
+            . '<div class="admin-meta-item"><span>Reference</span><strong>' . ve_h((string) ($detail['transfer_reference'] ?? '')) . '</strong></div>'
+            . '<div class="admin-meta-item"><span>Transfer row</span><strong>' . (is_array($transfer) ? ve_h((string) ($transfer['status'] ?? 'sent')) : 'Not created') . '</strong></div>'
+            . '<div class="admin-meta-item"><span>Fee</span><strong>' . (is_array($transfer) ? ve_h(ve_dashboard_format_currency_micro_usd((int) ($transfer['fee_micro_usd'] ?? 0))) : '$0.00') . '</strong></div>'
+            . '<div class="admin-meta-item"><span>Net</span><strong>' . (is_array($transfer) ? ve_h(ve_dashboard_format_currency_micro_usd((int) ($transfer['net_amount_micro_usd'] ?? 0))) : ve_h(ve_dashboard_format_currency_micro_usd((int) ($detail['amount_micro_usd'] ?? 0)))) . '</strong></div>'
+            . '</div></div>';
         $detailHtml = '<div class="admin-subsection" id="payouts-detail">'
             . '<h5>Payout request: ' . ve_h((string) ($detail['public_id'] ?? '')) . '</h5>'
             . '<div class="admin-meta-grid mb-4">'
@@ -5554,12 +5886,7 @@ function ve_admin_render_payouts_section_deep(): string
             . '</div>'
             . '<div class="admin-detail-panels mb-4">'
             . '<div class="admin-detail-panel"><h5>Operator notes</h5><p>' . ve_h((string) ($detail['notes'] ?? 'No notes.')) . '</p><p class="admin-muted">Rejection reason: ' . ve_h((string) ($detail['rejection_reason'] ?? '')) . '</p></div>'
-            . '<div class="admin-detail-panel" id="payouts-transfer"><h5>Transfer tracking</h5><div class="admin-meta-grid">'
-            . '<div class="admin-meta-item"><span>Reference</span><strong>' . ve_h((string) ($detail['transfer_reference'] ?? '')) . '</strong></div>'
-            . '<div class="admin-meta-item"><span>Transfer row</span><strong>' . (is_array($transfer) ? ve_h((string) ($transfer['status'] ?? 'sent')) : 'Not created') . '</strong></div>'
-            . '<div class="admin-meta-item"><span>Fee</span><strong>' . (is_array($transfer) ? ve_h(ve_dashboard_format_currency_micro_usd((int) ($transfer['fee_micro_usd'] ?? 0))) : '$0.00') . '</strong></div>'
-            . '<div class="admin-meta-item"><span>Net</span><strong>' . (is_array($transfer) ? ve_h(ve_dashboard_format_currency_micro_usd((int) ($transfer['net_amount_micro_usd'] ?? 0))) : ve_h(ve_dashboard_format_currency_micro_usd((int) ($detail['amount_micro_usd'] ?? 0)))) . '</strong></div>'
-            . '</div></div>'
+            . $transferHtml
             . '</div>'
             . '<div class="admin-detail-panels">'
             . '<div class="admin-detail-panel"><h5>Approve request</h5><form method="POST" action="' . $detailActionUrl . '" class="admin-stack"><input type="hidden" name="token" value="' . $token . '"><input type="hidden" name="action" value="approve_payout"><input type="hidden" name="request_id" value="' . $detailId . '">' . ve_admin_return_to_input_html() . '<div class="form-group"><label>Operator note</label><textarea name="notes" class="form-control" placeholder="Optional approval note.">' . ve_h((string) ($detail['notes'] ?? '')) . '</textarea></div><button type="submit" class="btn btn-primary">Approve payout</button></form></div>'
@@ -5572,26 +5899,33 @@ function ve_admin_render_payouts_section_deep(): string
 
     $pagination = ve_admin_pagination_html((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()));
     $userIdInput = $userId > 0 ? '<input type="hidden" name="user_id" value="' . $userId . '">' : '';
+    $queueHtml = <<<HTML
+<form method="GET" action="{$queueUrl}" class="admin-toolbar" id="payouts-queue">
+    {$userIdInput}
+    <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
+    <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
+    <div class="form-group form-group--action"><a href="{$queueUrl}" class="btn btn-secondary">Reset</a></div>
+</form>
+<div class="settings-table-wrap">
+    <table class="table">
+        <thead><tr><th>Request</th><th>User</th><th>Method</th><th>Amount</th><th>Status</th><th>Created</th></tr></thead>
+        <tbody>{$rowsHtml}</tbody>
+    </table>
+</div>
+{$pagination}
+HTML;
+    $bodyHtml = match ($activeSubview) {
+        'payouts-detail' => $detailHtml !== '' ? $detailHtml : ve_admin_subsection_notice_html('Select a valid payout request to open detail.'),
+        'payouts-transfer' => $transferHtml !== '' ? $transferHtml : ve_admin_subsection_notice_html('Select a valid payout request to inspect transfer tracking.'),
+        default => $queueHtml,
+    };
 
     return <<<HTML
 <div class="data settings-panel" id="payouts">
     <div class="settings-panel-title">Payout operations</div>
     <p class="settings-panel-subtitle">Review withdrawal requests with direct access to approval, rejection, payout settlement, and transfer accounting.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="payouts-queue">
-        {$userIdInput}
-        <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
-        <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
-        <div class="form-group form-group--action"><a href="{$sectionUrl}" class="btn btn-secondary">Reset</a></div>
-    </form>
-    <div class="settings-table-wrap">
-        <table class="table">
-            <thead><tr><th>Request</th><th>User</th><th>Method</th><th>Amount</th><th>Status</th><th>Created</th></tr></thead>
-            <tbody>{$rowsHtml}</tbody>
-        </table>
-    </div>
-    {$pagination}
-    {$detailHtml}
+    {$bodyHtml}
 </div>
 HTML;
 }
@@ -5601,10 +5935,12 @@ function ve_admin_render_domains_section_deep(): string
     $query = trim((string) ($_GET['q'] ?? ''));
     $status = trim((string) ($_GET['status'] ?? ''));
     $page = ve_admin_request_page();
+    $activeSubview = ve_admin_current_subview_slug('domains');
     $selectedDomainId = ve_admin_current_resource_id();
     $list = ve_admin_list_custom_domains($status, $query, $page);
     $detail = $selectedDomainId > 0 ? ve_admin_custom_domain_detail($selectedDomainId) : null;
     $sectionUrl = ve_h(ve_admin_url(['section' => 'domains', 'resource' => null, 'page' => null], false));
+    $directoryUrl = ve_h(ve_admin_subsection_url('domains-directory'));
     $statusOptions = ve_admin_select_options_html([
         'active' => 'Active',
         'pending_dns' => 'Pending DNS',
@@ -5687,32 +6023,40 @@ function ve_admin_render_domains_section_deep(): string
 
     $pagination = ve_admin_pagination_html((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()));
     $queryValue = ve_h($query);
+    $directoryHtml = <<<HTML
+<form method="GET" action="{$directoryUrl}" class="admin-toolbar" id="domains-directory">
+    <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Domain or uploader"></div>
+    <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
+    <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
+    <div class="form-group form-group--action"><a href="{$directoryUrl}" class="btn btn-secondary">Reset</a></div>
+</form>
+<div class="settings-table-wrap">
+    <table class="table">
+        <thead><tr><th>Domain</th><th>User</th><th>Status</th><th>DNS target</th><th>Last checked</th><th>Created</th></tr></thead>
+        <tbody>{$rowsHtml}</tbody>
+    </table>
+</div>
+{$pagination}
+HTML;
+    $bodyHtml = $directoryHtml;
+
+    if ($activeSubview === 'domains-detail') {
+        $bodyHtml = $detailHtml !== '' ? $detailHtml : ve_admin_subsection_notice_html('Select a valid domain record to open detail.');
+    }
 
     return <<<HTML
 <div class="data settings-panel" id="domains">
     <div class="settings-panel-title">Domain operations</div>
     <p class="settings-panel-subtitle">Track account-level custom domains, validate DNS resolution, and remove broken mappings without leaving the backend.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="domains-directory">
-        <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Domain or uploader"></div>
-        <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
-        <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
-        <div class="form-group form-group--action"><a href="{$sectionUrl}" class="btn btn-secondary">Reset</a></div>
-    </form>
-    <div class="settings-table-wrap">
-        <table class="table">
-            <thead><tr><th>Domain</th><th>User</th><th>Status</th><th>DNS target</th><th>Last checked</th><th>Created</th></tr></thead>
-            <tbody>{$rowsHtml}</tbody>
-        </table>
-    </div>
-    {$pagination}
-    {$detailHtml}
+    {$bodyHtml}
 </div>
 HTML;
 }
 
 function ve_admin_render_app_section_deep(): string
 {
+    $activeSubview = ve_admin_current_subview_slug('app');
     $sectionUrl = ve_h(ve_admin_url(['section' => 'app', 'resource' => null, 'page' => null], false));
     $token = ve_h(ve_csrf_token());
     $returnToInput = ve_admin_return_to_input_html();
@@ -5750,58 +6094,69 @@ function ve_admin_render_app_section_deep(): string
         ['label' => 'Custom domain target', 'value' => (string) (ve_config()['custom_domain_target'] ?? '')],
     ]);
 
+    $panels = [
+        'app-general' => <<<HTML
+<div class="admin-subsection" id="app-general">
+    <h5>Operator thresholds</h5>
+    <form method="POST" action="{$sectionUrl}" class="admin-stack">
+        <input type="hidden" name="token" value="{$token}">
+        <input type="hidden" name="action" value="save_app_settings">
+        {$returnToInput}
+        <div class="admin-form-grid">
+            <div class="form-group">
+                <label>Payout minimum (micro USD)</label>
+                <input type="text" name="payout_minimum_micro_usd" value="{$settings['payout_minimum_micro_usd']}" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Default page size</label>
+                <input type="text" name="admin_default_page_size" value="{$settings['admin_default_page_size']}" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Recent audit limit</label>
+                <input type="text" name="admin_recent_audit_limit" value="{$settings['admin_recent_audit_limit']}" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Remote queue max per user</label>
+                <input type="text" name="remote_max_queue_per_user" value="{$settings['remote_max_queue_per_user']}" class="form-control">
+            </div>
+        </div>
+        <div class="admin-actions">
+            <button type="submit" class="btn btn-primary">Save app settings</button>
+        </div>
+    </form>
+</div>
+HTML,
+        'app-roles' => <<<HTML
+<div class="admin-subsection" id="app-roles">
+    <h5>Role catalog</h5>
+    <div class="settings-table-wrap">
+        <table class="table">
+            <thead><tr><th>Code</th><th>Label</th><th>Permissions</th></tr></thead>
+            <tbody>{$roleRows}</tbody>
+        </table>
+    </div>
+</div>
+HTML,
+        'app-permissions' => <<<HTML
+<div class="admin-subsection" id="app-permissions">
+    <h5>Permission inventory</h5>
+    <div class="settings-table-wrap">
+        <table class="table">
+            <thead><tr><th>Code</th><th>Label</th><th>Group</th></tr></thead>
+            <tbody>{$permissionRows}</tbody>
+        </table>
+    </div>
+</div>
+HTML,
+    ];
+    $panelHtml = ve_admin_active_subsection_html($activeSubview, $panels, 'app-general');
+
     return <<<HTML
 <div class="data settings-panel" id="app">
     <div class="settings-panel-title">App settings</div>
     <p class="settings-panel-subtitle">Control backend operating thresholds and keep the role and permission model visible to anyone maintaining this panel.</p>
     {$metricsHtml}
-    <div class="admin-subsection" id="app-general">
-        <h5>Operator thresholds</h5>
-        <form method="POST" action="{$sectionUrl}" class="admin-stack">
-            <input type="hidden" name="token" value="{$token}">
-            <input type="hidden" name="action" value="save_app_settings">
-            {$returnToInput}
-            <div class="admin-form-grid">
-                <div class="form-group">
-                    <label>Payout minimum (micro USD)</label>
-                    <input type="text" name="payout_minimum_micro_usd" value="{$settings['payout_minimum_micro_usd']}" class="form-control">
-                </div>
-                <div class="form-group">
-                    <label>Default page size</label>
-                    <input type="text" name="admin_default_page_size" value="{$settings['admin_default_page_size']}" class="form-control">
-                </div>
-                <div class="form-group">
-                    <label>Recent audit limit</label>
-                    <input type="text" name="admin_recent_audit_limit" value="{$settings['admin_recent_audit_limit']}" class="form-control">
-                </div>
-                <div class="form-group">
-                    <label>Remote queue max per user</label>
-                    <input type="text" name="remote_max_queue_per_user" value="{$settings['remote_max_queue_per_user']}" class="form-control">
-                </div>
-            </div>
-            <div class="admin-actions">
-                <button type="submit" class="btn btn-primary">Save app settings</button>
-            </div>
-        </form>
-    </div>
-    <div class="admin-subsection" id="app-roles">
-        <h5>Role catalog</h5>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Code</th><th>Label</th><th>Permissions</th></tr></thead>
-                <tbody>{$roleRows}</tbody>
-            </table>
-        </div>
-    </div>
-    <div class="admin-subsection" id="app-permissions">
-        <h5>Permission inventory</h5>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Code</th><th>Label</th><th>Group</th></tr></thead>
-                <tbody>{$permissionRows}</tbody>
-            </table>
-        </div>
-    </div>
+    {$panelHtml}
 </div>
 HTML;
 }
@@ -5826,6 +6181,7 @@ function ve_admin_storage_node_options_html(array $nodes, int $selectedId = 0): 
 
 function ve_admin_render_infrastructure_section_deep(): string
 {
+    $activeSubview = ve_admin_current_subview_slug('infrastructure');
     $sectionUrl = ve_h(ve_admin_url(['section' => 'infrastructure', 'resource' => null, 'page' => null], false));
     $token = ve_h(ve_csrf_token());
     $returnToInput = ve_admin_return_to_input_html();
@@ -6085,150 +6441,165 @@ function ve_admin_render_infrastructure_section_deep(): string
             . '</div><div class="admin-actions"><button type="submit" class="btn btn-primary">Save delivery domain</button>' . $deleteForm . '</div></form></div>';
     }
 
+    $panels = [
+        'infra-nodes' => <<<HTML
+<div class="admin-subsection" id="infra-nodes">
+    <h5>Storage nodes</h5>
+    <div class="settings-table-wrap">
+        <table class="table">
+            <thead><tr><th>Code</th><th>Hostname</th><th>Health</th><th>Capacity</th><th>Ingest QPS</th><th>Stream QPS</th></tr></thead>
+            <tbody>{$nodeRows}</tbody>
+        </table>
+    </div>
+    <div class="admin-form-card mb-3">
+        <h6>Add storage node</h6>
+        <form method="POST" action="{$sectionUrl}" class="admin-stack">
+            <input type="hidden" name="token" value="{$token}">
+            <input type="hidden" name="action" value="save_storage_node">
+            {$returnToInput}
+            <div class="admin-form-grid">
+                <div class="form-group"><label>Code</label><input type="text" name="code" value="" class="form-control"></div>
+                <div class="form-group"><label>Hostname</label><input type="text" name="hostname" value="" class="form-control"></div>
+                <div class="form-group"><label>Public base URL</label><input type="text" name="public_base_url" value="" class="form-control"></div>
+                <div class="form-group"><label>Upload base URL</label><input type="text" name="upload_base_url" value="" class="form-control"></div>
+                <div class="form-group"><label>Health</label><select name="health_status" class="form-control"><option value="healthy">Healthy</option><option value="degraded">Degraded</option><option value="offline">Offline</option></select></div>
+                <div class="form-group"><label>Available bytes</label><input type="text" name="available_bytes" value="0" class="form-control"></div>
+                <div class="form-group"><label>Used bytes</label><input type="text" name="used_bytes" value="0" class="form-control"></div>
+                <div class="form-group"><label>Max ingest QPS</label><input type="text" name="max_ingest_qps" value="0" class="form-control"></div>
+                <div class="form-group"><label>Max stream QPS</label><input type="text" name="max_stream_qps" value="0" class="form-control"></div>
+                <div class="form-group" style="grid-column: 1 / -1;"><label>Notes</label><textarea name="notes" class="form-control"></textarea></div>
+            </div>
+            <div class="admin-actions"><button type="submit" class="btn btn-primary">Add node</button></div>
+        </form>
+    </div>
+    <div class="admin-section-grid">{$nodeCards}</div>
+</div>
+HTML,
+        'infra-volumes' => <<<HTML
+<div class="admin-subsection" id="infra-volumes">
+    <h5>Storage volumes</h5>
+    <div class="settings-table-wrap">
+        <table class="table">
+            <thead><tr><th>Node</th><th>Code</th><th>Mount path</th><th>Health</th><th>Usage</th></tr></thead>
+            <tbody>{$volumeRows}</tbody>
+        </table>
+    </div>
+    <div class="admin-form-card mb-3">
+        <h6>Add storage volume</h6>
+        <form method="POST" action="{$sectionUrl}" class="admin-stack">
+            <input type="hidden" name="token" value="{$token}">
+            <input type="hidden" name="action" value="save_storage_volume">
+            {$returnToInput}
+            <div class="admin-form-grid">
+                <div class="form-group"><label>Node</label><select name="storage_node_id" class="form-control">{$nodeOptions}</select></div>
+                <div class="form-group"><label>Code</label><input type="text" name="code" value="" class="form-control"></div>
+                <div class="form-group"><label>Mount path</label><input type="text" name="mount_path" value="" class="form-control"></div>
+                <div class="form-group"><label>Health</label><select name="health_status" class="form-control"><option value="healthy">Healthy</option><option value="degraded">Degraded</option><option value="offline">Offline</option></select></div>
+                <div class="form-group"><label>Capacity bytes</label><input type="text" name="capacity_bytes" value="0" class="form-control"></div>
+                <div class="form-group"><label>Used bytes</label><input type="text" name="used_bytes" value="0" class="form-control"></div>
+                <div class="form-group"><label>Reserved bytes</label><input type="text" name="reserved_bytes" value="0" class="form-control"></div>
+            </div>
+            <div class="admin-actions"><button type="submit" class="btn btn-primary">Add volume</button></div>
+        </form>
+    </div>
+    <div class="admin-section-grid">{$volumeCards}</div>
+</div>
+HTML,
+        'infra-endpoints' => <<<HTML
+<div class="admin-subsection" id="infra-endpoints">
+    <h5>Upload endpoints</h5>
+    <div class="settings-table-wrap">
+        <table class="table">
+            <thead><tr><th>Code</th><th>Node</th><th>Address</th><th>Status</th><th>Weight</th><th>Max file size</th></tr></thead>
+            <tbody>{$endpointRows}</tbody>
+        </table>
+    </div>
+    <div class="admin-form-card mb-3">
+        <h6>Add upload endpoint</h6>
+        <form method="POST" action="{$sectionUrl}" class="admin-stack">
+            <input type="hidden" name="token" value="{$token}">
+            <input type="hidden" name="action" value="save_upload_endpoint">
+            {$returnToInput}
+            <div class="admin-form-grid">
+                <div class="form-group"><label>Node</label><select name="storage_node_id" class="form-control">{$nodeOptions}</select></div>
+                <div class="form-group"><label>Code</label><input type="text" name="code" value="" class="form-control"></div>
+                <div class="form-group"><label>Protocol</label><select name="protocol" class="form-control"><option value="https">https</option><option value="http">http</option></select></div>
+                <div class="form-group"><label>Host</label><input type="text" name="host" value="" class="form-control"></div>
+                <div class="form-group"><label>Path prefix</label><input type="text" name="path_prefix" value="" class="form-control"></div>
+                <div class="form-group"><label>Weight</label><input type="text" name="weight" value="100" class="form-control"></div>
+                <div class="form-group"><label>Max file size bytes</label><input type="text" name="max_file_size_bytes" value="0" class="form-control"></div>
+                <div class="form-group d-flex align-items-end"><div class="custom-control custom-checkbox"><input type="checkbox" class="custom-control-input" id="infra_endpoint_add_active" name="is_active" value="1" checked="checked"><label class="custom-control-label" for="infra_endpoint_add_active">Endpoint active</label></div></div>
+                <div class="form-group d-flex align-items-end"><div class="custom-control custom-checkbox"><input type="checkbox" class="custom-control-input" id="infra_endpoint_add_remote" name="accepts_remote_upload" value="1" checked="checked"><label class="custom-control-label" for="infra_endpoint_add_remote">Accepts remote uploads</label></div></div>
+            </div>
+            <div class="admin-actions"><button type="submit" class="btn btn-primary">Add endpoint</button></div>
+        </form>
+    </div>
+    <div class="admin-section-grid">{$endpointCards}</div>
+</div>
+HTML,
+        'infra-delivery' => <<<HTML
+<div class="admin-subsection" id="infra-delivery">
+    <h5>Delivery domains</h5>
+    <div class="settings-table-wrap">
+        <table class="table">
+            <thead><tr><th>Domain</th><th>Purpose</th><th>Status</th><th>TLS mode</th></tr></thead>
+            <tbody>{$deliveryRows}</tbody>
+        </table>
+    </div>
+    <div class="admin-form-card mb-3">
+        <h6>Add delivery domain</h6>
+        <form method="POST" action="{$sectionUrl}" class="admin-stack">
+            <input type="hidden" name="token" value="{$token}">
+            <input type="hidden" name="action" value="save_delivery_domain">
+            {$returnToInput}
+            <div class="admin-form-grid">
+                <div class="form-group"><label>Domain</label><input type="text" name="domain" value="" class="form-control"></div>
+                <div class="form-group"><label>Purpose</label><select name="purpose" class="form-control"><option value="watch">Watch</option><option value="download">Download</option><option value="embed">Embed</option></select></div>
+                <div class="form-group"><label>Status</label><select name="status" class="form-control"><option value="active">Active</option><option value="draining">Draining</option><option value="disabled">Disabled</option></select></div>
+                <div class="form-group"><label>TLS mode</label><select name="tls_mode" class="form-control"><option value="managed">Managed</option><option value="bring_your_own">Bring your own</option></select></div>
+            </div>
+            <div class="admin-actions"><button type="submit" class="btn btn-primary">Add delivery domain</button></div>
+        </form>
+    </div>
+    <div class="admin-section-grid">{$deliveryCards}</div>
+</div>
+HTML,
+        'infra-maintenance' => <<<HTML
+<div class="admin-subsection" id="infra-maintenance">
+    <h5>Maintenance windows</h5>
+    <div class="admin-form-card mb-3">
+        <h6>Schedule maintenance window</h6>
+        <form method="POST" action="{$sectionUrl}" class="admin-stack">
+            <input type="hidden" name="token" value="{$token}">
+            <input type="hidden" name="action" value="add_maintenance_window">
+            {$returnToInput}
+            <div class="admin-form-grid">
+                <div class="form-group"><label>Node</label><select name="storage_node_id" class="form-control">{$nodeOptions}</select></div>
+                <div class="form-group"><label>Start (UTC)</label><input type="text" name="starts_at" value="" class="form-control" placeholder="YYYY-MM-DD HH:MM:SS"></div>
+                <div class="form-group"><label>End (UTC)</label><input type="text" name="ends_at" value="" class="form-control" placeholder="YYYY-MM-DD HH:MM:SS"></div>
+                <div class="form-group"><label>Mode</label><select name="mode" class="form-control"><option value="drain">Drain</option><option value="offline">Offline</option></select></div>
+                <div class="form-group" style="grid-column: 1 / -1;"><label>Reason</label><textarea name="reason" class="form-control"></textarea></div>
+            </div>
+            <div class="admin-actions"><button type="submit" class="btn btn-primary">Schedule maintenance</button></div>
+        </form>
+    </div>
+    <div class="settings-table-wrap">
+        <table class="table">
+            <thead><tr><th>Node</th><th>Mode</th><th>Starts</th><th>Ends</th><th>Reason</th><th>Action</th></tr></thead>
+            <tbody>{$maintenanceRows}</tbody>
+        </table>
+    </div>
+</div>
+HTML,
+    ];
+    $panelHtml = ve_admin_active_subsection_html($activeSubview, $panels, 'infra-nodes');
+
     return <<<HTML
 <div class="data settings-panel" id="infrastructure">
     <div class="settings-panel-title">Infrastructure</div>
     <p class="settings-panel-subtitle">Operate the storage and delivery plane from one backend surface: nodes, volumes, upload endpoints, delivery domains, and maintenance scheduling.</p>
     {$metricsHtml}
-    <div class="admin-subsection" id="infra-nodes">
-        <h5>Storage nodes</h5>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Code</th><th>Hostname</th><th>Health</th><th>Capacity</th><th>Ingest QPS</th><th>Stream QPS</th></tr></thead>
-                <tbody>{$nodeRows}</tbody>
-            </table>
-        </div>
-        <div class="admin-form-card mb-3">
-            <h6>Add storage node</h6>
-            <form method="POST" action="{$sectionUrl}" class="admin-stack">
-                <input type="hidden" name="token" value="{$token}">
-                <input type="hidden" name="action" value="save_storage_node">
-                {$returnToInput}
-                <div class="admin-form-grid">
-                    <div class="form-group"><label>Code</label><input type="text" name="code" value="" class="form-control"></div>
-                    <div class="form-group"><label>Hostname</label><input type="text" name="hostname" value="" class="form-control"></div>
-                    <div class="form-group"><label>Public base URL</label><input type="text" name="public_base_url" value="" class="form-control"></div>
-                    <div class="form-group"><label>Upload base URL</label><input type="text" name="upload_base_url" value="" class="form-control"></div>
-                    <div class="form-group"><label>Health</label><select name="health_status" class="form-control"><option value="healthy">Healthy</option><option value="degraded">Degraded</option><option value="offline">Offline</option></select></div>
-                    <div class="form-group"><label>Available bytes</label><input type="text" name="available_bytes" value="0" class="form-control"></div>
-                    <div class="form-group"><label>Used bytes</label><input type="text" name="used_bytes" value="0" class="form-control"></div>
-                    <div class="form-group"><label>Max ingest QPS</label><input type="text" name="max_ingest_qps" value="0" class="form-control"></div>
-                    <div class="form-group"><label>Max stream QPS</label><input type="text" name="max_stream_qps" value="0" class="form-control"></div>
-                    <div class="form-group" style="grid-column: 1 / -1;"><label>Notes</label><textarea name="notes" class="form-control"></textarea></div>
-                </div>
-                <div class="admin-actions"><button type="submit" class="btn btn-primary">Add node</button></div>
-            </form>
-        </div>
-        <div class="admin-section-grid">{$nodeCards}</div>
-    </div>
-    <div class="admin-subsection" id="infra-volumes">
-        <h5>Storage volumes</h5>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Node</th><th>Code</th><th>Mount path</th><th>Health</th><th>Usage</th></tr></thead>
-                <tbody>{$volumeRows}</tbody>
-            </table>
-        </div>
-        <div class="admin-form-card mb-3">
-            <h6>Add storage volume</h6>
-            <form method="POST" action="{$sectionUrl}" class="admin-stack">
-                <input type="hidden" name="token" value="{$token}">
-                <input type="hidden" name="action" value="save_storage_volume">
-                {$returnToInput}
-                <div class="admin-form-grid">
-                    <div class="form-group"><label>Node</label><select name="storage_node_id" class="form-control">{$nodeOptions}</select></div>
-                    <div class="form-group"><label>Code</label><input type="text" name="code" value="" class="form-control"></div>
-                    <div class="form-group"><label>Mount path</label><input type="text" name="mount_path" value="" class="form-control"></div>
-                    <div class="form-group"><label>Health</label><select name="health_status" class="form-control"><option value="healthy">Healthy</option><option value="degraded">Degraded</option><option value="offline">Offline</option></select></div>
-                    <div class="form-group"><label>Capacity bytes</label><input type="text" name="capacity_bytes" value="0" class="form-control"></div>
-                    <div class="form-group"><label>Used bytes</label><input type="text" name="used_bytes" value="0" class="form-control"></div>
-                    <div class="form-group"><label>Reserved bytes</label><input type="text" name="reserved_bytes" value="0" class="form-control"></div>
-                </div>
-                <div class="admin-actions"><button type="submit" class="btn btn-primary">Add volume</button></div>
-            </form>
-        </div>
-        <div class="admin-section-grid">{$volumeCards}</div>
-    </div>
-    <div class="admin-subsection" id="infra-endpoints">
-        <h5>Upload endpoints</h5>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Code</th><th>Node</th><th>Address</th><th>Status</th><th>Weight</th><th>Max file size</th></tr></thead>
-                <tbody>{$endpointRows}</tbody>
-            </table>
-        </div>
-        <div class="admin-form-card mb-3">
-            <h6>Add upload endpoint</h6>
-            <form method="POST" action="{$sectionUrl}" class="admin-stack">
-                <input type="hidden" name="token" value="{$token}">
-                <input type="hidden" name="action" value="save_upload_endpoint">
-                {$returnToInput}
-                <div class="admin-form-grid">
-                    <div class="form-group"><label>Node</label><select name="storage_node_id" class="form-control">{$nodeOptions}</select></div>
-                    <div class="form-group"><label>Code</label><input type="text" name="code" value="" class="form-control"></div>
-                    <div class="form-group"><label>Protocol</label><select name="protocol" class="form-control"><option value="https">https</option><option value="http">http</option></select></div>
-                    <div class="form-group"><label>Host</label><input type="text" name="host" value="" class="form-control"></div>
-                    <div class="form-group"><label>Path prefix</label><input type="text" name="path_prefix" value="" class="form-control"></div>
-                    <div class="form-group"><label>Weight</label><input type="text" name="weight" value="100" class="form-control"></div>
-                    <div class="form-group"><label>Max file size bytes</label><input type="text" name="max_file_size_bytes" value="0" class="form-control"></div>
-                    <div class="form-group d-flex align-items-end"><div class="custom-control custom-checkbox"><input type="checkbox" class="custom-control-input" id="infra_endpoint_add_active" name="is_active" value="1" checked="checked"><label class="custom-control-label" for="infra_endpoint_add_active">Endpoint active</label></div></div>
-                    <div class="form-group d-flex align-items-end"><div class="custom-control custom-checkbox"><input type="checkbox" class="custom-control-input" id="infra_endpoint_add_remote" name="accepts_remote_upload" value="1" checked="checked"><label class="custom-control-label" for="infra_endpoint_add_remote">Accepts remote uploads</label></div></div>
-                </div>
-                <div class="admin-actions"><button type="submit" class="btn btn-primary">Add endpoint</button></div>
-            </form>
-        </div>
-        <div class="admin-section-grid">{$endpointCards}</div>
-    </div>
-    <div class="admin-subsection" id="infra-delivery">
-        <h5>Delivery domains</h5>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Domain</th><th>Purpose</th><th>Status</th><th>TLS mode</th></tr></thead>
-                <tbody>{$deliveryRows}</tbody>
-            </table>
-        </div>
-        <div class="admin-form-card mb-3">
-            <h6>Add delivery domain</h6>
-            <form method="POST" action="{$sectionUrl}" class="admin-stack">
-                <input type="hidden" name="token" value="{$token}">
-                <input type="hidden" name="action" value="save_delivery_domain">
-                {$returnToInput}
-                <div class="admin-form-grid">
-                    <div class="form-group"><label>Domain</label><input type="text" name="domain" value="" class="form-control"></div>
-                    <div class="form-group"><label>Purpose</label><select name="purpose" class="form-control"><option value="watch">Watch</option><option value="download">Download</option><option value="embed">Embed</option></select></div>
-                    <div class="form-group"><label>Status</label><select name="status" class="form-control"><option value="active">Active</option><option value="draining">Draining</option><option value="disabled">Disabled</option></select></div>
-                    <div class="form-group"><label>TLS mode</label><select name="tls_mode" class="form-control"><option value="managed">Managed</option><option value="bring_your_own">Bring your own</option></select></div>
-                </div>
-                <div class="admin-actions"><button type="submit" class="btn btn-primary">Add delivery domain</button></div>
-            </form>
-        </div>
-        <div class="admin-section-grid">{$deliveryCards}</div>
-    </div>
-    <div class="admin-subsection" id="infra-maintenance">
-        <h5>Maintenance windows</h5>
-        <div class="admin-form-card mb-3">
-            <h6>Schedule maintenance window</h6>
-            <form method="POST" action="{$sectionUrl}" class="admin-stack">
-                <input type="hidden" name="token" value="{$token}">
-                <input type="hidden" name="action" value="add_maintenance_window">
-                {$returnToInput}
-                <div class="admin-form-grid">
-                    <div class="form-group"><label>Node</label><select name="storage_node_id" class="form-control">{$nodeOptions}</select></div>
-                    <div class="form-group"><label>Start (UTC)</label><input type="text" name="starts_at" value="" class="form-control" placeholder="YYYY-MM-DD HH:MM:SS"></div>
-                    <div class="form-group"><label>End (UTC)</label><input type="text" name="ends_at" value="" class="form-control" placeholder="YYYY-MM-DD HH:MM:SS"></div>
-                    <div class="form-group"><label>Mode</label><select name="mode" class="form-control"><option value="drain">Drain</option><option value="offline">Offline</option></select></div>
-                    <div class="form-group" style="grid-column: 1 / -1;"><label>Reason</label><textarea name="reason" class="form-control"></textarea></div>
-                </div>
-                <div class="admin-actions"><button type="submit" class="btn btn-primary">Schedule maintenance</button></div>
-            </form>
-        </div>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Node</th><th>Mode</th><th>Starts</th><th>Ends</th><th>Reason</th><th>Action</th></tr></thead>
-                <tbody>{$maintenanceRows}</tbody>
-            </table>
-        </div>
-    </div>
+    {$panelHtml}
 </div>
 HTML;
 }
@@ -6236,10 +6607,12 @@ HTML;
 function ve_admin_render_audit_section_deep(): string
 {
     $page = ve_admin_request_page();
+    $activeSubview = ve_admin_current_subview_slug('audit');
     $selectedLogId = ve_admin_current_resource_id();
     $list = ve_admin_list_audit_logs($page);
     $detail = $selectedLogId > 0 ? ve_admin_audit_log_detail($selectedLogId) : null;
     $sectionUrl = ve_h(ve_admin_url(['section' => 'audit', 'resource' => null, 'page' => null], false));
+    $feedUrl = ve_h(ve_admin_subsection_url('audit-feed'));
     $rowsHtml = '';
     $actorCount = [];
 
@@ -6307,20 +6680,27 @@ function ve_admin_render_audit_section_deep(): string
     }
 
     $pagination = ve_admin_pagination_html((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()));
+    $feedHtml = <<<HTML
+<div class="settings-table-wrap" id="audit-feed">
+    <table class="table">
+        <thead><tr><th>Time</th><th>Actor</th><th>Event</th><th>Target</th><th>IP</th></tr></thead>
+        <tbody>{$rowsHtml}</tbody>
+    </table>
+</div>
+{$pagination}
+HTML;
+    $bodyHtml = $feedHtml;
+
+    if ($activeSubview === 'audit-detail') {
+        $bodyHtml = $detailHtml !== '' ? $detailHtml : ve_admin_subsection_notice_html('Select an audit entry from the feed to open detail.');
+    }
 
     return <<<HTML
 <div class="data settings-panel" id="audit">
     <div class="settings-panel-title">Audit log</div>
     <p class="settings-panel-subtitle">Inspect backend actions with exact timestamps, actor identity, target records, and before/after payloads.</p>
     {$metricsHtml}
-    <div class="settings-table-wrap" id="audit-feed">
-        <table class="table">
-            <thead><tr><th>Time</th><th>Actor</th><th>Event</th><th>Target</th><th>IP</th></tr></thead>
-            <tbody>{$rowsHtml}</tbody>
-        </table>
-    </div>
-    {$pagination}
-    {$detailHtml}
+    {$bodyHtml}
 </div>
 HTML;
 }
@@ -6331,13 +6711,10 @@ function ve_admin_backend_mobile_nav_html(array $actorUser, string $activeSectio
 
     foreach (ve_admin_allowed_sections_for_user($actorUser) as $code => $section) {
         $activeClass = $code === $activeSection ? ' active' : '';
-        $items[] = '<li class="nav-item"><a href="' . ve_h(ve_admin_url(['section' => $code, 'resource' => null, 'page' => null], false)) . '" class="nav-link' . $activeClass . '"><i class="fad ' . ve_h((string) ($section['icon'] ?? 'fa-circle')) . '"></i>' . ve_h((string) ($section['label'] ?? ucfirst($code))) . '</a></li>';
+        $items[] = '<li class="nav-item"><a href="' . ve_h(ve_admin_url(['section' => $code, 'resource' => null, 'page' => null], false)) . '" data-admin-nav="1" class="nav-link' . $activeClass . '"><i class="fad ' . ve_h((string) ($section['icon'] ?? 'fa-circle')) . '"></i>' . ve_h((string) ($section['label'] ?? ucfirst($code))) . '</a></li>';
     }
 
     $items[] = '<li class="nav-item"><a href="' . ve_h(ve_url('/dashboard')) . '" class="nav-link"><i class="fad fa-shapes"></i>Dashboard</a></li>';
-    $items[] = '<li class="nav-item"><a href="' . ve_h(ve_url('/')) . '" class="nav-link"><i class="fad fa-home"></i>Home</a></li>';
-    $items[] = '<li class="nav-item"><a href="' . ve_h(ve_url('/api-docs')) . '" class="nav-link"><i class="fad fa-brackets-curly"></i>API Docs</a></li>';
-    $items[] = '<li class="nav-item"><a href="' . ve_h(ve_url('/contact')) . '" class="nav-link"><i class="fad fa-life-ring"></i>Contact</a></li>';
 
     $stopControl = ve_admin_impersonation_stop_control_html('nav-link btn btn-link admin-stop-button', false);
 

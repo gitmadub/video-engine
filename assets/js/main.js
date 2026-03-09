@@ -23,6 +23,7 @@ function veCsrfToken() {
 $(document).ready(function() {
     var pathname = window.location.pathname;
     var l_first = true;
+    var adminRequest = null;
 
     function isLogoutHref(href) {
         var logoutUrl = veAppUrl('/logout');
@@ -45,6 +46,191 @@ $(document).ready(function() {
     if ($.fn.tooltip) {
         $('[data-toggle="tooltip"]').tooltip();
     }
+
+    function getAdminBasePath() {
+        return veAppUrl('/backend');
+    }
+
+    function hasAdminShell() {
+        return $('[data-admin-shell="1"]').length > 0;
+    }
+
+    function isModifiedNavigation(event) {
+        return !!(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.which === 2);
+    }
+
+    function isAdminNavigationHref(href) {
+        var url;
+        var backendBase = getAdminBasePath();
+
+        if (!href || href.charAt(0) === '#') {
+            return false;
+        }
+
+        try {
+            url = new URL(href, window.location.origin);
+        } catch (err) {
+            return false;
+        }
+
+        if (url.origin !== window.location.origin) {
+            return false;
+        }
+
+        return url.pathname === backendBase || url.pathname.indexOf(backendBase + '/') === 0;
+    }
+
+    function setAdminLoadingState(isLoading) {
+        var $shell = $('[data-admin-shell="1"]').first();
+
+        if (!$shell.length) {
+            return;
+        }
+
+        $shell.toggleClass('is-loading', !!isLoading);
+    }
+
+    function parseAdminDocument(html) {
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(html, 'text/html');
+
+        return {
+            title: doc.title || document.title,
+            shell: doc.querySelector('[data-admin-shell="1"]'),
+            headerStrip: doc.querySelector('.admin-header-strip'),
+            mobileNav: doc.querySelector('#menu .container-fluid > ul.nav')
+        };
+    }
+
+    function syncAdminShell(parsed, nextUrl, pushState) {
+        var currentShell = document.querySelector('[data-admin-shell="1"]');
+        var currentHeaderStrip = document.querySelector('.admin-header-strip');
+        var currentMobileNav = document.querySelector('#menu .container-fluid > ul.nav');
+
+        if (!parsed.shell || !currentShell) {
+            window.location.href = nextUrl;
+            return;
+        }
+
+        if (parsed.headerStrip && currentHeaderStrip) {
+            currentHeaderStrip.replaceWith(parsed.headerStrip);
+        } else if (parsed.headerStrip && !currentHeaderStrip) {
+            var navbar = document.querySelector('nav.main-menu');
+
+            if (navbar && navbar.parentNode) {
+                navbar.insertAdjacentElement('afterend', parsed.headerStrip);
+            }
+        } else if (!parsed.headerStrip && currentHeaderStrip) {
+            currentHeaderStrip.remove();
+        }
+
+        if (parsed.mobileNav && currentMobileNav) {
+            currentMobileNav.replaceWith(parsed.mobileNav);
+        }
+
+        currentShell.replaceWith(parsed.shell);
+        document.title = parsed.title;
+        $('#menu').removeClass('show');
+
+        if (pushState) {
+            window.history.pushState({adminShell: true, url: nextUrl}, '', nextUrl);
+        } else {
+            window.history.replaceState({adminShell: true, url: nextUrl}, '', nextUrl);
+        }
+    }
+
+    function loadAdminView(nextUrl, pushState) {
+        if (!hasAdminShell() || !isAdminNavigationHref(nextUrl)) {
+            window.location.href = nextUrl;
+            return;
+        }
+
+        if (adminRequest && typeof adminRequest.abort === 'function') {
+            adminRequest.abort();
+        }
+
+        setAdminLoadingState(true);
+        adminRequest = $.ajax({
+            url: nextUrl,
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        }).done(function(responseHtml) {
+            var parsed = parseAdminDocument(responseHtml);
+
+            syncAdminShell(parsed, nextUrl, pushState);
+        }).fail(function(xhr, status) {
+            if (status !== 'abort') {
+                window.location.href = nextUrl;
+            }
+        }).always(function() {
+            adminRequest = null;
+            setAdminLoadingState(false);
+        });
+    }
+
+    function updateAdminChartTooltip($hit, event) {
+        var $frame = $hit.closest('.admin-chart-frame');
+        var $tooltip = $frame.find('.admin-chart-tooltip').first();
+        var frameRect;
+        var left;
+        var top;
+
+        if (!$frame.length || !$tooltip.length || !$frame[0].getBoundingClientRect) {
+            return;
+        }
+
+        frameRect = $frame[0].getBoundingClientRect();
+        left = (event.clientX || frameRect.left) - frameRect.left;
+        top = (event.clientY || frameRect.top) - frameRect.top;
+
+        $tooltip.html(
+            '<span>' + escapeHtml($hit.data('series-label') || '') + '</span>' +
+            '<strong>' + escapeHtml($hit.data('value-label') || '') + '</strong>' +
+            '<small>' + escapeHtml($hit.data('date-label') || '') + '</small>'
+        );
+        $tooltip.css({
+            left: left + 'px',
+            top: top + 'px'
+        }).prop('hidden', false);
+    }
+
+    $(document).on('click', 'a[href]', function(e) {
+        var href = $(this).attr('href');
+        var target = $(this).attr('target');
+
+        if (!hasAdminShell() || isModifiedNavigation(e) || target === '_blank' || isLogoutHref(href)) {
+            return;
+        }
+
+        if (!isAdminNavigationHref(href)) {
+            return;
+        }
+
+        e.preventDefault();
+        loadAdminView(href, true);
+    });
+
+    window.addEventListener('popstate', function() {
+        if (!hasAdminShell() || !isAdminNavigationHref(window.location.href)) {
+            return;
+        }
+
+        loadAdminView(window.location.href, false);
+    });
+
+    if (hasAdminShell() && isAdminNavigationHref(window.location.href)) {
+        window.history.replaceState({adminShell: true, url: window.location.href}, '', window.location.href);
+    }
+
+    $(document).on('mouseenter mousemove focus', '.admin-chart-hit', function(e) {
+        updateAdminChartTooltip($(this), e);
+    });
+
+    $(document).on('mouseleave blur', '.admin-chart-hit', function() {
+        $(this).closest('.admin-chart-frame').find('.admin-chart-tooltip').prop('hidden', true);
+    });
 
     $('.settings_menu li a').on('click', function(e) {
         var $this = $(this),
