@@ -209,6 +209,7 @@ async function elementDocumentBox(page, selector) {
   const waitFree = optionalNumber('VIDEO_DOWNLOAD_BROWSER_WAIT_FREE', 15);
   const waitPremium = optionalNumber('VIDEO_DOWNLOAD_BROWSER_WAIT_PREMIUM', 0);
   const minWatchSeconds = optionalNumber('VIDEO_DOWNLOAD_BROWSER_MIN_WATCH_SECONDS', 30);
+  const qualificationTimeoutMs = (minWatchSeconds + 30) * 1000;
   const skipPremium = process.env.VIDEO_DOWNLOAD_BROWSER_SKIP_PREMIUM === '1';
   const debugPlayback = process.env.VIDEO_DOWNLOAD_BROWSER_DEBUG === '1';
   if (debugPlayback) {
@@ -535,7 +536,7 @@ async function elementDocumentBox(page, selector) {
       return response.url().includes(`/api/videos/${publicId}/playback/qualify`)
         && response.request().method() === 'POST'
         && response.status() === 200;
-    }, { timeout: (minWatchSeconds + 15) * 1000 });
+    }, { timeout: qualificationTimeoutMs });
 
     await embedPage.evaluate(async () => {
       const video = document.getElementById('ve-secure-player');
@@ -600,7 +601,7 @@ async function elementDocumentBox(page, selector) {
       return response.url().includes(`/api/videos/${publicId}/playback/qualify`)
         && response.request().method() === 'POST'
         && response.status() === 200;
-    }, { timeout: (minWatchSeconds + 15) * 1000 });
+    }, { timeout: qualificationTimeoutMs });
 
     await repeatEmbedPage.evaluate(async () => {
       const video = document.getElementById('ve-secure-player');
