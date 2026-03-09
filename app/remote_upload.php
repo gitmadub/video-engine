@@ -1793,7 +1793,7 @@ function ve_remote_maybe_spawn_worker(): void
     }
 
     $phpBinary = (string) ve_remote_config()['php_binary'];
-    $script = ve_root_path('scripts', 'process_remote_upload_queue.php');
+    $script = ve_root_path('app', 'workers', 'remote_upload_queue.php');
     $command = ve_video_shell_join([$phpBinary, $script]);
 
     if (ve_video_is_windows()) {

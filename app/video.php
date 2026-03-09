@@ -2556,7 +2556,7 @@ function ve_video_maybe_spawn_worker(): void
     }
 
     $phpBinary = (string) ve_video_config()['php_binary'];
-    $script = ve_root_path('scripts', 'process_video_queue.php');
+    $script = ve_root_path('app', 'workers', 'video_queue.php');
     $command = ve_video_shell_join([$phpBinary, $script]);
 
     if (ve_video_is_windows()) {
