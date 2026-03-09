@@ -21,10 +21,21 @@ function requiredEnv(name) {
   return value;
 }
 
-async function loginAndOpenDmcaPage(browser, baseURL, username, password) {
+function appPath(pathname, pathPrefix) {
+  const normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
+
+  if (!pathPrefix) {
+    return normalized;
+  }
+
+  const cleanedPrefix = String(pathPrefix).replace(/^\/+|\/+$/g, '');
+  return `/${cleanedPrefix}${normalized}`;
+}
+
+async function loginAndOpenDmcaPage(browser, baseURL, pathPrefix, username, password) {
   const context = await browser.newContext({ baseURL });
   const page = await context.newPage();
-  await page.goto('/', { waitUntil: 'networkidle' });
+  await page.goto(appPath('/', pathPrefix), { waitUntil: 'networkidle' });
 
   const token = await page.evaluate(() => window.VE_CSRF_TOKEN || '');
 
@@ -33,7 +44,18 @@ async function loginAndOpenDmcaPage(browser, baseURL, username, password) {
   }
 
   const loginResult = await page.evaluate(async (credentials) => {
-    const response = await fetch('/api/auth/login', {
+    const normalizePath = (pathname, prefix) => {
+      const normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
+
+      if (!prefix) {
+        return normalized;
+      }
+
+      const cleanedPrefix = String(prefix).replace(/^\/+|\/+$/g, '');
+      return `/${cleanedPrefix}${normalized}`;
+    };
+
+    const response = await fetch(normalizePath('/api/auth/login', credentials.pathPrefix), {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
@@ -59,18 +81,19 @@ async function loginAndOpenDmcaPage(browser, baseURL, username, password) {
       status: response.status,
       payload,
     };
-  }, { username, password, token });
+  }, { username, password, token, pathPrefix });
 
   if (loginResult.status !== 200 || loginResult.payload.status !== 'redirect') {
     throw new Error(`Login failed for ${username}: ${JSON.stringify(loginResult)}`);
   }
 
-  await page.goto('/dashboard/dmca-manager', { waitUntil: 'networkidle' });
+  await page.goto(appPath('/dashboard/dmca-manager', pathPrefix), { waitUntil: 'networkidle' });
   return { context, page };
 }
 
 (async () => {
   const baseURL = requiredEnv('DMCA_BROWSER_BASE_URL');
+  const pathPrefix = process.env.DMCA_BROWSER_PATH_PREFIX || '';
   const username = requiredEnv('DMCA_BROWSER_USER');
   const password = requiredEnv('DMCA_BROWSER_PASSWORD');
   const emptyUsername = requiredEnv('DMCA_BROWSER_EMPTY_USER');
@@ -95,7 +118,7 @@ async function loginAndOpenDmcaPage(browser, baseURL, username, password) {
   });
 
   try {
-    const emptySession = await loginAndOpenDmcaPage(browser, baseURL, emptyUsername, emptyPassword);
+    const emptySession = await loginAndOpenDmcaPage(browser, baseURL, pathPrefix, emptyUsername, emptyPassword);
     await emptySession.page.waitForFunction(() => {
       const emptyState = document.querySelector('[data-dmca-empty]');
       return Boolean(emptyState && !emptyState.classList.contains('d-none'));
@@ -114,7 +137,7 @@ async function loginAndOpenDmcaPage(browser, baseURL, username, password) {
 
     await emptySession.context.close();
 
-    const activeSession = await loginAndOpenDmcaPage(browser, baseURL, username, password);
+    const activeSession = await loginAndOpenDmcaPage(browser, baseURL, pathPrefix, username, password);
     const page = activeSession.page;
 
     await page.waitForFunction(() => {
