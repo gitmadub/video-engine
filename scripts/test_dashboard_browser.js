@@ -311,7 +311,9 @@ function requiredEnv(name) {
     }
 
     const cryptoNotice = (await page.locator('.ve-premium-modal.is-open .ve-premium-modal-notice').textContent() || '').trim();
-    const cryptoAddress = (await page.locator('.ve-premium-modal.is-open .ve-premium-address-block').textContent() || '').trim();
+    const cryptoAddress = (await page.locator('.ve-premium-modal.is-open #ve-premium-copy-wallet').inputValue() || '').trim();
+    const cryptoAmount = (await page.locator('.ve-premium-modal.is-open #ve-premium-copy-amount').inputValue() || '').trim();
+    const copyButtons = await page.locator('.ve-premium-modal.is-open [data-copy-text]').count();
 
     if (!cryptoNotice.includes('Sandbox crypto invoice created')) {
       throw new Error(`Crypto checkout notice should confirm sandbox invoice creation. Received: ${cryptoNotice || '(empty)'}`);
@@ -319,6 +321,14 @@ function requiredEnv(name) {
 
     if (!cryptoAddress || cryptoAddress.length < 16) {
       throw new Error(`Crypto checkout should render a wallet address in the runtime modal. Received: ${cryptoAddress || '(empty)'}`);
+    }
+
+    if (!cryptoAmount || !/^\d/.test(cryptoAmount)) {
+      throw new Error(`Crypto checkout should render the invoice amount in the runtime modal. Received: ${cryptoAmount || '(empty)'}`);
+    }
+
+    if (copyButtons < 2) {
+      throw new Error(`Crypto checkout should expose copy actions for the amount and wallet address. Received count: ${copyButtons}`);
     }
   } finally {
     await browser.close();

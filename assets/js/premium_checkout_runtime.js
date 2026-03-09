@@ -35,6 +35,205 @@
         });
     }
 
+    function formatFixedGigabytes(bytes, fallbackLabel) {
+        if (typeof bytes === 'number' && isFinite(bytes)) {
+            return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+        }
+
+        return fallbackLabel || '0.00 GB';
+    }
+
+    function formatPremiumBandwidthLabel(bytes, fallbackLabel) {
+        if (typeof bytes === 'number' && isFinite(bytes) && bytes <= 0) {
+            return formatFixedGigabytes(bytes, fallbackLabel);
+        }
+
+        if (!fallbackLabel || fallbackLabel === '0 B') {
+            return formatFixedGigabytes(typeof bytes === 'number' ? bytes : 0, fallbackLabel);
+        }
+
+        return fallbackLabel;
+    }
+
+    function copyText(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text);
+        }
+
+        return new Promise(function (resolve, reject) {
+            var input = document.createElement('textarea');
+            input.value = text;
+            input.setAttribute('readonly', 'readonly');
+            input.style.position = 'fixed';
+            input.style.opacity = '0';
+            document.body.appendChild(input);
+            input.focus();
+            input.select();
+
+            try {
+                if (!document.execCommand('copy')) {
+                    throw new Error('Copy failed.');
+                }
+
+                document.body.removeChild(input);
+                resolve();
+            } catch (error) {
+                document.body.removeChild(input);
+                reject(error);
+            }
+        });
+    }
+
+    function showCopyState(button, copied) {
+        if (!button) {
+            return;
+        }
+
+        if (copied) {
+            button.classList.add('is-copied');
+            button.textContent = button.getAttribute('data-copy-success') || 'Copied';
+            window.setTimeout(function () {
+                button.classList.remove('is-copied');
+                button.textContent = button.getAttribute('data-copy-label') || 'Copy';
+            }, 1400);
+            return;
+        }
+
+        button.classList.add('is-copy-error');
+        window.setTimeout(function () {
+            button.classList.remove('is-copy-error');
+        }, 1400);
+    }
+
+    function insertAfter(referenceNode, node) {
+        if (!referenceNode || !referenceNode.parentNode) {
+            return;
+        }
+
+        if (referenceNode.nextSibling) {
+            referenceNode.parentNode.insertBefore(node, referenceNode.nextSibling);
+            return;
+        }
+
+        referenceNode.parentNode.appendChild(node);
+    }
+
+    function findChartInstance(component) {
+        if (!component) {
+            return null;
+        }
+
+        if (component.$data && component.$data._chart) {
+            return component.$data._chart;
+        }
+
+        var children = Array.isArray(component.$children) ? component.$children : [];
+        var index;
+
+        for (index = 0; index < children.length; index += 1) {
+            var chart = findChartInstance(children[index]);
+
+            if (chart) {
+                return chart;
+            }
+        }
+
+        return null;
+    }
+
+    function enhanceModalBody(modal) {
+        if (!modal || !modal.body) {
+            return;
+        }
+
+        Array.prototype.forEach.call(modal.body.querySelectorAll('.ve-premium-copy-input'), function (field) {
+            field.addEventListener('focus', function () {
+                field.select();
+            });
+        });
+
+        Array.prototype.forEach.call(modal.body.querySelectorAll('.ve-premium-qr-frame'), function (frame) {
+            var image = frame.querySelector('.ve-premium-qr-image');
+
+            if (!image) {
+                return;
+            }
+
+            function markLoaded() {
+                frame.classList.remove('is-loading');
+                frame.classList.add('is-loaded');
+            }
+
+            function markError() {
+                frame.classList.remove('is-loading');
+                frame.classList.add('is-error');
+            }
+
+            frame.classList.add('is-loading');
+
+            if (image.complete && image.naturalWidth > 0) {
+                markLoaded();
+                return;
+            }
+
+            image.addEventListener('load', markLoaded, { once: true });
+            image.addEventListener('error', markError, { once: true });
+        });
+    }
+
+    function applyPremiumChartFloor(vm) {
+        if (!vm) {
+            return;
+        }
+
+        var options = vm.chart_options || {};
+        var tooltips = options.tooltips || {};
+        var hover = options.hover || {};
+        var scales = options.scales || {};
+        var yAxis = (Array.isArray(scales.yAxes) && scales.yAxes[0]) ? scales.yAxes[0] : {};
+        var xAxis = (Array.isArray(scales.xAxes) && scales.xAxes[0]) ? scales.xAxes[0] : {};
+
+        tooltips.enabled = true;
+        tooltips.mode = 'index';
+        tooltips.intersect = false;
+        options.tooltips = tooltips;
+
+        hover.mode = 'index';
+        hover.intersect = false;
+        hover.animationDuration = 0;
+        options.hover = hover;
+
+        yAxis.ticks = Object.assign({}, yAxis.ticks || {}, {
+            beginAtZero: true,
+            min: 0,
+            suggestedMin: 0,
+            precision: 0
+        });
+        yAxis.gridLines = Object.assign({}, yAxis.gridLines || {}, {
+            color: 'rgba(255, 255, 255, 0.08)',
+            zeroLineColor: 'rgba(255, 153, 0, 0.28)'
+        });
+        xAxis.gridLines = Object.assign({}, xAxis.gridLines || {}, {
+            display: false
+        });
+        xAxis.ticks = Object.assign({}, xAxis.ticks || {}, {
+            fontColor: '#8b8b8b'
+        });
+
+        scales.yAxes = [yAxis];
+        scales.xAxes = [xAxis];
+        options.scales = scales;
+        options.maintainAspectRatio = false;
+        vm.chart_options = options;
+
+        var chart = findChartInstance(vm);
+
+        if (chart) {
+            chart.options = Object.assign({}, chart.options || {}, options);
+            chart.update(0);
+        }
+    }
+
     function ensureCheckoutModal() {
         if (window.__vePremiumCheckoutModal) {
             return window.__vePremiumCheckoutModal;
@@ -65,6 +264,7 @@
 
         var modal = {
             root: root,
+            shell: root.querySelector('.ve-premium-modal-shell'),
             title: root.querySelector('.ve-premium-modal-title'),
             subtitle: root.querySelector('.ve-premium-modal-subtitle'),
             notice: root.querySelector('.ve-premium-modal-notice'),
@@ -73,13 +273,13 @@
         };
 
         root.addEventListener('click', function (event) {
-            if (event.target.closest('[data-close-modal="1"]')) {
+            if (event.target.closest('[data-close-modal="1"]') || event.target === modal.shell) {
                 closeCheckoutModal();
             }
         });
 
         modal.body.addEventListener('click', function (event) {
-            var copyButton = event.target.closest('[data-copy-address="1"]');
+            var copyButton = event.target.closest('[data-copy-text]');
 
             if (!copyButton) {
                 return;
@@ -87,26 +287,16 @@
 
             event.preventDefault();
 
-            var address = modal.root.getAttribute('data-copy-value') || '';
-
-            if (!address) {
+            var copyValue = copyButton.getAttribute('data-copy-text') || '';
+            if (!copyValue) {
                 return;
             }
 
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(address).then(function () {
-                    copyButton.textContent = 'Copied';
-                    window.setTimeout(function () {
-                        copyButton.textContent = 'Copy address';
-                    }, 1600);
-                    setCheckoutNotice('info', 'Address copied.');
-                }, function () {
-                    setCheckoutNotice('warning', 'Copy the address manually from the invoice.');
-                });
-                return;
-            }
-
-            setCheckoutNotice('warning', 'Copy the address manually from the invoice.');
+            copyText(copyValue).then(function () {
+                showCopyState(copyButton, true);
+            }).catch(function () {
+                showCopyState(copyButton, false);
+            });
         });
 
         document.addEventListener('keydown', function (event) {
@@ -142,7 +332,6 @@
         var modal = ensureCheckoutModal();
         modal.root.classList.remove('is-open');
         modal.root.setAttribute('aria-hidden', 'true');
-        modal.root.removeAttribute('data-copy-value');
         document.body.classList.remove('ve-premium-modal-active');
     }
 
@@ -184,6 +373,7 @@
         modal.title.textContent = title || 'Checkout';
         modal.subtitle.textContent = subtitle || '';
         modal.body.innerHTML = bodyHtml || '';
+        enhanceModalBody(modal);
         setCheckoutNotice(noticeType, noticeMessage || '');
         setCheckoutActions(actions || []);
         openCheckoutModal();
@@ -293,9 +483,9 @@
         var page = currentPremiumPage(vm);
         var accountStatus = page.plan_label || 'Free account';
         var accountDetail = page.premium_until_label || 'No active renewal';
-        var bandwidthStatus = page.purchased_bw_label || '0 B';
-        var bandwidthDetail = 'Remaining ' + escapeHtml(page.available_bw_label || '0 B') + ' • ' + escapeHtml(page.premium_bandwidth_status_label || 'Inactive');
-        var usageStatus = page.used_bw_label || '0 B';
+        var bandwidthStatus = formatPremiumBandwidthLabel(page.purchased_bw, page.purchased_bw_label || '');
+        var bandwidthDetail = 'Remaining ' + escapeHtml(formatPremiumBandwidthLabel(page.available_bw, page.available_bw_label || '')) + ' • ' + escapeHtml(page.premium_bandwidth_status_label || 'Inactive');
+        var usageStatus = formatPremiumBandwidthLabel(page.used_bw, page.used_bw_label || '');
         var usageDetail = page.premium_bandwidth_status_detail || 'Only traffic served while own adverts are enabled counts against premium bandwidth.';
         var overview = root.querySelector('[data-premium-overview]');
 
@@ -307,21 +497,46 @@
         }
 
         overview.innerHTML = ''
-            + '<div class="ve-premium-overview-card" data-premium-card="account">'
+            + '<div class="ve-premium-overview-card the_box" data-premium-card="account">'
             + '  <span class="ve-premium-overview-kicker" data-premium-card-title="account">Premium account</span>'
             + '  <strong>' + escapeHtml(accountStatus) + '</strong>'
             + '  <p>' + escapeHtml(accountDetail) + '</p>'
             + '</div>'
-            + '<div class="ve-premium-overview-card" data-premium-card="bandwidth">'
+            + '<div class="ve-premium-overview-card the_box" data-premium-card="bandwidth">'
             + '  <span class="ve-premium-overview-kicker" data-premium-card-title="bandwidth">Premium bandwidth</span>'
             + '  <strong>' + escapeHtml(bandwidthStatus) + '</strong>'
             + '  <p>' + bandwidthDetail + '</p>'
             + '</div>'
-            + '<div class="ve-premium-overview-card" data-premium-card="usage">'
+            + '<div class="ve-premium-overview-card the_box" data-premium-card="usage">'
             + '  <span class="ve-premium-overview-kicker" data-premium-card-title="usage">Premium bandwidth usage</span>'
             + '  <strong>' + escapeHtml(usageStatus) + '</strong>'
             + '  <p>' + escapeHtml(usageDetail) + '</p>'
             + '</div>';
+    }
+
+    function renderUsageSummary(vm) {
+        var root = document.querySelector('.my-premium');
+
+        if (!root) {
+            return;
+        }
+
+        var page = currentPremiumPage(vm);
+        var usageCard = root.querySelector('.ve-premium-usage-row .col-md-2 .the_box.usage');
+
+        if (!usageCard) {
+            return;
+        }
+
+        var totals = usageCard.querySelectorAll('.used strong');
+
+        if (totals[0]) {
+            totals[0].textContent = formatPremiumBandwidthLabel(page.used_bw, page.used_bw_label || '');
+        }
+
+        if (totals[1]) {
+            totals[1].textContent = formatPremiumBandwidthLabel(page.available_bw, page.available_bw_label || '');
+        }
     }
 
     function reorderPremiumSections(vm) {
@@ -333,6 +548,8 @@
 
         var directChildren = Array.prototype.slice.call(root.children || []);
         var mainRow = directChildren.find(function (element) {
+            return element && element.classList && element.classList.contains('ve-premium-usage-row');
+        }) || directChildren.find(function (element) {
             return element && element.classList
                 && element.classList.contains('row')
                 && !element.classList.contains('premium-plans');
@@ -343,7 +560,9 @@
         var accountRow = directChildren.find(function (element) {
             return element && element.classList
                 && element.classList.contains('row')
-                && element.classList.contains('premium-plans');
+                && element.classList.contains('premium-plans')
+                && !element.classList.contains('ve-premium-usage-row')
+                && !element.classList.contains('ve-premium-bandwidth-row');
         }) || null;
 
         if (accountTitle && accountRow && mainRow) {
@@ -354,6 +573,8 @@
         if (!mainRow) {
             return;
         }
+
+        mainRow.classList.add('premium-plans', 'mb-4', 've-premium-usage-row');
 
         var mainRowChildren = Array.prototype.slice.call(mainRow.children || []);
         var usageTitle = mainRowChildren.find(function (element) {
@@ -373,10 +594,29 @@
                 && element.classList.contains('mt-4');
         }) || null;
         var bandwidthPlans = bandwidthTitle ? bandwidthTitle.nextElementSibling : null;
+        var bandwidthRow = root.querySelector('.ve-premium-bandwidth-row');
 
-        [bandwidthTitle, bandwidthPlans, usageTitle, usageCard, usageChart].forEach(function (element) {
+        if (!bandwidthRow) {
+            bandwidthRow = document.createElement('div');
+            bandwidthRow.className = 'row premium-plans mb-4 ve-premium-bandwidth-row';
+            insertAfter(mainRow, bandwidthRow);
+        } else if (mainRow.nextElementSibling !== bandwidthRow) {
+            insertAfter(mainRow, bandwidthRow);
+        }
+
+        if (bandwidthTitle) {
+            bandwidthTitle.classList.remove('mt-4');
+        }
+
+        [usageTitle, usageCard, usageChart].forEach(function (element) {
             if (element && element.parentNode === mainRow) {
                 mainRow.appendChild(element);
+            }
+        });
+
+        [bandwidthTitle, bandwidthPlans].forEach(function (element) {
+            if (element && element.parentNode !== bandwidthRow) {
+                bandwidthRow.appendChild(element);
             }
         });
     }
@@ -384,6 +624,7 @@
     function renderPremiumLayout(vm) {
         reorderPremiumSections(vm);
         renderPremiumOverview(vm);
+        renderUsageSummary(vm);
     }
 
     function applyPremiumSummary(vm, summary) {
@@ -411,6 +652,8 @@
             }
         }
 
+        applyPremiumChartFloor(vm);
+
         if (typeof vm.$forceUpdate === 'function') {
             vm.$forceUpdate();
         }
@@ -419,6 +662,11 @@
     }
 
     function renderBalanceCheckoutBody(quote) {
+        var hasShortfall = (quote.remaining_balance_micro_usd || 0) < 0;
+        var balanceOutcomeLabel = hasShortfall ? 'Additional funds needed' : 'Balance after';
+        var balanceOutcomeValue = hasShortfall
+            ? (quote.shortfall_label || (quote.remaining_balance_label || '').replace('-', '') || '$0.00000')
+            : (quote.remaining_balance_label || '$0.00000');
         var expiryCard = '';
 
         if (quote.purchase_type === 'account') {
@@ -445,9 +693,9 @@
             + '    <span>Charge now</span>'
             + '    <strong>' + escapeHtml(quote.amount_label || '$0.00000') + '</strong>'
             + '  </div>'
-            + '  <div class="ve-premium-checkout-stat' + ((quote.remaining_balance_micro_usd || 0) < 0 ? ' negative' : '') + '">'
-            + '    <span>Balance after</span>'
-            + '    <strong>' + escapeHtml(quote.remaining_balance_label || '$0.00000') + '</strong>'
+            + '  <div class="ve-premium-checkout-stat' + (hasShortfall ? ' negative' : '') + '">'
+            + '    <span>' + escapeHtml(balanceOutcomeLabel) + '</span>'
+            + '    <strong>' + escapeHtml(balanceOutcomeValue) + '</strong>'
             + '  </div>'
             + '</div>'
             + '<div class="ve-premium-checkout-meta">'
@@ -460,18 +708,38 @@
     }
 
     function renderCryptoInvoiceBody(quote, invoice) {
+        var amountValue = invoice.amount || '';
+        var currencyCode = invoice.currency_code || '';
+
         return ''
             + '<div class="ve-premium-invoice-layout">'
             + '  <div class="ve-premium-qr-wrap">'
-            + '    <img alt="Crypto payment QR" src="' + escapeHtml(invoice.qr || '') + '">'
+            + '    <div class="ve-premium-qr-frame">'
+            + '      <div class="ve-premium-qr-loader" aria-hidden="true"></div>'
+            + '      <img class="ve-premium-qr-image" alt="Crypto payment QR" src="' + escapeHtml(invoice.qr || '') + '">'
+            + '    </div>'
             + '    <div class="ve-premium-inline-actions">'
             + '      <a class="btn btn-primary btn-block" target="_blank" rel="noopener" href="' + escapeHtml(invoice.payment_uri || '#') + '">Click here to pay</a>'
-            + '      <button type="button" class="btn ve-premium-btn-secondary btn-block ve-premium-invoice-copy" data-copy-address="1">Copy address</button>'
             + '    </div>'
             + '  </div>'
-            + '  <div>'
-            + '    <p class="text-muted mb-2">Send exactly <strong>' + escapeHtml(invoice.amount || '') + ' ' + escapeHtml(invoice.currency_code || '') + '</strong> to the following address.</p>'
-            + '    <div class="ve-premium-address-block">' + escapeHtml(invoice.address || '') + '</div>'
+            + '  <div class="ve-premium-invoice-details">'
+            + '    <p class="text-muted mb-3">Send exactly <strong>' + escapeHtml(amountValue) + ' ' + escapeHtml(currencyCode) + '</strong> to the wallet below.</p>'
+            + '    <div class="ve-premium-copy-stack">'
+            + '      <div class="ve-premium-copy-field">'
+            + '        <label class="ve-premium-copy-label" for="ve-premium-copy-amount">Amount <span class="ve-premium-copy-unit">' + escapeHtml(currencyCode) + '</span></label>'
+            + '        <div class="ve-premium-copy-box">'
+            + '          <input id="ve-premium-copy-amount" class="ve-premium-copy-input" type="text" readonly value="' + escapeHtml(amountValue) + '">'
+            + '          <button type="button" class="btn ve-premium-btn-secondary ve-premium-copy-button" data-copy-text="' + escapeHtml(amountValue) + '" data-copy-label="Copy" data-copy-success="Done">Copy</button>'
+            + '        </div>'
+            + '      </div>'
+            + '      <div class="ve-premium-copy-field">'
+            + '        <label class="ve-premium-copy-label" for="ve-premium-copy-wallet">Wallet address</label>'
+            + '        <div class="ve-premium-copy-box ve-premium-copy-box-address">'
+            + '          <input id="ve-premium-copy-wallet" class="ve-premium-copy-input ve-premium-copy-wallet" type="text" readonly value="' + escapeHtml(invoice.address || '') + '">'
+            + '          <button type="button" class="btn ve-premium-btn-secondary ve-premium-copy-button" data-copy-text="' + escapeHtml(invoice.address || '') + '" data-copy-label="Copy" data-copy-success="Done">Copy</button>'
+            + '        </div>'
+            + '      </div>'
+            + '    </div>'
             + '    <p class="text-muted">This is a sandbox invoice in the same product flow. Real crypto settlement and automatic crediting will be wired in when the payment gateway is connected.</p>'
             + '    <div class="ve-premium-invoice-meta">'
             + '      <div class="ve-premium-checkout-stat">'
@@ -620,7 +888,6 @@
             var subtitle = 'Sandbox crypto invoice generated in the native premium checkout flow.';
             var noticeMessage = response.message || 'This invoice is pending. No balance will change until a real crypto gateway is connected.';
 
-            ensureCheckoutModal().root.setAttribute('data-copy-value', invoice.address || '');
             showCheckoutModal(
                 title,
                 subtitle,
@@ -646,6 +913,7 @@
         }
 
         vm.__vePremiumCheckoutBound = true;
+        applyPremiumChartFloor(vm);
         renderPremiumLayout(vm);
         var originalPayPlan = typeof vm.pay_plan === 'function' ? vm.pay_plan : null;
         var originalPayBw = typeof vm.pay_bw === 'function' ? vm.pay_bw : null;

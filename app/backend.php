@@ -2176,6 +2176,7 @@ function ve_premium_checkout_quote(int $userId, string $purchaseType, array $pro
     $balanceMicroUsd = ve_dashboard_balance_micro_usd($userId);
     $amountMicroUsd = (int) ($product['amount_micro_usd'] ?? 0);
     $remainingBalanceMicroUsd = $balanceMicroUsd - $amountMicroUsd;
+    $shortfallMicroUsd = $remainingBalanceMicroUsd < 0 ? abs($remainingBalanceMicroUsd) : 0;
     $canPay = ($payment['kind'] ?? '') !== 'balance' || $remainingBalanceMicroUsd >= 0;
     $projectedPremiumUntil = $purchaseType === 'account'
         ? ve_premium_project_expiry(is_array($user) ? $user : [], (string) ($product['interval_spec'] ?? 'P1M'))
@@ -2197,6 +2198,8 @@ function ve_premium_checkout_quote(int $userId, string $purchaseType, array $pro
         'balance_label' => ve_dashboard_format_currency_micro_usd($balanceMicroUsd),
         'remaining_balance_micro_usd' => $remainingBalanceMicroUsd,
         'remaining_balance_label' => ve_dashboard_format_currency_micro_usd($remainingBalanceMicroUsd),
+        'shortfall_micro_usd' => $shortfallMicroUsd,
+        'shortfall_label' => ve_dashboard_format_currency_micro_usd($shortfallMicroUsd),
         'can_pay' => $canPay,
         'insufficient_balance_message' => $canPay ? '' : 'Your current balance is not high enough for this purchase.',
         'bandwidth_bytes' => (int) ($product['bandwidth_bytes'] ?? 0),
