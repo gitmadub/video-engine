@@ -3477,10 +3477,10 @@ function ve_video_record_playback_pulse(array $video, array $session, int $watch
     $lastPulseWatchedSeconds = max(0, (int) ($session['last_pulse_watched_seconds'] ?? 0));
     $acceptedWatchedSeconds = min(max($watchedSeconds, $lastPulseWatchedSeconds), $elapsedPlaybackSeconds);
 
-    if ($currentBandwidthBytes <= $lastPulseBandwidthBytes) {
+    if ($acceptedWatchedSeconds <= $lastPulseWatchedSeconds && (int) ($session['pulse_count'] ?? 0) > 0) {
         return [
             'status' => 'pending',
-            'message' => 'Secure playback has not advanced since the last validation pulse.',
+            'message' => 'Playback has not progressed far enough for another validation pulse yet.',
             'watched_seconds' => $watchedSeconds,
             'accepted_watched_seconds' => $lastPulseWatchedSeconds,
             'required_seconds' => $minimumWatchSeconds,
@@ -3492,10 +3492,10 @@ function ve_video_record_playback_pulse(array $video, array $session, int $watch
         ];
     }
 
-    if ($acceptedWatchedSeconds <= $lastPulseWatchedSeconds && (int) ($session['pulse_count'] ?? 0) > 0) {
+    if ($currentBandwidthBytes <= $lastPulseBandwidthBytes && $acceptedWatchedSeconds <= $lastPulseWatchedSeconds) {
         return [
             'status' => 'pending',
-            'message' => 'Playback has not progressed far enough for another validation pulse yet.',
+            'message' => 'Secure playback has not advanced since the last validation pulse.',
             'watched_seconds' => $watchedSeconds,
             'accepted_watched_seconds' => $lastPulseWatchedSeconds,
             'required_seconds' => $minimumWatchSeconds,
@@ -5450,7 +5450,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             var mediaAdvanced = Math.max(0, currentTime - lastWatchCurrentTime);
 
             if (isPlaybackTrackable() && mediaAdvanced > 0.05) {
-                watchedSeconds += elapsedSeconds;
+                watchedSeconds += Math.min(elapsedSeconds, mediaAdvanced);
                 if (watchedSeconds + 0.05 >= nextPulseTargetSeconds) {
                     submitPlaybackPulse(false);
                 }
@@ -5522,6 +5522,18 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             window.addEventListener('pagehide', function () {
                 stopWatchAudit();
+                if (
+                    !streamActivated
+                    || watchedSeconds <= 0
+                    || !canSignPlaybackRequests()
+                    || (
+                        watchedSeconds + 0.05 < nextPulseTargetSeconds
+                        && watchedSeconds + 0.05 < minimumWatchSeconds
+                    )
+                ) {
+                    return;
+                }
+
                 submitPlaybackPulse(true).then(function () {
                     maybeQualifyView();
                 });
