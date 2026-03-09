@@ -306,6 +306,22 @@ function ve_dispatch_api_routes(string $path): bool
         ve_handle_dmca_counter_notice_api($matches[1]);
     }
 
+    if (preg_match('#^/api/dmca/([A-Z0-9-]+)/response$#', $path, $matches) === 1) {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_dmca_response_api($matches[1]);
+    }
+
+    if (preg_match('#^/api/dmca/([A-Z0-9-]+)/delete-video$#', $path, $matches) === 1) {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_dmca_delete_video_api($matches[1]);
+    }
+
     if ($path === '/api/domains') {
         if (ve_is_method('GET')) {
             ve_handle_custom_domain_list();
@@ -429,6 +445,10 @@ function ve_dispatch_api_routes(string $path): bool
     if ($path === '/api/payouts/request') {
         if (!ve_is_method('POST')) {
             ve_method_not_allowed(['POST']);
+        }
+
+        if (function_exists('ve_handle_payout_request_api')) {
+            ve_handle_payout_request_api();
         }
 
         ve_require_auth();

@@ -430,6 +430,12 @@ function ve_run_database_migrations(PDO $pdo): void
             resolved_at TEXT DEFAULT NULL,
             video_is_public_before_action INTEGER DEFAULT NULL,
             video_status_message_before_action TEXT NOT NULL DEFAULT "",
+            response_submitted_at TEXT DEFAULT NULL,
+            uploader_response_json TEXT NOT NULL DEFAULT "",
+            auto_delete_at TEXT DEFAULT NULL,
+            video_deleted_at TEXT DEFAULT NULL,
+            video_title_snapshot TEXT NOT NULL DEFAULT "",
+            video_public_id_snapshot TEXT NOT NULL DEFAULT "",
             received_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
@@ -666,11 +672,19 @@ function ve_run_database_migrations(PDO $pdo): void
     ve_add_column_if_missing($pdo, 'dmca_notices', 'resolved_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'dmca_notices', 'video_is_public_before_action', 'INTEGER DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'dmca_notices', 'video_status_message_before_action', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'response_submitted_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'uploader_response_json', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'auto_delete_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'video_deleted_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'video_title_snapshot', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'video_public_id_snapshot', 'TEXT NOT NULL DEFAULT ""');
     ve_add_column_if_missing($pdo, 'dmca_notices', 'updated_at', 'TEXT NOT NULL DEFAULT ""');
     ve_add_column_if_missing($pdo, 'user_stats_daily', 'referral_earned_micro_usd', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'user_stats_daily', 'premium_bandwidth_bytes', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'video_stats_daily', 'premium_bandwidth_bytes', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'client_proof_key', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'playback_token_hash', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'previous_playback_token_hash', 'TEXT NOT NULL DEFAULT ""');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'pulse_client_token_hash', 'TEXT NOT NULL DEFAULT ""');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'pulse_server_token_hash', 'TEXT NOT NULL DEFAULT ""');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'previous_pulse_client_token_hash', 'TEXT NOT NULL DEFAULT ""');
@@ -741,6 +755,10 @@ function ve_run_database_migrations(PDO $pdo): void
 
     ve_remote_host_run_migrations($pdo);
     ve_seed_default_app_settings($pdo);
+
+    if (function_exists('ve_admin_run_migrations')) {
+        ve_admin_run_migrations($pdo);
+    }
 
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_app_settings_updated_at ON app_settings(updated_at DESC)');
@@ -5673,6 +5691,10 @@ function ve_render_dashboard_file(string $relativePath): void
 {
     if ($relativePath === 'dashboard/premium-plans.html') {
         ve_render_premium_plans_page();
+    }
+
+    if ($relativePath === 'dashboard/request-payout.html' && function_exists('ve_render_payout_request_page')) {
+        ve_render_payout_request_page();
     }
 
     if ($relativePath === 'dashboard/referrals.html' && function_exists('ve_render_referrals_page')) {

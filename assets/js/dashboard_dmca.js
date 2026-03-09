@@ -11,25 +11,29 @@
         query: '',
         page: 1,
         hasMore: false,
-        loading: false
+        loading: false,
+        selectedCaseCode: ''
     };
 
     var els = {
         error: root.querySelector('[data-dmca-error]'),
         updated: root.querySelector('[data-dmca-updated]'),
         open: root.querySelector('[data-dmca-open]'),
-        disabled: root.querySelector('[data-dmca-disabled]'),
-        counter: root.querySelector('[data-dmca-counter]'),
-        strikes: root.querySelector('[data-dmca-strikes]'),
+        pendingDelete: root.querySelector('[data-dmca-pending-delete]'),
+        response: root.querySelector('[data-dmca-response]'),
+        deleted: root.querySelector('[data-dmca-deleted]'),
         email: root.querySelector('[data-dmca-email]'),
-        threshold: root.querySelector('[data-dmca-threshold]'),
-        counterWindow: root.querySelector('[data-dmca-counter-window]'),
+        window: root.querySelector('[data-dmca-window]'),
+        windowCopy: root.querySelector('[data-dmca-window-copy]'),
+        windowInline: root.querySelector('[data-dmca-window-inline]'),
         list: root.querySelector('[data-dmca-list]'),
         empty: root.querySelector('[data-dmca-empty]'),
         query: root.querySelector('[data-dmca-query]'),
         loadMoreWrap: root.querySelector('[data-dmca-load-more-wrap]'),
         loadMore: root.querySelector('[data-dmca-load-more]'),
         filterButtons: root.querySelectorAll('[data-filter-status]'),
+        navLinks: root.querySelectorAll('.settings_menu a, [data-dmca-nav]'),
+        panels: root.querySelectorAll('.settings_data .data'),
         modalTitle: document.querySelector('[data-dmca-modal-title]'),
         modalBody: document.querySelector('[data-dmca-modal-body]')
     };
@@ -63,6 +67,12 @@
             .replace(/'/g, '&#039;');
     }
 
+    function setText(element, value) {
+        if (element) {
+            element.textContent = String(value == null ? '' : value);
+        }
+    }
+
     function setError(message) {
         if (!els.error) {
             return;
@@ -78,93 +88,137 @@
         els.error.classList.add('is-visible');
     }
 
-    function formatUpdated() {
-        if (!els.updated) {
+    function showToast(type, title, message) {
+        if (window.iziToast && typeof window.iziToast[type] === 'function') {
+            window.iziToast[type]({
+                title: title,
+                message: message,
+                position: 'topRight'
+            });
             return;
         }
 
-        els.updated.textContent = 'Updated ' + new Date().toLocaleString();
+        if (type === 'error') {
+            window.alert(message);
+        }
+    }
+
+    function formatUpdated() {
+        setText(els.updated, 'Updated ' + new Date().toLocaleString());
+    }
+
+    function activatePanel(hash, shouldUpdateLocation) {
+        if (!hash || hash.charAt(0) !== '#') {
+            hash = '#dmca_overview';
+        }
+
+        var panel = root.querySelector(hash);
+
+        if (!panel) {
+            hash = '#dmca_overview';
+            panel = root.querySelector(hash);
+        }
+
+        Array.prototype.forEach.call(els.navLinks, function (link) {
+            link.classList.toggle('active', link.getAttribute('href') === hash);
+        });
+
+        Array.prototype.forEach.call(els.panels, function (item) {
+            item.classList.toggle('active', '#' + item.id === hash);
+        });
+
+        if (shouldUpdateLocation) {
+            if (window.history && typeof window.history.replaceState === 'function') {
+                window.history.replaceState(null, '', hash);
+            } else {
+                window.location.hash = hash;
+            }
+        }
     }
 
     function renderPolicy(policy) {
-        if (!policy) {
-            return;
-        }
+        policy = policy || {};
+        var hours = String(policy.response_window_hours || 24);
 
-        if (els.email) {
-            els.email.textContent = policy.dmca_email || 'dmca@doodstream.com';
-        }
-
-        if (els.threshold) {
-            els.threshold.textContent = (policy.repeat_infringer_threshold || 3) + ' effective complaints in ' + (policy.repeat_infringer_window_months || 6) + ' months';
-        }
-
-        if (els.counterWindow) {
-            var counterWindow = policy.counter_window_business_days || {};
-            els.counterWindow.textContent = (counterWindow.min || 10) + ' to ' + (counterWindow.max || 14) + ' business days';
-        }
+        setText(els.email, policy.dmca_email || 'dmca@doodstream.com');
+        setText(els.window, hours);
+        setText(els.windowCopy, hours);
+        setText(els.windowInline, hours);
     }
 
     function renderSummary(summary) {
         summary = summary || {};
 
-        if (els.open) {
-            els.open.textContent = String(summary.open_cases || 0);
-        }
-
-        if (els.disabled) {
-            els.disabled.textContent = String(summary.content_disabled || 0);
-        }
-
-        if (els.counter) {
-            els.counter.textContent = String(summary.counter_notice_pending || 0);
-        }
-
-        if (els.strikes) {
-            els.strikes.textContent = String(summary.effective_strikes || 0);
-        }
+        setText(els.open, summary.open_cases || 0);
+        setText(els.pendingDelete, summary.pending_delete || 0);
+        setText(els.response, summary.responses_received || 0);
+        setText(els.deleted, summary.deleted_videos || 0);
     }
 
     function setFilterButtons() {
         Array.prototype.forEach.call(els.filterButtons, function (button) {
-            var isActive = button.getAttribute('data-filter-status') === state.status;
-            button.classList.toggle('btn-primary', isActive);
-            button.classList.toggle('btn-white', !isActive);
+            var active = button.getAttribute('data-filter-status') === state.status;
+            button.classList.toggle('btn-primary', active);
+            button.classList.toggle('btn-white', !active);
         });
     }
 
     function renderEmpty(isVisible) {
-        if (!els.empty) {
-            return;
+        if (els.empty) {
+            els.empty.classList.toggle('d-none', !isVisible);
         }
-
-        els.empty.classList.toggle('d-none', !isVisible);
     }
 
     function renderLoadMore(hasMore) {
         state.hasMore = !!hasMore;
 
-        if (!els.loadMoreWrap) {
-            return;
+        if (els.loadMoreWrap) {
+            els.loadMoreWrap.classList.toggle('d-none', !hasMore);
+        }
+    }
+
+    function statusBadge(item) {
+        return '<span class="dmca-status ' + escapeHtml(item.status_tone || 'secondary') + '">' + escapeHtml(item.status_label || item.status || 'Open') + '</span>';
+    }
+
+    function deadlineLabel(item) {
+        if (!item) {
+            return '';
         }
 
-        els.loadMoreWrap.classList.toggle('d-none', !hasMore);
+        if (item.status === 'content_disabled') {
+            return escapeHtml(item.auto_delete_remaining_label || item.auto_delete_label || '24h');
+        }
+
+        if (item.status === 'response_submitted' || item.status === 'counter_submitted') {
+            return 'Info sent ' + escapeHtml(item.response_submitted_label || item.updated_label || '');
+        }
+
+        if (item.status === 'uploader_deleted' || item.status === 'auto_deleted') {
+            return 'Deleted ' + escapeHtml(item.deleted_video_label || item.resolved_label || '');
+        }
+
+        if (item.resolved_at) {
+            return escapeHtml(item.resolved_label || item.updated_label || '');
+        }
+
+        return escapeHtml(item.updated_label || item.received_label || '');
     }
 
-    function statusPill(item) {
-        return '<span class="dmca-status-pill tone-' + escapeHtml(item.status_tone || 'secondary') + '">' + escapeHtml(item.status_label || item.status || 'Open') + '</span>';
-    }
-
-    function itemActions(item) {
+    function rowActions(item) {
         var buttons = [
             '<button type="button" class="btn btn-sm btn-white" data-dmca-view="' + escapeHtml(item.case_code || '') + '">View case</button>'
         ];
 
-        if (item.can_submit_counter_notice) {
-            buttons.push('<button type="button" class="btn btn-sm btn-primary" data-dmca-view="' + escapeHtml(item.case_code || '') + '">Submit counter notice</button>');
+        if (item.can_submit_response) {
+            buttons.push('<button type="button" class="btn btn-sm btn-primary" data-dmca-view="' + escapeHtml(item.case_code || '') + '">Add info</button>');
         }
 
-        return buttons.join(' ');
+        if (item.can_delete_video) {
+            buttons.push('<button type="button" class="btn btn-sm btn-danger" data-dmca-delete-case="' + escapeHtml(item.case_code || '') + '">Delete video</button>');
+        }
+
+        return buttons.join('');
     }
 
     function renderList(items, append) {
@@ -186,32 +240,34 @@
 
         renderEmpty(false);
 
-        var html = items.map(function (item) {
-            var fileTitle = item.video && item.video.title ? item.video.title : 'Removed or unresolved file';
-            var workRef = item.work_reference_url ? '<a href="' + escapeHtml(item.work_reference_url) + '" target="_blank" rel="noopener">reference</a>' : 'no reference supplied';
-            var deadline = item.status === 'counter_submitted'
-                ? 'Restoration window: ' + escapeHtml(item.restoration_earliest_label) + ' to ' + escapeHtml(item.restoration_latest_label)
-                : (item.can_submit_counter_notice ? 'Counter notice available' : escapeHtml(item.resolved_label || item.updated_label || ''));
+        var rows = items.map(function (item) {
+            var videoTitle = item.video && item.video.title ? item.video.title : 'Deleted video';
+            var reportedUrl = item.reported_url
+                ? '<a href="' + escapeHtml(item.reported_url) + '" target="_blank" rel="noopener">reported link</a>'
+                : 'No reported link';
+            var claimant = item.complainant_company
+                ? escapeHtml(item.complainant_name || '') + ' (' + escapeHtml(item.complainant_company) + ')'
+                : escapeHtml(item.complainant_name || 'Unknown claimant');
 
             return [
-                '<li class="dmca-item">',
-                '<div class="d-flex align-items-start justify-content-between flex-wrap">',
-                '<div class="pr-lg-4">',
-                '<div class="dmca-item-title">' + escapeHtml(item.case_code || '') + ' • ' + escapeHtml(fileTitle) + '</div>',
-                '<div class="dmca-item-copy mb-2">' + escapeHtml(item.claimed_work || '') + '</div>',
-                '<div class="dmca-item-meta">Received ' + escapeHtml(item.received_label || '') + ' • ' + workRef + '</div>',
-                '<div class="dmca-item-meta">' + deadline + '</div>',
-                '</div>',
-                '<div class="mt-3 mt-lg-0 text-lg-right">',
-                '<div class="mb-2">' + statusPill(item) + '</div>',
-                itemActions(item),
-                '</div>',
-                '</div>',
-                '</li>'
+                '<tr>',
+                '<td>',
+                '<strong class="d-block">' + escapeHtml(item.case_code || '') + '</strong>',
+                '<small class="text-muted d-block mt-1">' + claimant + '</small>',
+                '</td>',
+                '<td>',
+                '<strong class="d-block">' + escapeHtml(videoTitle) + '</strong>',
+                '<small class="text-muted d-block mt-1">' + escapeHtml(item.claimed_work || 'No claimed work supplied') + '</small>',
+                '<small class="text-muted d-block mt-1">' + reportedUrl + '</small>',
+                '</td>',
+                '<td>' + statusBadge(item) + '</td>',
+                '<td>' + deadlineLabel(item) + '</td>',
+                '<td class="dmca-table-actions">' + rowActions(item) + '</td>',
+                '</tr>'
             ].join('');
         }).join('');
 
-        els.list.insertAdjacentHTML('beforeend', html);
+        els.list.insertAdjacentHTML('beforeend', rows);
     }
 
     function requestJson(url, options) {
@@ -231,90 +287,132 @@
         });
     }
 
-    function renderModal(notice) {
-        if (!notice || !els.modalTitle || !els.modalBody) {
-            return;
+    function renderEvidence(notice) {
+        if (!Array.isArray(notice.evidence_urls) || !notice.evidence_urls.length) {
+            return '<p class="mb-0 text-muted">No evidence URLs were attached to this complaint.</p>';
         }
 
-        var videoTitle = notice.video && notice.video.title ? notice.video.title : 'Removed or unresolved file';
-        var timeline = Array.isArray(notice.timeline) && notice.timeline.length
-            ? '<ul class="dmca-timeline">' + notice.timeline.map(function (eventItem) {
-                return [
-                    '<li>',
-                    '<div class="dmca-modal-value">' + escapeHtml(eventItem.title || '') + '</div>',
-                    '<div class="dmca-modal-copy">' + escapeHtml(eventItem.created_label || '') + '</div>',
-                    '<div class="dmca-modal-copy">' + escapeHtml(eventItem.body || '') + '</div>',
-                    '</li>'
-                ].join('');
-            }).join('') + '</ul>'
-            : '<p class="dmca-modal-copy mb-0">No timeline entries were recorded for this case yet.</p>';
-        var evidence = Array.isArray(notice.evidence_urls) && notice.evidence_urls.length
-            ? '<ul>' + notice.evidence_urls.map(function (url) {
-                return '<li><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(url) + '</a></li>';
-            }).join('') + '</ul>'
-            : '<p class="dmca-modal-copy mb-0">No evidence URLs were attached.</p>';
-        var counterBlock = '';
+        return '<ul class="mb-0">' + notice.evidence_urls.map(function (url) {
+            return '<li><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(url) + '</a></li>';
+        }).join('') + '</ul>';
+    }
 
-        if (notice.counter_notice) {
-            counterBlock = [
-                '<div class="the_box mt-4">',
-                '<h5 class="mb-3">Counter notice</h5>',
-                '<div class="dmca-modal-copy mb-2">Submitted ' + escapeHtml(notice.counter_notice.submitted_label || '') + '</div>',
-                '<div class="dmca-modal-copy mb-2">Restoration window: ' + escapeHtml(notice.restoration_earliest_label || '') + ' to ' + escapeHtml(notice.restoration_latest_label || '') + '</div>',
-                '<div class="dmca-modal-copy mb-0">' + escapeHtml(notice.counter_notice.mistake_statement || '') + '</div>',
-                '</div>'
+    function renderTimeline(notice) {
+        if (!Array.isArray(notice.timeline) || !notice.timeline.length) {
+            return '<p class="mb-0 text-muted">No timeline entries were recorded for this case yet.</p>';
+        }
+
+        return '<ul class="dmca-timeline">' + notice.timeline.map(function (eventItem) {
+            return [
+                '<li>',
+                '<strong>' + escapeHtml(eventItem.title || '') + '</strong>',
+                '<span class="d-block mb-2">' + escapeHtml(eventItem.created_label || '') + '</span>',
+                '<p>' + escapeHtml(eventItem.body || '') + '</p>',
+                '</li>'
             ].join('');
-        } else if (notice.can_submit_counter_notice) {
-            counterBlock = [
+        }).join('') + '</ul>';
+    }
+
+    function renderUploaderResponse(notice) {
+        var response = notice.uploader_response || {};
+        var contactEmail = response.contact_email || '';
+        var contactPhone = response.contact_phone || '';
+        var notes = response.notes || '';
+
+        if (notice.can_submit_response) {
+            return [
                 '<div class="the_box mt-4">',
-                '<h5 class="mb-3">Submit counter notice</h5>',
-                '<form data-dmca-counter-form data-case-code="' + escapeHtml(notice.case_code || '') + '">',
+                '<h5 class="mb-3">Optional uploader response</h5>',
+                '<p class="text-muted mb-3">These fields are optional. If you do not submit anything, the file will be deleted automatically after the response window ends.</p>',
+                '<form data-dmca-response-form data-case-code="' + escapeHtml(notice.case_code || '') + '">',
                 '<div class="form-row">',
-                '<div class="form-group col-md-6"><label>Full name</label><input class="form-control" name="full_name" required></div>',
-                '<div class="form-group col-md-6"><label>Email</label><input class="form-control" name="email" type="email" required></div>',
+                '<div class="form-group col-md-6">',
+                '<label>Contact email</label>',
+                '<input type="email" class="form-control" name="contact_email" value="' + escapeHtml(contactEmail) + '" placeholder="Optional">',
                 '</div>',
-                '<div class="form-row">',
-                '<div class="form-group col-md-6"><label>Phone</label><input class="form-control" name="phone" required></div>',
-                '<div class="form-group col-md-6"><label>Postal code</label><input class="form-control" name="postal_code"></div>',
+                '<div class="form-group col-md-6">',
+                '<label>Contact phone</label>',
+                '<input type="text" class="form-control" name="contact_phone" value="' + escapeHtml(contactPhone) + '" placeholder="Optional">',
                 '</div>',
-                '<div class="form-group"><label>Street address</label><input class="form-control" name="address_line" required></div>',
-                '<div class="form-row">',
-                '<div class="form-group col-md-6"><label>City</label><input class="form-control" name="city" required></div>',
-                '<div class="form-group col-md-6"><label>Country</label><input class="form-control" name="country" required></div>',
                 '</div>',
-                '<div class="form-group"><label>Material location before removal</label><input class="form-control" name="removed_material_location" value="' + escapeHtml(notice.reported_url || '') + '" required></div>',
-                '<div class="form-group"><label>Good-faith statement</label><textarea class="form-control" name="mistake_statement" rows="3" required>I have a good-faith belief that the material was removed or disabled as a result of mistake or misidentification.</textarea></div>',
-                '<div class="form-group"><label>Jurisdiction statement</label><textarea class="form-control" name="jurisdiction_statement" rows="3" required>I consent to the jurisdiction of the Federal District Court for my address, or if outside the United States, any judicial district in which the service provider may be found, and I will accept service of process from the complainant.</textarea></div>',
-                '<div class="form-group"><label>Electronic signature</label><input class="form-control" name="signature_name" required></div>',
-                '<button type="submit" class="btn btn-primary">Submit counter notice</button>',
+                '<div class="form-group">',
+                '<label>Notes</label>',
+                '<textarea class="form-control" name="notes" rows="4" placeholder="Optional details for review">' + escapeHtml(notes) + '</textarea>',
+                '</div>',
+                '<div class="d-flex flex-wrap align-items-center">',
+                '<button type="submit" class="btn btn-primary mr-2 mb-2">Send optional info</button>',
+                (notice.can_delete_video ? '<button type="button" class="btn btn-danger mb-2" data-dmca-delete-case="' + escapeHtml(notice.case_code || '') + '">Delete video now</button>' : ''),
+                '</div>',
                 '</form>',
                 '</div>'
             ].join('');
         }
 
-        els.modalTitle.textContent = (notice.case_code || 'DMCA case') + ' • ' + videoTitle;
+        if (notice.status === 'response_submitted' || notice.status === 'counter_submitted') {
+            return [
+                '<div class="the_box mt-4">',
+                '<h5 class="mb-3">Uploader response</h5>',
+                '<p class="text-muted mb-3">Submitted ' + escapeHtml(notice.response_submitted_label || '') + '</p>',
+                '<dl class="dmca-detail-list mb-0">',
+                '<dt>Contact email</dt><dd>' + escapeHtml(contactEmail || 'Not provided') + '</dd>',
+                '<dt>Contact phone</dt><dd>' + escapeHtml(contactPhone || 'Not provided') + '</dd>',
+                '<dt>Notes</dt><dd>' + escapeHtml(notes || 'No extra information was provided.') + '</dd>',
+                '</dl>',
+                '</div>'
+            ].join('');
+        }
+
+        return '';
+    }
+
+    function renderModal(notice) {
+        if (!notice || !els.modalTitle || !els.modalBody) {
+            return;
+        }
+
+        var videoTitle = notice.video && notice.video.title ? notice.video.title : 'Deleted video';
+        var complainant = notice.complainant_company
+            ? escapeHtml(notice.complainant_name || '') + ' (' + escapeHtml(notice.complainant_company) + ')'
+            : escapeHtml(notice.complainant_name || 'Unknown claimant');
+        var complainantContact = [notice.complainant_email || '', notice.complainant_phone || '', notice.complainant_country || '']
+            .filter(Boolean)
+            .join(' | ');
+        var deadline = notice.status === 'content_disabled'
+            ? escapeHtml(notice.auto_delete_remaining_label || notice.auto_delete_label || '')
+            : deadlineLabel(notice);
+
+        state.selectedCaseCode = notice.case_code || '';
+        els.modalTitle.textContent = (notice.case_code || 'DMCA case') + ' - ' + videoTitle;
         els.modalBody.innerHTML = [
             '<div class="row">',
-            '<div class="col-md-6">',
-            '<div class="dmca-meta mb-2">Status</div>',
-            '<div class="mb-3">' + statusPill(notice) + '</div>',
-            '<div class="dmca-meta mb-2">Claimed work</div>',
-            '<div class="dmca-modal-value mb-3">' + escapeHtml(notice.claimed_work || '') + '</div>',
-            '<div class="dmca-meta mb-2">Reported URL</div>',
-            '<div class="dmca-modal-copy mb-3"><a href="' + escapeHtml(notice.reported_url || '#') + '" target="_blank" rel="noopener">' + escapeHtml(notice.reported_url || '') + '</a></div>',
-            '<div class="dmca-meta mb-2">Claimant</div>',
-            '<div class="dmca-modal-copy mb-3">' + escapeHtml((notice.complainant && notice.complainant.name) || '') + (notice.complainant && notice.complainant.company ? ' • ' + escapeHtml(notice.complainant.company) : '') + '</div>',
-            '<div class="dmca-meta mb-2">Claimant contact</div>',
-            '<div class="dmca-modal-copy mb-3">' + escapeHtml((notice.complainant && notice.complainant.email) || '') + ((notice.complainant && notice.complainant.phone) ? ' • ' + escapeHtml(notice.complainant.phone) : '') + '</div>',
-            '<div class="dmca-meta mb-2">Evidence</div>',
-            evidence,
-            '</div>',
-            '<div class="col-md-6">',
-            '<div class="dmca-meta mb-2">Timeline</div>',
-            timeline,
+            '<div class="col-md-6 mb-4">',
+            '<div class="the_box h-100">',
+            '<h5 class="mb-3">Case details</h5>',
+            '<dl class="dmca-detail-list">',
+            '<dt>Status</dt><dd>' + statusBadge(notice) + '</dd>',
+            '<dt>File</dt><dd>' + escapeHtml(videoTitle) + '</dd>',
+            '<dt>Claimed work</dt><dd>' + escapeHtml(notice.claimed_work || 'Not provided') + '</dd>',
+            '<dt>Received</dt><dd>' + escapeHtml(notice.received_label || '') + '</dd>',
+            '<dt>Deadline</dt><dd>' + deadline + '</dd>',
+            '<dt>Reported URL</dt><dd>' + (notice.reported_url ? '<a href="' + escapeHtml(notice.reported_url) + '" target="_blank" rel="noopener">' + escapeHtml(notice.reported_url) + '</a>' : 'Not provided') + '</dd>',
+            '<dt>Reference URL</dt><dd>' + (notice.work_reference_url ? '<a href="' + escapeHtml(notice.work_reference_url) + '" target="_blank" rel="noopener">' + escapeHtml(notice.work_reference_url) + '</a>' : 'Not provided') + '</dd>',
+            '<dt>Claimant</dt><dd>' + complainant + '</dd>',
+            '<dt>Claimant contact</dt><dd>' + escapeHtml(complainantContact || 'Not provided') + '</dd>',
+            '</dl>',
             '</div>',
             '</div>',
-            counterBlock
+            '<div class="col-md-6 mb-4">',
+            '<div class="the_box h-100">',
+            '<h5 class="mb-3">Timeline</h5>',
+            renderTimeline(notice),
+            '</div>',
+            '</div>',
+            '</div>',
+            '<div class="the_box mb-4">',
+            '<h5 class="mb-3">Evidence</h5>',
+            renderEvidence(notice),
+            '</div>',
+            renderUploaderResponse(notice)
         ].join('');
 
         $('#dmca-case-modal').modal('show');
@@ -367,7 +465,56 @@
         loadCases(false);
     }
 
+    function openCase(caseCode) {
+        requestJson('/api/dmca/' + encodeURIComponent(caseCode || ''), {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json'
+            }
+        }).then(function (payload) {
+            renderModal(payload.notice || null);
+        }).catch(function (error) {
+            setError(error && error.message ? error.message : 'The selected DMCA case could not be opened.');
+        });
+    }
+
+    function deleteCase(caseCode) {
+        var formData = new FormData();
+        formData.append('token', window.VE_CSRF_TOKEN || '');
+
+        requestJson('/api/dmca/' + encodeURIComponent(caseCode || '') + '/delete-video', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json'
+            },
+            body: formData
+        }).then(function (payload) {
+            renderSummary(payload.summary || {});
+            reloadCases();
+
+            if (payload.notice) {
+                renderModal(payload.notice);
+            } else {
+                $('#dmca-case-modal').modal('hide');
+            }
+
+            showToast('success', 'Video deleted', payload.message || 'The reported video was deleted.');
+        }).catch(function (error) {
+            showToast('error', 'Delete failed', error && error.message ? error.message : 'The reported video could not be deleted.');
+        });
+    }
+
     root.addEventListener('click', function (event) {
+        var navLink = event.target.closest('.settings_menu a, [data-dmca-nav]');
+
+        if (navLink) {
+            event.preventDefault();
+            activatePanel(navLink.getAttribute('href') || '#dmca_overview', true);
+            return;
+        }
+
         var filterButton = event.target.closest('[data-filter-status]');
 
         if (filterButton) {
@@ -387,17 +534,21 @@
         var viewButton = event.target.closest('[data-dmca-view]');
 
         if (viewButton) {
-            requestJson('/api/dmca/' + encodeURIComponent(viewButton.getAttribute('data-dmca-view') || ''), {
-                method: 'GET',
-                credentials: 'same-origin',
-                headers: {
-                    Accept: 'application/json'
-                }
-            }).then(function (payload) {
-                renderModal(payload.notice || null);
-            }).catch(function (error) {
-                setError(error && error.message ? error.message : 'The selected DMCA case could not be opened.');
-            });
+            activatePanel('#dmca_cases', true);
+            openCase(viewButton.getAttribute('data-dmca-view') || '');
+            return;
+        }
+
+        var deleteButton = event.target.closest('[data-dmca-delete-case]');
+
+        if (deleteButton) {
+            var caseCode = deleteButton.getAttribute('data-dmca-delete-case') || '';
+
+            if (!window.confirm('Delete this reported video now? This action cannot be undone.')) {
+                return;
+            }
+
+            deleteCase(caseCode);
         }
     });
 
@@ -414,7 +565,7 @@
     }
 
     document.addEventListener('submit', function (event) {
-        var form = event.target.closest('[data-dmca-counter-form]');
+        var form = event.target.closest('[data-dmca-response-form]');
 
         if (!form) {
             return;
@@ -424,7 +575,7 @@
         var formData = new FormData(form);
         formData.append('token', window.VE_CSRF_TOKEN || '');
 
-        requestJson('/api/dmca/' + encodeURIComponent(form.getAttribute('data-case-code') || '') + '/counter-notice', {
+        requestJson('/api/dmca/' + encodeURIComponent(form.getAttribute('data-case-code') || '') + '/response', {
             method: 'POST',
             credentials: 'same-origin',
             headers: {
@@ -435,10 +586,16 @@
             renderSummary(payload.summary || {});
             renderModal(payload.notice || null);
             reloadCases();
+            showToast('success', 'Response saved', payload.message || 'Optional uploader information was saved.');
         }).catch(function (error) {
-            window.alert(error && error.message ? error.message : 'Counter notice submission failed.');
+            showToast('error', 'Response failed', error && error.message ? error.message : 'Optional uploader information could not be saved.');
         });
     });
 
+    window.addEventListener('hashchange', function () {
+        activatePanel(window.location.hash, false);
+    });
+
+    activatePanel(window.location.hash || '#dmca_overview', false);
     loadCases(false);
 }());

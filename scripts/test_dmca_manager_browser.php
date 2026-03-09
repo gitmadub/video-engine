@@ -106,13 +106,39 @@ function dmca_browser_insert_ready_video(PDO $pdo, int $userId, string $publicId
     return (int) $pdo->lastInsertId();
 }
 
+/**
+ * @param array<string, mixed> $fields
+ */
+function dmca_browser_update_notice_fields(int $noticeId, array $fields): void
+{
+    $assignments = [];
+    $params = [':id' => $noticeId];
+
+    foreach ($fields as $column => $value) {
+        $assignments[] = $column . ' = :' . $column;
+        $params[':' . $column] = $value;
+    }
+
+    ve_db()->prepare(
+        'UPDATE dmca_notices
+         SET ' . implode(', ', $assignments) . '
+         WHERE id = :id'
+    )->execute($params);
+}
+
 $root = dirname(__DIR__);
 $php = 'C:\\xampp\\php\\php.exe';
-$node = 'node';
+$node = is_file('C:\\Program Files\\nodejs\\node.exe') ? 'C:\\Program Files\\nodejs\\node.exe' : 'node';
 $dbPath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'dmca-browser.sqlite';
 $port = 18086;
 $baseUrl = 'http://127.0.0.1:' . $port;
 $serverPid = null;
+
+$existingPid = dmca_browser_find_listening_pid($port);
+
+if (is_int($existingPid) && $existingPid > 0) {
+    @shell_exec('taskkill /PID ' . $existingPid . ' /T /F >NUL 2>NUL');
+}
 
 @unlink($dbPath);
 
@@ -140,28 +166,48 @@ dmca_browser_assert($activeUserId > 0, 'Browser DMCA user should be created.');
 $emptyUser = ve_create_user('dmca_browser_empty', 'dmca-browser-empty@example.com', 'DmcaPass123');
 dmca_browser_assert((int) ($emptyUser['id'] ?? 0) > 0, 'Browser DMCA empty user should be created.');
 
-$videoId = dmca_browser_insert_ready_video($pdo, $activeUserId, 'dmcabrowser01', 'Browser DMCA Fixture');
+$responseVideoId = dmca_browser_insert_ready_video($pdo, $activeUserId, 'dmcabrowserresp', 'Browser DMCA Response Fixture');
+$deleteVideoId = dmca_browser_insert_ready_video($pdo, $activeUserId, 'dmcabrowserdelete', 'Browser DMCA Delete Fixture');
+$overdueVideoId = dmca_browser_insert_ready_video($pdo, $activeUserId, 'dmcabrowseroverdue', 'Browser DMCA Overdue Fixture');
 
 ve_dmca_create_notice([
     'user_id' => $activeUserId,
-    'video_id' => $videoId,
-    'case_code' => 'DMCA-BROWSER-OPEN',
+    'video_id' => $responseVideoId,
+    'case_code' => 'DMCA-BROWSER-RESP',
     'status' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
     'complainant_name' => 'Browser Rights',
     'complainant_email' => 'rights@example.test',
-    'claimed_work' => 'Browser Fixture',
-    'reported_url' => ve_absolute_url('/d/dmcabrowser01'),
+    'claimed_work' => 'Browser Response Fixture',
+    'reported_url' => ve_absolute_url('/d/dmcabrowserresp'),
     'work_reference_url' => 'https://rights.example.test/browser-fixture',
     'evidence_urls' => ['https://rights.example.test/evidence/browser'],
 ]);
 
 ve_dmca_create_notice([
     'user_id' => $activeUserId,
-    'case_code' => 'DMCA-BROWSER-PENDING',
-    'status' => VE_DMCA_NOTICE_STATUS_PENDING_REVIEW,
-    'complainant_name' => 'Pending Rights',
-    'claimed_work' => 'Browser Pending',
-    'reported_url' => 'https://mirror.example.test/browser-pending',
+    'video_id' => $deleteVideoId,
+    'case_code' => 'DMCA-BROWSER-DELETE',
+    'status' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
+    'complainant_name' => 'Delete Rights',
+    'claimed_work' => 'Browser Delete Fixture',
+    'reported_url' => ve_absolute_url('/d/dmcabrowserdelete'),
+]);
+
+$overdueNotice = ve_dmca_create_notice([
+    'user_id' => $activeUserId,
+    'video_id' => $overdueVideoId,
+    'case_code' => 'DMCA-BROWSER-OVERDUE',
+    'status' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
+    'complainant_name' => 'Overdue Rights',
+    'claimed_work' => 'Browser Overdue Fixture',
+    'reported_url' => ve_absolute_url('/d/dmcabrowseroverdue'),
+]);
+dmca_browser_update_notice_fields((int) ($overdueNotice['id'] ?? 0), [
+    'received_at' => gmdate('Y-m-d H:i:s', strtotime('-2 days')),
+    'updated_at' => gmdate('Y-m-d H:i:s', strtotime('-2 days')),
+    'effective_at' => gmdate('Y-m-d H:i:s', strtotime('-2 days')),
+    'content_disabled_at' => gmdate('Y-m-d H:i:s', strtotime('-2 days')),
+    'auto_delete_at' => gmdate('Y-m-d H:i:s', strtotime('-1 hour')),
 ]);
 
 try {
@@ -182,15 +228,20 @@ try {
         'DMCA_BROWSER_PASSWORD' => 'DmcaPass123',
         'DMCA_BROWSER_EMPTY_USER' => 'dmca_browser_empty',
         'DMCA_BROWSER_EMPTY_PASSWORD' => 'DmcaPass123',
-        'DMCA_BROWSER_CASE_CODE' => 'DMCA-BROWSER-OPEN',
+        'DMCA_BROWSER_RESPONSE_CASE_CODE' => 'DMCA-BROWSER-RESP',
+        'DMCA_BROWSER_DELETE_CASE_CODE' => 'DMCA-BROWSER-DELETE',
     ];
-    $browserPrefix = '';
 
     foreach ($browserEnv as $key => $value) {
-        $browserPrefix .= 'set "' . $key . '=' . str_replace('"', '""', $value) . '" && ';
+        putenv($key . '=' . $value);
+        $_ENV[$key] = $value;
     }
 
-    $browserCommand = 'cmd /c "' . $browserPrefix . 'cd /d "' . $root . '" && ' . $node . ' scripts\\test_dmca_manager_browser.js"';
+    $browserCommand = "powershell -NoProfile -Command \"Set-Location -LiteralPath ''"
+        . str_replace("'", "''", $root)
+        . "''; & ''"
+        . str_replace("'", "''", $node)
+        . "'' ''scripts\\test_dmca_manager_browser.js''\"";
     passthru($browserCommand, $exitCode);
     dmca_browser_assert($exitCode === 0, 'DMCA browser smoke test failed.');
 } finally {

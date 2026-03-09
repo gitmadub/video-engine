@@ -5,23 +5,21 @@ declare(strict_types=1);
 const VE_DMCA_NOTICE_STATUS_PENDING_REVIEW = 'pending_review';
 const VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED = 'content_disabled';
 const VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED = 'counter_submitted';
+const VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED = 'response_submitted';
 const VE_DMCA_NOTICE_STATUS_RESTORED = 'restored';
 const VE_DMCA_NOTICE_STATUS_REJECTED = 'rejected';
 const VE_DMCA_NOTICE_STATUS_WITHDRAWN = 'withdrawn';
+const VE_DMCA_NOTICE_STATUS_UPLOADER_DELETED = 'uploader_deleted';
+const VE_DMCA_NOTICE_STATUS_AUTO_DELETED = 'auto_deleted';
 
-const VE_DMCA_COUNTER_STATUS_SUBMITTED = 'submitted';
 const VE_DMCA_PAGE_SIZE = 10;
 
 function ve_dmca_policy_snapshot(): array
 {
     return [
         'dmca_email' => 'dmca@doodstream.com',
-        'repeat_infringer_threshold' => 3,
-        'repeat_infringer_window_months' => 6,
-        'counter_window_business_days' => [
-            'min' => 10,
-            'max' => 14,
-        ],
+        'response_window_hours' => 24,
+        'uploader_response_optional' => true,
     ];
 }
 
@@ -35,66 +33,77 @@ function ve_dmca_notice_status_catalog(): array
 
     $catalog = [
         VE_DMCA_NOTICE_STATUS_PENDING_REVIEW => [
-            'label' => 'Under review',
-            'tone' => 'warning',
+            'label' => 'Reviewing complaint',
+            'tone' => 'secondary',
             'open' => true,
             'keeps_disabled' => false,
+            'deletes_video' => false,
         ],
         VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED => [
-            'label' => 'Content disabled',
-            'tone' => 'danger',
+            'label' => 'Waiting 24 hours',
+            'tone' => 'warning',
             'open' => true,
             'keeps_disabled' => true,
+            'deletes_video' => false,
         ],
         VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED => [
-            'label' => 'Counter notice sent',
+            'label' => 'Info sent',
             'tone' => 'info',
             'open' => true,
             'keeps_disabled' => true,
+            'deletes_video' => false,
+        ],
+        VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED => [
+            'label' => 'Info sent',
+            'tone' => 'info',
+            'open' => true,
+            'keeps_disabled' => true,
+            'deletes_video' => false,
         ],
         VE_DMCA_NOTICE_STATUS_RESTORED => [
             'label' => 'Restored',
             'tone' => 'success',
             'open' => false,
             'keeps_disabled' => false,
+            'deletes_video' => false,
         ],
         VE_DMCA_NOTICE_STATUS_REJECTED => [
             'label' => 'Rejected',
             'tone' => 'secondary',
             'open' => false,
             'keeps_disabled' => false,
+            'deletes_video' => false,
         ],
         VE_DMCA_NOTICE_STATUS_WITHDRAWN => [
             'label' => 'Withdrawn',
             'tone' => 'secondary',
             'open' => false,
             'keeps_disabled' => false,
+            'deletes_video' => false,
+        ],
+        VE_DMCA_NOTICE_STATUS_UPLOADER_DELETED => [
+            'label' => 'Deleted by you',
+            'tone' => 'secondary',
+            'open' => false,
+            'keeps_disabled' => false,
+            'deletes_video' => true,
+        ],
+        VE_DMCA_NOTICE_STATUS_AUTO_DELETED => [
+            'label' => 'Auto deleted',
+            'tone' => 'secondary',
+            'open' => false,
+            'keeps_disabled' => false,
+            'deletes_video' => true,
         ],
     ];
 
     return $catalog;
 }
 
-function ve_dmca_counter_status_catalog(): array
-{
-    return [
-        VE_DMCA_COUNTER_STATUS_SUBMITTED => [
-            'label' => 'Submitted',
-            'tone' => 'info',
-        ],
-    ];
-}
-
 function ve_dmca_notice_status_meta(string $status): array
 {
     $catalog = ve_dmca_notice_status_catalog();
     return $catalog[$status] ?? $catalog[VE_DMCA_NOTICE_STATUS_PENDING_REVIEW];
-}
-
-function ve_dmca_counter_status_meta(string $status): array
-{
-    $catalog = ve_dmca_counter_status_catalog();
-    return $catalog[$status] ?? $catalog[VE_DMCA_COUNTER_STATUS_SUBMITTED];
 }
 
 function ve_dmca_notice_is_open(string $status): bool
@@ -107,60 +116,57 @@ function ve_dmca_notice_keeps_disabled(string $status): bool
     return (bool) (ve_dmca_notice_status_meta($status)['keeps_disabled'] ?? false);
 }
 
+function ve_dmca_notice_deletes_video(string $status): bool
+{
+    return (bool) (ve_dmca_notice_status_meta($status)['deletes_video'] ?? false);
+}
+
 function ve_dmca_generate_case_code(): string
 {
     return 'DMCA-' . gmdate('Ymd') . '-' . strtoupper(substr(ve_random_token(6), 0, 8));
 }
 
-function ve_dmca_mask_email(string $email): string
-{
-    $email = trim($email);
-
-    if ($email === '' || !str_contains($email, '@')) {
-        return '';
-    }
-
-    [$local, $domain] = explode('@', $email, 2);
-    $localLength = strlen($local);
-
-    if ($localLength <= 2) {
-        $local = substr($local, 0, 1) . '*';
-    } else {
-        $local = substr($local, 0, 1) . str_repeat('*', max(1, $localLength - 2)) . substr($local, -1);
-    }
-
-    return $local . '@' . $domain;
-}
-
-function ve_dmca_mask_phone(string $phone): string
-{
-    $digits = preg_replace('/\D+/', '', $phone) ?? '';
-
-    if ($digits === '') {
-        return '';
-    }
-
-    $suffix = substr($digits, -4);
-    return '***-***-' . str_pad($suffix, 4, '*', STR_PAD_LEFT);
-}
-
-function ve_dmca_add_business_days(string $timestamp, int $days): string
+function ve_dmca_add_hours(string $timestamp, int $hours): string
 {
     $date = new DateTimeImmutable($timestamp, new DateTimeZone('UTC'));
-    $remaining = max(0, $days);
+    return $date->modify('+' . max(0, $hours) . ' hours')->format('Y-m-d H:i:s');
+}
 
-    while ($remaining > 0) {
-        $date = $date->modify('+1 day');
-        $dayOfWeek = (int) $date->format('N');
+function ve_dmca_seconds_until(string $timestamp): ?int
+{
+    $timestamp = trim($timestamp);
 
-        if ($dayOfWeek >= 6) {
-            continue;
-        }
-
-        $remaining--;
+    if ($timestamp === '') {
+        return null;
     }
 
-    return $date->format('Y-m-d H:i:s');
+    $deadline = strtotime($timestamp);
+
+    if ($deadline === false) {
+        return null;
+    }
+
+    return max(0, $deadline - ve_timestamp());
+}
+
+function ve_dmca_format_remaining_label(?int $seconds): string
+{
+    if ($seconds === null) {
+        return 'No deadline';
+    }
+
+    if ($seconds <= 0) {
+        return 'Due now';
+    }
+
+    $hours = intdiv($seconds, 3600);
+    $minutes = intdiv($seconds % 3600, 60);
+
+    if ($hours > 0) {
+        return $hours . 'h ' . $minutes . 'm left';
+    }
+
+    return max(1, $minutes) . 'm left';
 }
 
 function ve_dmca_evidence_urls_json($value): string
@@ -190,7 +196,6 @@ function ve_dmca_evidence_urls_json($value): string
     }
 
     $encoded = json_encode(array_values(array_unique($urls)), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-
     return is_string($encoded) ? $encoded : '[]';
 }
 
@@ -207,6 +212,41 @@ function ve_dmca_decode_evidence_urls($value): array
     }
 
     return array_values(array_filter($decoded, static fn ($item): bool => is_string($item) && trim($item) !== ''));
+}
+
+function ve_dmca_response_json($value): string
+{
+    if (!is_array($value)) {
+        $value = [];
+    }
+
+    $payload = [
+        'contact_email' => trim((string) ($value['contact_email'] ?? '')),
+        'contact_phone' => trim((string) ($value['contact_phone'] ?? '')),
+        'notes' => trim((string) ($value['notes'] ?? '')),
+    ];
+
+    $encoded = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    return is_string($encoded) ? $encoded : '{}';
+}
+
+function ve_dmca_decode_response($value): ?array
+{
+    if (!is_string($value) || trim($value) === '') {
+        return null;
+    }
+
+    $decoded = json_decode($value, true);
+
+    if (!is_array($decoded)) {
+        return null;
+    }
+
+    return [
+        'contact_email' => trim((string) ($decoded['contact_email'] ?? '')),
+        'contact_phone' => trim((string) ($decoded['contact_phone'] ?? '')),
+        'notes' => trim((string) ($decoded['notes'] ?? '')),
+    ];
 }
 
 function ve_dmca_notice_by_id(int $noticeId): ?array
@@ -279,53 +319,50 @@ function ve_dmca_log_event(int $noticeId, string $eventType, string $title, stri
     ]);
 }
 
-function ve_dmca_counter_notice(int $noticeId): ?array
-{
-    $stmt = ve_db()->prepare(
-        'SELECT * FROM dmca_counter_notices
-         WHERE notice_id = :notice_id
-         LIMIT 1'
-    );
-    $stmt->execute([':notice_id' => $noticeId]);
-    $row = $stmt->fetch();
-
-    return is_array($row) ? $row : null;
-}
-
 function ve_dmca_notification_subject(string $status): string
 {
     return match ($status) {
-        VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED => 'DMCA claim applied',
-        VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED => 'Counter notice submitted',
-        VE_DMCA_NOTICE_STATUS_RESTORED => 'Content restored',
-        VE_DMCA_NOTICE_STATUS_REJECTED => 'DMCA claim rejected',
-        VE_DMCA_NOTICE_STATUS_WITHDRAWN => 'DMCA claim withdrawn',
-        default => 'DMCA notice received',
+        VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED => 'DMCA complaint received',
+        VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED,
+        VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED => 'Uploader response received',
+        VE_DMCA_NOTICE_STATUS_UPLOADER_DELETED => 'Video deleted from DMCA manager',
+        VE_DMCA_NOTICE_STATUS_AUTO_DELETED => 'DMCA video auto deleted',
+        VE_DMCA_NOTICE_STATUS_RESTORED => 'DMCA video restored',
+        VE_DMCA_NOTICE_STATUS_REJECTED => 'DMCA complaint rejected',
+        VE_DMCA_NOTICE_STATUS_WITHDRAWN => 'DMCA complaint withdrawn',
+        default => 'DMCA notice updated',
     };
 }
 
-function ve_dmca_notice_video_payload(array $notice): ?array
+function ve_dmca_notice_video_payload(array $notice): array
 {
     $videoId = (int) ($notice['video_id'] ?? 0);
+    $video = $videoId > 0 ? ve_video_get_by_id($videoId) : null;
 
-    if ($videoId <= 0) {
-        return null;
+    if (is_array($video)) {
+        return [
+            'id' => (int) ($video['id'] ?? 0),
+            'public_id' => (string) ($video['public_id'] ?? ''),
+            'title' => (string) ($video['title'] ?? 'Untitled video'),
+            'watch_url' => ve_url('/d/' . rawurlencode((string) ($video['public_id'] ?? ''))),
+            'is_public' => (int) ($video['is_public'] ?? 1),
+            'status' => (string) ($video['status'] ?? ''),
+            'status_message' => (string) ($video['status_message'] ?? ''),
+            'exists' => true,
+        ];
     }
 
-    $video = ve_video_get_by_id($videoId);
-
-    if (!is_array($video)) {
-        return null;
-    }
+    $publicId = trim((string) ($notice['video_public_id_snapshot'] ?? ''));
 
     return [
-        'id' => (int) ($video['id'] ?? 0),
-        'public_id' => (string) ($video['public_id'] ?? ''),
-        'title' => (string) ($video['title'] ?? 'Untitled video'),
-        'watch_url' => ve_url('/d/' . rawurlencode((string) ($video['public_id'] ?? ''))),
-        'is_public' => (int) ($video['is_public'] ?? 1),
-        'status' => (string) ($video['status'] ?? ''),
-        'status_message' => (string) ($video['status_message'] ?? ''),
+        'id' => 0,
+        'public_id' => $publicId,
+        'title' => trim((string) ($notice['video_title_snapshot'] ?? '')) ?: 'Removed video',
+        'watch_url' => $publicId !== '' ? ve_url('/d/' . rawurlencode($publicId)) : '',
+        'is_public' => 0,
+        'status' => '',
+        'status_message' => '',
+        'exists' => false,
     ];
 }
 
@@ -334,70 +371,86 @@ function ve_dmca_notice_payload(array $notice): array
     $status = (string) ($notice['status'] ?? VE_DMCA_NOTICE_STATUS_PENDING_REVIEW);
     $meta = ve_dmca_notice_status_meta($status);
     $video = ve_dmca_notice_video_payload($notice);
-    $counter = ve_dmca_counter_notice((int) ($notice['id'] ?? 0));
-    $effectiveAt = trim((string) ($notice['effective_at'] ?? ''));
-    $policy = ve_dmca_policy_snapshot();
-    $strikeWindowStart = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
-        ->sub(new DateInterval('P' . (int) $policy['repeat_infringer_window_months'] . 'M'))
-        ->format('Y-m-d H:i:s');
+    $autoDeleteAt = trim((string) ($notice['auto_delete_at'] ?? ''));
+    $remainingSeconds = $status === VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED
+        ? ve_dmca_seconds_until($autoDeleteAt)
+        : null;
+    $response = ve_dmca_decode_response($notice['uploader_response_json'] ?? '');
+    $canRespond = $status === VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED;
 
     return [
         'case_code' => (string) ($notice['case_code'] ?? ''),
         'status' => $status,
-        'status_label' => (string) ($meta['label'] ?? 'Under review'),
+        'status_label' => (string) ($meta['label'] ?? 'Waiting for review'),
         'status_tone' => (string) ($meta['tone'] ?? 'secondary'),
         'is_open' => (bool) ($meta['open'] ?? false),
         'content_disabled' => ve_dmca_notice_keeps_disabled($status),
-        'can_submit_counter_notice' => $counter === null && $status === VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
+        'can_submit_response' => $canRespond,
+        'can_delete_video' => $canRespond && (bool) ($video['exists'] ?? false),
         'received_at' => (string) ($notice['received_at'] ?? ''),
         'received_label' => ve_format_datetime_label((string) ($notice['received_at'] ?? '')),
         'updated_at' => (string) ($notice['updated_at'] ?? ''),
         'updated_label' => ve_format_datetime_label((string) ($notice['updated_at'] ?? '')),
-        'effective_at' => $effectiveAt,
-        'effective_label' => ve_format_datetime_label($effectiveAt, 'Not effective yet'),
         'resolved_at' => (string) ($notice['resolved_at'] ?? ''),
         'resolved_label' => ve_format_datetime_label((string) ($notice['resolved_at'] ?? ''), 'Open'),
-        'counter_notice_submitted_at' => (string) ($notice['counter_notice_submitted_at'] ?? ''),
-        'counter_notice_submitted_label' => ve_format_datetime_label((string) ($notice['counter_notice_submitted_at'] ?? ''), 'Not submitted'),
-        'restoration_earliest_at' => (string) ($notice['restoration_earliest_at'] ?? ''),
-        'restoration_earliest_label' => ve_format_datetime_label((string) ($notice['restoration_earliest_at'] ?? ''), 'Not scheduled'),
-        'restoration_latest_at' => (string) ($notice['restoration_latest_at'] ?? ''),
-        'restoration_latest_label' => ve_format_datetime_label((string) ($notice['restoration_latest_at'] ?? ''), 'Not scheduled'),
+        'response_submitted_at' => (string) ($notice['response_submitted_at'] ?? ''),
+        'response_submitted_label' => ve_format_datetime_label((string) ($notice['response_submitted_at'] ?? ''), 'Not sent'),
+        'deleted_video_at' => (string) ($notice['video_deleted_at'] ?? ''),
+        'deleted_video_label' => ve_format_datetime_label((string) ($notice['video_deleted_at'] ?? ''), 'Not deleted'),
+        'auto_delete_at' => $autoDeleteAt,
+        'auto_delete_label' => ve_format_datetime_label($autoDeleteAt, 'Not scheduled'),
+        'auto_delete_remaining_seconds' => $remainingSeconds,
+        'auto_delete_remaining_label' => ve_dmca_format_remaining_label($remainingSeconds),
         'claimed_work' => (string) ($notice['claimed_work'] ?? ''),
-        'work_reference_url' => (string) ($notice['work_reference_url'] ?? ''),
         'reported_url' => (string) ($notice['reported_url'] ?? ''),
-        'evidence_urls' => ve_dmca_decode_evidence_urls($notice['evidence_urls_json'] ?? '[]'),
+        'work_reference_url' => (string) ($notice['work_reference_url'] ?? ''),
+        'complainant_name' => (string) ($notice['complainant_name'] ?? ''),
+        'complainant_company' => (string) ($notice['complainant_company'] ?? ''),
+        'complainant_email' => (string) ($notice['complainant_email'] ?? ''),
+        'complainant_phone' => (string) ($notice['complainant_phone'] ?? ''),
+        'complainant_country' => (string) ($notice['complainant_country'] ?? ''),
+        'evidence_urls' => ve_dmca_decode_evidence_urls($notice['evidence_urls_json'] ?? ''),
         'notes' => (string) ($notice['notes'] ?? ''),
-        'source_type' => (string) ($notice['source_type'] ?? 'email'),
-        'signature_name' => (string) ($notice['signature_name'] ?? ''),
-        'complainant' => [
-            'name' => (string) ($notice['complainant_name'] ?? ''),
-            'company' => (string) ($notice['complainant_company'] ?? ''),
-            'email' => ve_dmca_mask_email((string) ($notice['complainant_email'] ?? '')),
-            'phone' => ve_dmca_mask_phone((string) ($notice['complainant_phone'] ?? '')),
-            'country' => (string) ($notice['complainant_country'] ?? ''),
-        ],
         'video' => $video,
-        'counter_notice' => $counter === null ? null : [
-            'status' => (string) ($counter['status'] ?? VE_DMCA_COUNTER_STATUS_SUBMITTED),
-            'status_label' => (string) (ve_dmca_counter_status_meta((string) ($counter['status'] ?? VE_DMCA_COUNTER_STATUS_SUBMITTED))['label'] ?? 'Submitted'),
-            'submitted_at' => (string) ($counter['submitted_at'] ?? ''),
-            'submitted_label' => ve_format_datetime_label((string) ($counter['submitted_at'] ?? '')),
-            'full_name' => (string) ($counter['full_name'] ?? ''),
-            'email' => (string) ($counter['email'] ?? ''),
-            'phone' => (string) ($counter['phone'] ?? ''),
-            'address_line' => (string) ($counter['address_line'] ?? ''),
-            'city' => (string) ($counter['city'] ?? ''),
-            'country' => (string) ($counter['country'] ?? ''),
-            'postal_code' => (string) ($counter['postal_code'] ?? ''),
-            'removed_material_location' => (string) ($counter['removed_material_location'] ?? ''),
-            'mistake_statement' => (string) ($counter['mistake_statement'] ?? ''),
-            'jurisdiction_statement' => (string) ($counter['jurisdiction_statement'] ?? ''),
-            'signature_name' => (string) ($counter['signature_name'] ?? ''),
-        ],
-        'strike_active' => $effectiveAt !== '' && $effectiveAt >= $strikeWindowStart,
+        'uploader_response' => $response,
         'timeline' => ve_dmca_notice_events((int) ($notice['id'] ?? 0)),
+        'response_optional' => true,
     ];
+}
+
+function ve_dmca_sync_video_snapshot(array $notice): void
+{
+    $noticeId = (int) ($notice['id'] ?? 0);
+    $videoId = (int) ($notice['video_id'] ?? 0);
+
+    if ($noticeId <= 0 || $videoId <= 0) {
+        return;
+    }
+
+    $video = ve_video_get_by_id($videoId);
+
+    if (!is_array($video)) {
+        return;
+    }
+
+    ve_db()->prepare(
+        'UPDATE dmca_notices
+         SET video_title_snapshot = CASE
+                 WHEN video_title_snapshot = "" THEN :video_title_snapshot
+                 ELSE video_title_snapshot
+             END,
+             video_public_id_snapshot = CASE
+                 WHEN video_public_id_snapshot = "" THEN :video_public_id_snapshot
+                 ELSE video_public_id_snapshot
+             END,
+             updated_at = :updated_at
+         WHERE id = :id'
+    )->execute([
+        ':video_title_snapshot' => (string) ($video['title'] ?? ''),
+        ':video_public_id_snapshot' => (string) ($video['public_id'] ?? ''),
+        ':updated_at' => ve_now(),
+        ':id' => $noticeId,
+    ]);
 }
 
 function ve_dmca_disable_video_for_notice(array $notice): void
@@ -428,7 +481,7 @@ function ve_dmca_disable_video_for_notice(array $notice): void
              updated_at = :updated_at
          WHERE id = :id'
     )->execute([
-        ':status_message' => 'Unavailable due to an active DMCA complaint.',
+        ':status_message' => 'Unavailable while this DMCA complaint is waiting for uploader action.',
         ':dmca_hold_count' => $holdCount + 1,
         ':dmca_original_is_public' => $holdCount === 0 ? (int) ($video['is_public'] ?? 1) : ($video['dmca_original_is_public'] ?? null),
         ':dmca_original_status_message' => $holdCount === 0 ? (string) ($video['status_message'] ?? '') : (string) ($video['dmca_original_status_message'] ?? ''),
@@ -440,18 +493,30 @@ function ve_dmca_disable_video_for_notice(array $notice): void
         'UPDATE dmca_notices
          SET content_disabled_at = :content_disabled_at,
              effective_at = COALESCE(NULLIF(effective_at, ""), :effective_at),
+             auto_delete_at = COALESCE(NULLIF(auto_delete_at, ""), :auto_delete_at),
              video_is_public_before_action = COALESCE(video_is_public_before_action, :video_is_public_before_action),
              video_status_message_before_action = CASE
                  WHEN video_status_message_before_action = "" THEN :video_status_message_before_action
                  ELSE video_status_message_before_action
+             END,
+             video_title_snapshot = CASE
+                 WHEN video_title_snapshot = "" THEN :video_title_snapshot
+                 ELSE video_title_snapshot
+             END,
+             video_public_id_snapshot = CASE
+                 WHEN video_public_id_snapshot = "" THEN :video_public_id_snapshot
+                 ELSE video_public_id_snapshot
              END,
              updated_at = :updated_at
          WHERE id = :id'
     )->execute([
         ':content_disabled_at' => $now,
         ':effective_at' => $now,
+        ':auto_delete_at' => ve_dmca_add_hours($now, (int) ve_dmca_policy_snapshot()['response_window_hours']),
         ':video_is_public_before_action' => (int) ($video['is_public'] ?? 1),
         ':video_status_message_before_action' => (string) ($video['status_message'] ?? ''),
+        ':video_title_snapshot' => (string) ($video['title'] ?? ''),
+        ':video_public_id_snapshot' => (string) ($video['public_id'] ?? ''),
         ':updated_at' => $now,
         ':id' => $noticeId,
     ]);
@@ -459,10 +524,9 @@ function ve_dmca_disable_video_for_notice(array $notice): void
 
 function ve_dmca_restore_video_for_notice(array $notice): void
 {
-    $noticeId = (int) ($notice['id'] ?? 0);
     $videoId = (int) ($notice['video_id'] ?? 0);
 
-    if ($noticeId <= 0 || $videoId <= 0 || trim((string) ($notice['content_disabled_at'] ?? '')) === '') {
+    if ($videoId <= 0 || trim((string) ($notice['content_disabled_at'] ?? '')) === '') {
         return;
     }
 
@@ -479,10 +543,12 @@ function ve_dmca_restore_video_for_notice(array $notice): void
     }
 
     $remaining = max(0, $holdCount - 1);
-    $restorePublic = $remaining === 0 ? (($video['dmca_original_is_public'] ?? null) === null ? (int) ($notice['video_is_public_before_action'] ?? 1) : (int) ($video['dmca_original_is_public'] ?? 1)) : 0;
+    $restorePublic = $remaining === 0
+        ? (($video['dmca_original_is_public'] ?? null) === null ? (int) ($notice['video_is_public_before_action'] ?? 1) : (int) ($video['dmca_original_is_public'] ?? 1))
+        : 0;
     $restoreMessage = $remaining === 0
         ? ((string) ($video['dmca_original_status_message'] ?? '') !== '' ? (string) ($video['dmca_original_status_message'] ?? '') : (string) ($notice['video_status_message_before_action'] ?? ''))
-        : 'Unavailable due to an active DMCA complaint.';
+        : 'Unavailable while this DMCA complaint is waiting for uploader action.';
 
     ve_db()->prepare(
         'UPDATE videos
@@ -504,7 +570,7 @@ function ve_dmca_restore_video_for_notice(array $notice): void
     ]);
 }
 
-function ve_dmca_update_notice_status(int $noticeId, string $status, string $eventType, string $title, string $body = ''): array
+function ve_dmca_update_notice_status(int $noticeId, string $status, string $eventType, string $title, string $body = '', array $extraFields = []): array
 {
     $notice = ve_dmca_notice_by_id($noticeId);
 
@@ -520,23 +586,22 @@ function ve_dmca_update_notice_status(int $noticeId, string $status, string $eve
         $notice = ve_dmca_notice_by_id($noticeId) ?? $notice;
     }
 
-    if (ve_dmca_notice_keeps_disabled($oldStatus) && !ve_dmca_notice_keeps_disabled($status)) {
+    if (ve_dmca_notice_keeps_disabled($oldStatus) && !ve_dmca_notice_keeps_disabled($status) && !ve_dmca_notice_deletes_video($status)) {
         ve_dmca_restore_video_for_notice($notice);
     }
 
-    $fields = [
+    $fields = array_merge([
         'status' => $status,
         'updated_at' => $now,
-    ];
+    ], $extraFields);
 
-    if ($status === VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED) {
-        $fields['counter_notice_submitted_at'] = $now;
-        $fields['restoration_earliest_at'] = ve_dmca_add_business_days($now, 10);
-        $fields['restoration_latest_at'] = ve_dmca_add_business_days($now, 14);
+    if ($status === VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED || $status === VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED) {
+        $fields['response_submitted_at'] = $fields['response_submitted_at'] ?? $now;
+        $fields['auto_delete_at'] = $fields['auto_delete_at'] ?? null;
     }
 
     if (!ve_dmca_notice_is_open($status)) {
-        $fields['resolved_at'] = $now;
+        $fields['resolved_at'] = $fields['resolved_at'] ?? $now;
     }
 
     $assignments = [];
@@ -560,21 +625,85 @@ function ve_dmca_update_notice_status(int $noticeId, string $status, string $eve
         throw new RuntimeException('Unable to reload DMCA notice.');
     }
 
-    if (in_array($status, [
-        VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
-        VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED,
-        VE_DMCA_NOTICE_STATUS_RESTORED,
-        VE_DMCA_NOTICE_STATUS_REJECTED,
-        VE_DMCA_NOTICE_STATUS_WITHDRAWN,
-    ], true)) {
-        ve_add_notification(
-            (int) ($updated['user_id'] ?? 0),
-            ve_dmca_notification_subject($status),
-            'Case ' . (string) ($updated['case_code'] ?? '') . ' is now marked as ' . (ve_dmca_notice_status_meta($status)['label'] ?? $status) . '.'
-        );
-    }
+    ve_add_notification(
+        (int) ($updated['user_id'] ?? 0),
+        ve_dmca_notification_subject($status),
+        'Case ' . (string) ($updated['case_code'] ?? '') . ' is now marked as ' . (ve_dmca_notice_status_meta($status)['label'] ?? $status) . '.'
+    );
 
     return $updated;
+}
+
+function ve_dmca_delete_video_for_notice(array $notice, string $status, string $eventType, string $title, string $body): array
+{
+    $noticeId = (int) ($notice['id'] ?? 0);
+
+    if ($noticeId <= 0) {
+        throw new RuntimeException('DMCA notice not found.');
+    }
+
+    $videoId = (int) ($notice['video_id'] ?? 0);
+    $video = $videoId > 0 ? ve_video_get_by_id($videoId) : null;
+    $deletedAt = ve_now();
+
+    if (is_array($video)) {
+        ve_db()->prepare(
+            'UPDATE dmca_notices
+             SET video_title_snapshot = CASE
+                     WHEN video_title_snapshot = "" THEN :video_title_snapshot
+                     ELSE video_title_snapshot
+                 END,
+                 video_public_id_snapshot = CASE
+                     WHEN video_public_id_snapshot = "" THEN :video_public_id_snapshot
+                     ELSE video_public_id_snapshot
+                 END,
+                 updated_at = :updated_at
+             WHERE id = :id'
+        )->execute([
+            ':video_title_snapshot' => (string) ($video['title'] ?? ''),
+            ':video_public_id_snapshot' => (string) ($video['public_id'] ?? ''),
+            ':updated_at' => $deletedAt,
+            ':id' => $noticeId,
+        ]);
+
+        ve_video_delete_video_rows([$video]);
+    }
+
+    return ve_dmca_update_notice_status($noticeId, $status, $eventType, $title, $body, [
+        'video_deleted_at' => $deletedAt,
+        'auto_delete_at' => null,
+    ]);
+}
+
+function ve_dmca_process_due_removals(): void
+{
+    $stmt = ve_db()->prepare(
+        'SELECT *
+         FROM dmca_notices
+         WHERE status = :status
+           AND auto_delete_at IS NOT NULL
+           AND auto_delete_at != ""
+           AND auto_delete_at <= :now
+         ORDER BY auto_delete_at ASC, id ASC'
+    );
+    $stmt->execute([
+        ':status' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
+        ':now' => ve_now(),
+    ]);
+
+    foreach ($stmt->fetchAll() as $notice) {
+        if (!is_array($notice)) {
+            continue;
+        }
+
+        ve_dmca_delete_video_for_notice(
+            $notice,
+            VE_DMCA_NOTICE_STATUS_AUTO_DELETED,
+            'auto_delete',
+            'Video auto deleted',
+            'No uploader response was submitted within 24 hours, so the file was permanently deleted.'
+        );
+    }
 }
 
 function ve_dmca_create_notice(array $payload): array
@@ -620,11 +749,15 @@ function ve_dmca_create_notice(array $payload): array
     $receivedAt = $receivedAt !== '' ? $receivedAt : ve_now();
     $caseCode = trim((string) ($payload['case_code'] ?? ''));
     $caseCode = $caseCode !== '' ? strtoupper($caseCode) : ve_dmca_generate_case_code();
-    $status = trim((string) ($payload['status'] ?? VE_DMCA_NOTICE_STATUS_PENDING_REVIEW));
+    $requestedStatus = trim((string) ($payload['status'] ?? ''));
+    $status = $requestedStatus !== '' ? $requestedStatus : ($videoId > 0 ? VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED : VE_DMCA_NOTICE_STATUS_PENDING_REVIEW);
 
     if (!array_key_exists($status, ve_dmca_notice_status_catalog())) {
-        $status = VE_DMCA_NOTICE_STATUS_PENDING_REVIEW;
+        $status = $videoId > 0 ? VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED : VE_DMCA_NOTICE_STATUS_PENDING_REVIEW;
     }
+
+    $videoTitleSnapshot = is_array($video) ? (string) ($video['title'] ?? '') : trim((string) ($payload['video_title_snapshot'] ?? ''));
+    $videoPublicSnapshot = is_array($video) ? (string) ($video['public_id'] ?? '') : trim((string) ($payload['video_public_id_snapshot'] ?? ''));
 
     ve_db()->prepare(
         'INSERT INTO dmca_notices (
@@ -633,14 +766,16 @@ function ve_dmca_create_notice(array $payload): array
             claimed_work, work_reference_url, reported_url, evidence_urls_json, notes,
             signature_name, effective_at, content_disabled_at, counter_notice_submitted_at,
             restoration_earliest_at, restoration_latest_at, resolved_at, video_is_public_before_action,
-            video_status_message_before_action, received_at, updated_at
+            video_status_message_before_action, received_at, updated_at, response_submitted_at,
+            uploader_response_json, auto_delete_at, video_deleted_at, video_title_snapshot, video_public_id_snapshot
         ) VALUES (
             :case_code, :user_id, :video_id, :source_type, :status, :complainant_name, :complainant_company,
             :complainant_email, :complainant_phone, :complainant_address, :complainant_country,
             :claimed_work, :work_reference_url, :reported_url, :evidence_urls_json, :notes,
             :signature_name, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL,
-            "", :received_at, :updated_at
+            "", :received_at, :updated_at, NULL,
+            "", NULL, NULL, :video_title_snapshot, :video_public_id_snapshot
         )'
     )->execute([
         ':case_code' => $caseCode,
@@ -662,6 +797,8 @@ function ve_dmca_create_notice(array $payload): array
         ':signature_name' => trim((string) ($payload['signature_name'] ?? '')),
         ':received_at' => $receivedAt,
         ':updated_at' => $receivedAt,
+        ':video_title_snapshot' => $videoTitleSnapshot,
+        ':video_public_id_snapshot' => $videoPublicSnapshot,
     ]);
 
     $noticeId = (int) ve_db()->lastInsertId();
@@ -671,76 +808,46 @@ function ve_dmca_create_notice(array $payload): array
         throw new RuntimeException('Unable to reload DMCA notice.');
     }
 
-    ve_dmca_log_event($noticeId, 'received', 'Notice received', 'The complaint was logged by the compliance system.', $receivedAt);
-    ve_add_notification($userId, 'DMCA notice received', 'Case ' . $caseCode . ' has been added to your DMCA manager.');
+    ve_dmca_log_event($noticeId, 'received', 'Complaint received', 'The complaint was logged and is now visible in the uploader DMCA manager.', $receivedAt);
+    ve_add_notification($userId, 'DMCA complaint received', 'Case ' . $caseCode . ' has been added to your DMCA manager.');
 
     if ($status !== VE_DMCA_NOTICE_STATUS_PENDING_REVIEW) {
-        $transitionTitle = match ($status) {
-            VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED => 'Content disabled',
-            VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED => 'Counter notice sent',
-            VE_DMCA_NOTICE_STATUS_RESTORED => 'Content restored',
-            VE_DMCA_NOTICE_STATUS_REJECTED => 'Notice rejected',
-            VE_DMCA_NOTICE_STATUS_WITHDRAWN => 'Notice withdrawn',
-            default => 'Status updated',
-        };
-
         $transitionBody = match ($status) {
-            VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED => 'The reported file was removed from public access pending resolution.',
-            VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED => 'The uploader submitted a counter notice and the file remains disabled until review completes.',
-            VE_DMCA_NOTICE_STATUS_RESTORED => 'The reported file was restored to its prior availability state.',
+            VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED => 'The reported file was removed from public access and will be deleted after 24 hours if you do not respond.',
+            VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED => 'The uploader sent optional information for manual review.',
+            VE_DMCA_NOTICE_STATUS_UPLOADER_DELETED => 'The uploader deleted the reported file.',
+            VE_DMCA_NOTICE_STATUS_AUTO_DELETED => 'The reported file was auto deleted after the response window expired.',
+            VE_DMCA_NOTICE_STATUS_RESTORED => 'The reported file was restored.',
             VE_DMCA_NOTICE_STATUS_REJECTED => 'The complaint was rejected after review.',
-            VE_DMCA_NOTICE_STATUS_WITHDRAWN => 'The complainant withdrew the complaint.',
+            VE_DMCA_NOTICE_STATUS_WITHDRAWN => 'The complaint was withdrawn by the complainant.',
             default => '',
         };
 
-        $notice = ve_dmca_update_notice_status($noticeId, $status, 'status_change', $transitionTitle, $transitionBody);
+        $notice = ve_dmca_update_notice_status($noticeId, $status, 'status_change', ve_dmca_notice_status_meta($status)['label'] ?? 'Status updated', $transitionBody);
     }
 
     return $notice;
 }
 
-function ve_dmca_validate_counter_notice_input(): array
+function ve_dmca_validate_uploader_response_input(): array
 {
     $fields = [
-        'full_name' => trim((string) ($_POST['full_name'] ?? '')),
-        'email' => strtolower(trim((string) ($_POST['email'] ?? ''))),
-        'phone' => trim((string) ($_POST['phone'] ?? '')),
-        'address_line' => trim((string) ($_POST['address_line'] ?? '')),
-        'city' => trim((string) ($_POST['city'] ?? '')),
-        'country' => trim((string) ($_POST['country'] ?? '')),
-        'postal_code' => trim((string) ($_POST['postal_code'] ?? '')),
-        'removed_material_location' => trim((string) ($_POST['removed_material_location'] ?? '')),
-        'mistake_statement' => trim((string) ($_POST['mistake_statement'] ?? '')),
-        'jurisdiction_statement' => trim((string) ($_POST['jurisdiction_statement'] ?? '')),
-        'signature_name' => trim((string) ($_POST['signature_name'] ?? '')),
+        'contact_email' => strtolower(trim((string) ($_POST['contact_email'] ?? ''))),
+        'contact_phone' => trim((string) ($_POST['contact_phone'] ?? '')),
+        'notes' => trim((string) ($_POST['notes'] ?? '')),
     ];
 
-    foreach ([
-        'full_name' => 'full name',
-        'email' => 'email address',
-        'phone' => 'phone number',
-        'address_line' => 'street address',
-        'city' => 'city',
-        'country' => 'country',
-        'removed_material_location' => 'removed material location',
-        'mistake_statement' => 'mistake statement',
-        'jurisdiction_statement' => 'jurisdiction statement',
-        'signature_name' => 'signature',
-    ] as $key => $label) {
-        if ($fields[$key] === '') {
-            throw new InvalidArgumentException('Enter your ' . $label . '.');
-        }
-    }
-
-    if (!filter_var($fields['email'], FILTER_VALIDATE_EMAIL)) {
-        throw new InvalidArgumentException('Enter a valid email address.');
+    if ($fields['contact_email'] !== '' && !filter_var($fields['contact_email'], FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Enter a valid contact email or leave it blank.');
     }
 
     return $fields;
 }
 
-function ve_dmca_submit_counter_notice(int $userId, string $caseCode): array
+function ve_dmca_submit_uploader_response(int $userId, string $caseCode): array
 {
+    ve_dmca_process_due_removals();
+
     $notice = ve_dmca_notice_by_case_code($userId, $caseCode);
 
     if (!is_array($notice)) {
@@ -748,52 +855,58 @@ function ve_dmca_submit_counter_notice(int $userId, string $caseCode): array
     }
 
     if ((string) ($notice['status'] ?? '') !== VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED) {
-        throw new InvalidArgumentException('This case is not currently eligible for a counter notice.');
+        throw new InvalidArgumentException('This case is no longer waiting for uploader action.');
     }
 
-    if (ve_dmca_counter_notice((int) ($notice['id'] ?? 0)) !== null) {
-        throw new InvalidArgumentException('A counter notice has already been submitted for this case.');
+    $fields = ve_dmca_validate_uploader_response_input();
+    $summary = trim(implode(' ', array_filter([
+        $fields['notes'] !== '' ? 'Uploader notes: ' . $fields['notes'] : '',
+        $fields['contact_email'] !== '' ? 'Contact email: ' . $fields['contact_email'] : '',
+        $fields['contact_phone'] !== '' ? 'Contact phone: ' . $fields['contact_phone'] : '',
+    ])));
+
+    if ($summary === '') {
+        $summary = 'The uploader responded without adding extra information.';
     }
 
-    $fields = ve_dmca_validate_counter_notice_input();
-    $now = ve_now();
-
-    ve_db()->prepare(
-        'INSERT INTO dmca_counter_notices (
-            notice_id, user_id, status, full_name, email, phone, address_line, city, country,
-            postal_code, removed_material_location, mistake_statement, jurisdiction_statement,
-            signature_name, submitted_at, updated_at
-         ) VALUES (
-            :notice_id, :user_id, :status, :full_name, :email, :phone, :address_line, :city, :country,
-            :postal_code, :removed_material_location, :mistake_statement, :jurisdiction_statement,
-            :signature_name, :submitted_at, :updated_at
-         )'
-    )->execute([
-        ':notice_id' => (int) ($notice['id'] ?? 0),
-        ':user_id' => $userId,
-        ':status' => VE_DMCA_COUNTER_STATUS_SUBMITTED,
-        ':full_name' => $fields['full_name'],
-        ':email' => $fields['email'],
-        ':phone' => $fields['phone'],
-        ':address_line' => $fields['address_line'],
-        ':city' => $fields['city'],
-        ':country' => $fields['country'],
-        ':postal_code' => $fields['postal_code'],
-        ':removed_material_location' => $fields['removed_material_location'],
-        ':mistake_statement' => $fields['mistake_statement'],
-        ':jurisdiction_statement' => $fields['jurisdiction_statement'],
-        ':signature_name' => $fields['signature_name'],
-        ':submitted_at' => $now,
-        ':updated_at' => $now,
-    ]);
-
-    $body = 'The counter notice was logged and the standard 10 to 14 business day restoration window now applies unless the complainant reports court action.';
     return ve_dmca_update_notice_status(
         (int) ($notice['id'] ?? 0),
-        VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED,
-        'counter_notice',
-        'Counter notice submitted',
-        $body
+        VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED,
+        'uploader_response',
+        'Uploader response received',
+        $summary,
+        [
+            'uploader_response_json' => ve_dmca_response_json($fields),
+        ]
+    );
+}
+
+function ve_dmca_delete_video_by_case(int $userId, string $caseCode): array
+{
+    ve_dmca_process_due_removals();
+
+    $notice = ve_dmca_notice_by_case_code($userId, $caseCode);
+
+    if (!is_array($notice)) {
+        throw new RuntimeException('DMCA case not found.');
+    }
+
+    if (!ve_dmca_notice_is_open((string) ($notice['status'] ?? ''))) {
+        throw new InvalidArgumentException('This case is already closed.');
+    }
+
+    $video = ve_dmca_notice_video_payload($notice);
+
+    if (!(bool) ($video['exists'] ?? false)) {
+        throw new InvalidArgumentException('The reported file was already deleted.');
+    }
+
+    return ve_dmca_delete_video_for_notice(
+        $notice,
+        VE_DMCA_NOTICE_STATUS_UPLOADER_DELETED,
+        'uploader_delete',
+        'Video deleted by uploader',
+        'The uploader deleted the reported file from the DMCA manager.'
     );
 }
 
@@ -803,16 +916,16 @@ function ve_dmca_list_filters(string $statusFilter, string $queryFilter): array
     $params = [];
 
     if ($statusFilter === 'open') {
-        $clauses[] = 'n.status IN ("' . VE_DMCA_NOTICE_STATUS_PENDING_REVIEW . '", "' . VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED . '", "' . VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED . '")';
+        $clauses[] = 'n.status IN ("' . VE_DMCA_NOTICE_STATUS_PENDING_REVIEW . '", "' . VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED . '", "' . VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED . '", "' . VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED . '")';
     } elseif ($statusFilter === 'resolved') {
-        $clauses[] = 'n.status IN ("' . VE_DMCA_NOTICE_STATUS_RESTORED . '", "' . VE_DMCA_NOTICE_STATUS_REJECTED . '", "' . VE_DMCA_NOTICE_STATUS_WITHDRAWN . '")';
+        $clauses[] = 'n.status IN ("' . VE_DMCA_NOTICE_STATUS_RESTORED . '", "' . VE_DMCA_NOTICE_STATUS_REJECTED . '", "' . VE_DMCA_NOTICE_STATUS_WITHDRAWN . '", "' . VE_DMCA_NOTICE_STATUS_UPLOADER_DELETED . '", "' . VE_DMCA_NOTICE_STATUS_AUTO_DELETED . '")';
     } elseif ($statusFilter !== '' && array_key_exists($statusFilter, ve_dmca_notice_status_catalog())) {
         $clauses[] = 'n.status = :status_filter';
         $params[':status_filter'] = $statusFilter;
     }
 
     if ($queryFilter !== '') {
-        $clauses[] = '(lower(n.case_code) LIKE :query_filter OR lower(n.claimed_work) LIKE :query_filter OR lower(n.complainant_name) LIKE :query_filter OR lower(COALESCE(v.title, "")) LIKE :query_filter)';
+        $clauses[] = '(lower(n.case_code) LIKE :query_filter OR lower(n.claimed_work) LIKE :query_filter OR lower(COALESCE(n.video_title_snapshot, "")) LIKE :query_filter OR lower(COALESCE(v.title, "")) LIKE :query_filter)';
         $params[':query_filter'] = '%' . strtolower($queryFilter) . '%';
     }
 
@@ -885,66 +998,53 @@ function ve_dmca_list_notices(int $userId, string $statusFilter = '', string $qu
 
 function ve_dmca_summary(int $userId): array
 {
-    $rows = ve_db()->prepare(
-        'SELECT status, effective_at
+    $stmt = ve_db()->prepare(
+        'SELECT status
          FROM dmca_notices
          WHERE user_id = :user_id'
     );
-    $rows->execute([':user_id' => $userId]);
-    $items = $rows->fetchAll();
-    $openCount = 0;
-    $disabledCount = 0;
-    $counterCount = 0;
-    $restoredCount = 0;
-    $strikeCount = 0;
-    $policy = ve_dmca_policy_snapshot();
-    $windowStart = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
-        ->sub(new DateInterval('P' . (int) $policy['repeat_infringer_window_months'] . 'M'))
-        ->format('Y-m-d H:i:s');
+    $stmt->execute([':user_id' => $userId]);
 
-    foreach ($items as $item) {
+    $openCount = 0;
+    $pendingDeleteCount = 0;
+    $responseCount = 0;
+    $deletedCount = 0;
+
+    foreach ($stmt->fetchAll() as $item) {
         if (!is_array($item)) {
             continue;
         }
 
         $status = (string) ($item['status'] ?? VE_DMCA_NOTICE_STATUS_PENDING_REVIEW);
-        $effectiveAt = trim((string) ($item['effective_at'] ?? ''));
 
         if (ve_dmca_notice_is_open($status)) {
             $openCount++;
         }
 
         if ($status === VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED) {
-            $disabledCount++;
+            $pendingDeleteCount++;
         }
 
-        if ($status === VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED) {
-            $counterCount++;
+        if ($status === VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED || $status === VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED) {
+            $responseCount++;
         }
 
-        if ($status === VE_DMCA_NOTICE_STATUS_RESTORED) {
-            $restoredCount++;
-        }
-
-        if ($effectiveAt !== '' && $effectiveAt >= $windowStart) {
-            $strikeCount++;
+        if ($status === VE_DMCA_NOTICE_STATUS_UPLOADER_DELETED || $status === VE_DMCA_NOTICE_STATUS_AUTO_DELETED) {
+            $deletedCount++;
         }
     }
 
-    $threshold = (int) $policy['repeat_infringer_threshold'];
-
     return [
         'open_cases' => $openCount,
-        'content_disabled' => $disabledCount,
-        'counter_notice_pending' => $counterCount,
-        'restored_cases' => $restoredCount,
-        'effective_strikes' => $strikeCount,
-        'risk_state' => $strikeCount >= $threshold ? 'threshold_reached' : ($strikeCount === max(0, $threshold - 1) ? 'warning' : 'normal'),
+        'pending_delete' => $pendingDeleteCount,
+        'responses_received' => $responseCount,
+        'deleted_videos' => $deletedCount,
     ];
 }
 
 function ve_dmca_snapshot(int $userId, string $statusFilter = '', string $queryFilter = '', int $page = 1): array
 {
+    ve_dmca_process_due_removals();
     $list = ve_dmca_list_notices($userId, $statusFilter, $queryFilter, $page);
 
     return [
@@ -962,8 +1062,8 @@ function ve_dmca_snapshot(int $userId, string $statusFilter = '', string $queryF
 
 function ve_dmca_case_detail(int $userId, string $caseCode): ?array
 {
+    ve_dmca_process_due_removals();
     $notice = ve_dmca_notice_by_case_code($userId, $caseCode);
-
     return is_array($notice) ? ve_dmca_notice_payload($notice) : null;
 }
 
@@ -995,13 +1095,13 @@ function ve_handle_dmca_detail_api(string $caseCode): void
     ]);
 }
 
-function ve_handle_dmca_counter_notice_api(string $caseCode): void
+function ve_handle_dmca_response_api(string $caseCode): void
 {
     $user = ve_require_auth();
     ve_require_csrf(ve_request_csrf_token());
 
     try {
-        $notice = ve_dmca_submit_counter_notice((int) $user['id'], $caseCode);
+        $notice = ve_dmca_submit_uploader_response((int) $user['id'], $caseCode);
     } catch (InvalidArgumentException $exception) {
         ve_json([
             'status' => 'fail',
@@ -1016,8 +1116,40 @@ function ve_handle_dmca_counter_notice_api(string $caseCode): void
 
     ve_json([
         'status' => 'ok',
-        'message' => 'Counter notice submitted successfully.',
+        'message' => 'Optional uploader information was saved.',
         'notice' => ve_dmca_notice_payload($notice),
         'summary' => ve_dmca_summary((int) $user['id']),
     ]);
+}
+
+function ve_handle_dmca_delete_video_api(string $caseCode): void
+{
+    $user = ve_require_auth();
+    ve_require_csrf(ve_request_csrf_token());
+
+    try {
+        $notice = ve_dmca_delete_video_by_case((int) $user['id'], $caseCode);
+    } catch (InvalidArgumentException $exception) {
+        ve_json([
+            'status' => 'fail',
+            'message' => $exception->getMessage(),
+        ], 422);
+    } catch (Throwable $exception) {
+        ve_json([
+            'status' => 'fail',
+            'message' => $exception->getMessage(),
+        ], 404);
+    }
+
+    ve_json([
+        'status' => 'ok',
+        'message' => 'Video deleted successfully.',
+        'notice' => ve_dmca_notice_payload($notice),
+        'summary' => ve_dmca_summary((int) $user['id']),
+    ]);
+}
+
+function ve_handle_dmca_counter_notice_api(string $caseCode): void
+{
+    ve_handle_dmca_response_api($caseCode);
 }

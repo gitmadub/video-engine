@@ -75,7 +75,8 @@ async function loginAndOpenDmcaPage(browser, baseURL, username, password) {
   const password = requiredEnv('DMCA_BROWSER_PASSWORD');
   const emptyUsername = requiredEnv('DMCA_BROWSER_EMPTY_USER');
   const emptyPassword = requiredEnv('DMCA_BROWSER_EMPTY_PASSWORD');
-  const caseCode = requiredEnv('DMCA_BROWSER_CASE_CODE');
+  const responseCaseCode = requiredEnv('DMCA_BROWSER_RESPONSE_CASE_CODE');
+  const deleteCaseCode = requiredEnv('DMCA_BROWSER_DELETE_CASE_CODE');
   const browserPath = firstExistingPath([
     process.env.DMCA_BROWSER_EXECUTABLE || '',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -103,7 +104,7 @@ async function loginAndOpenDmcaPage(browser, baseURL, username, password) {
     const emptyCopy = await emptySession.page.locator('[data-dmca-empty]').textContent();
     const emptyOpen = (await emptySession.page.locator('[data-dmca-open]').textContent() || '').trim();
 
-    if (!String(emptyCopy || '').includes('No active DMCA complaints')) {
+    if (!String(emptyCopy || '').includes('No DMCA complaints right now.')) {
       throw new Error(`Empty-state user should see the DMCA empty copy. Received: ${emptyCopy || '(empty)'}`);
     }
 
@@ -115,64 +116,110 @@ async function loginAndOpenDmcaPage(browser, baseURL, username, password) {
 
     const activeSession = await loginAndOpenDmcaPage(browser, baseURL, username, password);
     const page = activeSession.page;
-    await page.waitForFunction((expectedCaseCode) => {
-      const list = document.querySelector('[data-dmca-list]');
-      return Boolean(list && list.textContent && list.textContent.includes(expectedCaseCode));
-    }, caseCode);
-
-    const openCases = (await page.locator('[data-dmca-open]').textContent() || '').trim();
-
-    if (openCases !== '2') {
-      throw new Error(`Seeded active user should show two open DMCA cases. Received: ${openCases || '(empty)'}`);
-    }
-
-    await page.locator(`[data-dmca-view="${caseCode}"]`).first().click();
-    await page.waitForFunction((expectedCaseCode) => {
-      const title = document.querySelector('[data-dmca-modal-title]');
-      return Boolean(title && title.textContent && title.textContent.includes(expectedCaseCode));
-    }, caseCode);
-
-    const modalCopy = await page.locator('[data-dmca-modal-body]').textContent();
-
-    if (!String(modalCopy || '').includes('Submit counter notice')) {
-      throw new Error(`Open DMCA case should render the counter-notice form. Received: ${modalCopy || '(empty)'}`);
-    }
-
-    await page.fill('[name="full_name"]', 'Browser QA');
-    await page.fill('[name="email"]', 'browser-qa@example.com');
-    await page.fill('[name="phone"]', '+1 555 333 4444');
-    await page.fill('[name="address_line"]', '45 Browser Lane');
-    await page.fill('[name="city"]', 'Playwright');
-    await page.fill('[name="country"]', 'US');
-    await page.fill('[name="postal_code"]', '10001');
-    await page.fill('[name="removed_material_location"]', 'https://127.0.0.1/d/dmcabrowser01');
-    await page.fill('[name="mistake_statement"]', 'I have a good-faith belief that the material was removed due to mistake or misidentification.');
-    await page.fill('[name="jurisdiction_statement"]', 'I consent to the jurisdiction of the appropriate Federal District Court and will accept service of process.');
-    await page.fill('[name="signature_name"]', 'Browser QA');
-    await page.locator('[data-dmca-counter-form] button[type="submit"]').click();
 
     await page.waitForFunction(() => {
-      const modalBody = document.querySelector('[data-dmca-modal-body]');
-      const counterTotal = document.querySelector('[data-dmca-counter]');
+      const shell = document.querySelector('.sidebar.settings-page');
+      const content = document.querySelector('.content_box.settings_data');
+      return Boolean(shell && content);
+    });
+
+    await page.waitForFunction(() => {
+      const openCases = document.querySelector('[data-dmca-open]');
+      const pendingDelete = document.querySelector('[data-dmca-pending-delete]');
+      const deleted = document.querySelector('[data-dmca-deleted]');
+
       return Boolean(
-        modalBody &&
-        modalBody.textContent &&
-        modalBody.textContent.includes('Counter notice') &&
-        counterTotal &&
-        counterTotal.textContent &&
-        counterTotal.textContent.trim() === '1'
+        openCases &&
+        pendingDelete &&
+        deleted &&
+        openCases.textContent &&
+        pendingDelete.textContent &&
+        deleted.textContent &&
+        openCases.textContent.trim() === '2' &&
+        pendingDelete.textContent.trim() === '2' &&
+        deleted.textContent.trim() === '1'
       );
     });
 
+    await page.locator('.settings_menu a[href="#dmca_cases"]').click();
     await page.waitForFunction(() => {
-      const list = document.querySelector('[data-dmca-list]');
-      return Boolean(list && list.textContent && list.textContent.includes('Counter notice sent'));
+      const panel = document.querySelector('#dmca_cases');
+      return Boolean(panel && panel.classList.contains('active'));
     });
 
-    const updatedStatus = await page.locator('[data-dmca-list]').textContent();
+    await page.waitForFunction((expectedCaseCode) => {
+      const list = document.querySelector('[data-dmca-list]');
+      return Boolean(list && list.textContent && list.textContent.includes(expectedCaseCode));
+    }, responseCaseCode);
 
-    if (!String(updatedStatus || '').includes('Counter notice sent')) {
-      throw new Error(`DMCA list should update after counter-notice submission. Received: ${updatedStatus || '(empty)'}`);
+    await page.locator(`[data-dmca-view="${responseCaseCode}"]`).first().click();
+    await page.waitForFunction((expectedCaseCode) => {
+      const title = document.querySelector('[data-dmca-modal-title]');
+      return Boolean(title && title.textContent && title.textContent.includes(expectedCaseCode));
+    }, responseCaseCode);
+
+    const modalCopy = await page.locator('[data-dmca-modal-body]').textContent();
+
+    if (!String(modalCopy || '').includes('Optional uploader response')) {
+      throw new Error(`Open DMCA case should render the optional uploader response form. Received: ${modalCopy || '(empty)'}`);
+    }
+
+    await page.locator('[data-dmca-response-form] button[type="submit"]').click();
+
+    await page.waitForFunction(() => {
+      const modalBody = document.querySelector('[data-dmca-modal-body]');
+      const responseTotal = document.querySelector('[data-dmca-response]');
+      return Boolean(
+        modalBody &&
+        modalBody.textContent &&
+        modalBody.textContent.includes('Uploader response') &&
+        responseTotal &&
+        responseTotal.textContent &&
+        responseTotal.textContent.trim() === '1'
+      );
+    });
+
+    await page.waitForFunction((expectedCaseCode) => {
+      const list = document.querySelector('[data-dmca-list]');
+      return Boolean(list && list.textContent && list.textContent.includes(expectedCaseCode) && list.textContent.includes('Info sent'));
+    }, responseCaseCode);
+
+    await page.locator('#dmca-case-modal .close').click();
+    await page.waitForFunction(() => {
+      const modal = document.querySelector('#dmca-case-modal');
+      return Boolean(modal && !modal.classList.contains('show'));
+    });
+
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.locator(`[data-dmca-delete-case="${deleteCaseCode}"]`).first().click();
+
+    await page.waitForFunction(() => {
+      const openCases = document.querySelector('[data-dmca-open]');
+      const deleted = document.querySelector('[data-dmca-deleted]');
+      return Boolean(
+        openCases &&
+        deleted &&
+        openCases.textContent &&
+        deleted.textContent &&
+        openCases.textContent.trim() === '1' &&
+        deleted.textContent.trim() === '2'
+      );
+    });
+
+    await page.waitForFunction((expectedCaseCode) => {
+      const list = document.querySelector('[data-dmca-list]');
+      return Boolean(
+        list &&
+        list.textContent &&
+        list.textContent.includes(expectedCaseCode) &&
+        list.textContent.includes('Deleted by you')
+      );
+    }, deleteCaseCode);
+
+    const updatedList = await page.locator('[data-dmca-list]').textContent();
+
+    if (!String(updatedList || '').includes('Deleted by you')) {
+      throw new Error(`DMCA list should update after direct deletion. Received: ${updatedList || '(empty)'}`);
     }
 
     await activeSession.context.close();

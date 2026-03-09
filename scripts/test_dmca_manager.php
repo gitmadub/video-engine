@@ -197,22 +197,24 @@ function dmca_insert_ready_video(PDO $pdo, int $userId, string $publicId, string
     return (int) $pdo->lastInsertId();
 }
 
-function dmca_force_notice_dates(int $noticeId, string $receivedAt, ?string $effectiveAt = null, ?string $resolvedAt = null, ?string $updatedAt = null): void
+/**
+ * @param array<string, mixed> $fields
+ */
+function dmca_update_notice_fields(int $noticeId, array $fields): void
 {
+    $assignments = [];
+    $params = [':id' => $noticeId];
+
+    foreach ($fields as $column => $value) {
+        $assignments[] = $column . ' = :' . $column;
+        $params[':' . $column] = $value;
+    }
+
     ve_db()->prepare(
         'UPDATE dmca_notices
-         SET received_at = :received_at,
-             updated_at = :updated_at,
-             effective_at = :effective_at,
-             resolved_at = :resolved_at
+         SET ' . implode(', ', $assignments) . '
          WHERE id = :id'
-    )->execute([
-        ':received_at' => $receivedAt,
-        ':updated_at' => $updatedAt ?? $receivedAt,
-        ':effective_at' => $effectiveAt,
-        ':resolved_at' => $resolvedAt,
-        ':id' => $noticeId,
-    ]);
+    )->execute($params);
 }
 
 $root = dirname(__DIR__);
@@ -222,6 +224,12 @@ $cookiePath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'd
 $port = 18085;
 $baseUrl = 'http://127.0.0.1:' . $port;
 $serverPid = null;
+
+$existingPid = dmca_find_listening_pid($port);
+
+if (is_int($existingPid) && $existingPid > 0) {
+    @shell_exec('taskkill /PID ' . $existingPid . ' /T /F >NUL 2>NUL');
+}
 
 @unlink($dbPath);
 @unlink($cookiePath);
@@ -247,74 +255,78 @@ $user = ve_create_user('dmca_case', 'dmca@example.com', 'DmcaPass123');
 $userId = (int) ($user['id'] ?? 0);
 dmca_assert($userId > 0, 'DMCA suite user should be created.');
 
-$emptyUser = ve_create_user('dmca_empty', 'dmca-empty@example.com', 'DmcaPass123');
-dmca_assert((int) ($emptyUser['id'] ?? 0) > 0, 'Empty-state DMCA user should be created.');
+$responseVideoId = dmca_insert_ready_video($pdo, $userId, 'dmcaresponse01', 'DMCA Response Fixture');
+$deleteVideoId = dmca_insert_ready_video($pdo, $userId, 'dmcadelete01', 'DMCA Delete Fixture');
+$overdueVideoId = dmca_insert_ready_video($pdo, $userId, 'dmcaoverdue01', 'DMCA Overdue Fixture');
+$restoredVideoId = dmca_insert_ready_video($pdo, $userId, 'dmcarestored01', 'DMCA Restored Fixture');
 
-$videoId = dmca_insert_ready_video($pdo, $userId, 'dmcacase0001', 'DMCA Fixture Clip');
-
-$disabledNotice = ve_dmca_create_notice([
+$responseNotice = ve_dmca_create_notice([
     'user_id' => $userId,
-    'video_id' => $videoId,
-    'case_code' => 'DMCA-QA-OPEN',
+    'video_id' => $responseVideoId,
+    'case_code' => 'DMCA-QA-RESP',
     'status' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
     'complainant_name' => 'Studio Rights',
     'complainant_company' => 'Studio Rights LLC',
     'complainant_email' => 'legal@studio-rights.test',
-    'claimed_work' => 'Fixture Clip',
-    'reported_url' => ve_absolute_url('/d/dmcacase0001'),
-    'work_reference_url' => 'https://rights.example.test/fixture-clip',
-    'evidence_urls' => ['https://evidence.example.test/open'],
+    'claimed_work' => 'Response Fixture Clip',
+    'reported_url' => ve_absolute_url('/d/dmcaresponse01'),
+    'work_reference_url' => 'https://rights.example.test/response-fixture',
+    'evidence_urls' => ['https://rights.example.test/evidence/response'],
 ]);
-dmca_force_notice_dates((int) ($disabledNotice['id'] ?? 0), gmdate('Y-m-d H:i:s', time() - 86400), gmdate('Y-m-d H:i:s', time() - 86400));
+
+$deleteNotice = ve_dmca_create_notice([
+    'user_id' => $userId,
+    'video_id' => $deleteVideoId,
+    'case_code' => 'DMCA-QA-DELETE',
+    'status' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
+    'complainant_name' => 'Delete Rights',
+    'claimed_work' => 'Delete Fixture Clip',
+    'reported_url' => ve_absolute_url('/d/dmcadelete01'),
+]);
+
+$overdueNotice = ve_dmca_create_notice([
+    'user_id' => $userId,
+    'video_id' => $overdueVideoId,
+    'case_code' => 'DMCA-QA-OVERDUE',
+    'status' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
+    'complainant_name' => 'Overdue Rights',
+    'claimed_work' => 'Overdue Fixture Clip',
+    'reported_url' => ve_absolute_url('/d/dmcaoverdue01'),
+]);
+
+dmca_update_notice_fields((int) ($overdueNotice['id'] ?? 0), [
+    'received_at' => gmdate('Y-m-d H:i:s', strtotime('-2 days')),
+    'updated_at' => gmdate('Y-m-d H:i:s', strtotime('-2 days')),
+    'effective_at' => gmdate('Y-m-d H:i:s', strtotime('-2 days')),
+    'content_disabled_at' => gmdate('Y-m-d H:i:s', strtotime('-2 days')),
+    'auto_delete_at' => gmdate('Y-m-d H:i:s', strtotime('-1 hour')),
+]);
 
 $restoredNotice = ve_dmca_create_notice([
     'user_id' => $userId,
-    'video_id' => $videoId,
+    'video_id' => $restoredVideoId,
     'case_code' => 'DMCA-QA-RESTORED',
     'status' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
     'complainant_name' => 'Archive Label',
     'claimed_work' => 'Archive Film',
-    'reported_url' => ve_absolute_url('/d/dmcacase0001'),
+    'reported_url' => ve_absolute_url('/d/dmcarestored01'),
 ]);
-$restoredNotice = ve_dmca_update_notice_status((int) ($restoredNotice['id'] ?? 0), VE_DMCA_NOTICE_STATUS_RESTORED, 'status_change', 'Content restored', 'Restored after review.');
-dmca_force_notice_dates(
+$restoredNotice = ve_dmca_update_notice_status(
     (int) ($restoredNotice['id'] ?? 0),
-    gmdate('Y-m-d H:i:s', strtotime('-20 days')),
-    gmdate('Y-m-d H:i:s', strtotime('-20 days')),
-    gmdate('Y-m-d H:i:s', strtotime('-18 days')),
-    gmdate('Y-m-d H:i:s', strtotime('-18 days'))
+    VE_DMCA_NOTICE_STATUS_RESTORED,
+    'status_change',
+    'Content restored',
+    'Restored after review.'
 );
-
-$oldNotice = ve_dmca_create_notice([
-    'user_id' => $userId,
-    'video_id' => $videoId,
-    'case_code' => 'DMCA-QA-OLD',
-    'status' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
-    'complainant_name' => 'Legacy Reporter',
-    'claimed_work' => 'Legacy Film',
-    'reported_url' => ve_absolute_url('/d/dmcacase0001'),
-]);
-$oldNotice = ve_dmca_update_notice_status((int) ($oldNotice['id'] ?? 0), VE_DMCA_NOTICE_STATUS_WITHDRAWN, 'status_change', 'Notice withdrawn', 'Withdrawn by complainant.');
-dmca_force_notice_dates(
-    (int) ($oldNotice['id'] ?? 0),
-    gmdate('Y-m-d H:i:s', strtotime('-240 days')),
-    gmdate('Y-m-d H:i:s', strtotime('-240 days')),
-    gmdate('Y-m-d H:i:s', strtotime('-230 days')),
-    gmdate('Y-m-d H:i:s', strtotime('-230 days'))
-);
-
-$pendingNotice = ve_dmca_create_notice([
-    'user_id' => $userId,
-    'case_code' => 'DMCA-QA-PENDING',
-    'status' => VE_DMCA_NOTICE_STATUS_PENDING_REVIEW,
-    'complainant_name' => 'Pending Rights',
-    'claimed_work' => 'Pending Title',
-    'reported_url' => 'https://mirror.example.test/pending',
+dmca_update_notice_fields((int) ($restoredNotice['id'] ?? 0), [
+    'received_at' => gmdate('Y-m-d H:i:s', strtotime('-20 days')),
+    'updated_at' => gmdate('Y-m-d H:i:s', strtotime('-18 days')),
+    'effective_at' => gmdate('Y-m-d H:i:s', strtotime('-20 days')),
+    'resolved_at' => gmdate('Y-m-d H:i:s', strtotime('-18 days')),
 ]);
 
-$video = ve_video_get_by_id($videoId);
-dmca_assert(is_array($video), 'Fixture video should exist.');
-dmca_assert((int) ($video['is_public'] ?? 1) === 0, 'Video should be disabled after an active DMCA notice.');
+dmca_assert((int) ((ve_video_get_by_id($responseVideoId) ?: [])['is_public'] ?? 1) === 0, 'Response fixture should be hidden after DMCA.');
+dmca_assert((int) ((ve_video_get_by_id($deleteVideoId) ?: [])['is_public'] ?? 1) === 0, 'Delete fixture should be hidden after DMCA.');
 
 try {
     $envPrefix = '';
@@ -344,48 +356,61 @@ try {
 
     $dmcaPage = $client->request('GET', '/dashboard/dmca-manager');
     dmca_assert($dmcaPage['status'] === 200, 'DMCA dashboard page should load after login.');
+    dmca_assert(str_contains($dmcaPage['body'], 'settings_menu'), 'DMCA page should reuse the settings-page menu shell.');
+    dmca_assert(str_contains($dmcaPage['body'], 'widget_area'), 'DMCA page should render dashboard widgets.');
+    dmca_assert(str_contains($dmcaPage['body'], 'data-dmca-manager'), 'DMCA page should render the managed root.');
+    dmca_assert(str_contains($dmcaPage['body'], '/assets/js/dashboard_dmca.js'), 'DMCA dashboard page should load the managed bundle.');
     $postLoginCsrf = dmca_extract_runtime_token($dmcaPage['body']);
 
     $snapshot = dmca_json($client->request('GET', '/api/dmca'));
     dmca_assert(($snapshot['status'] ?? null) === 'ok', 'DMCA snapshot should return status ok.');
-    dmca_assert((int) (($snapshot['summary']['open_cases'] ?? 0)) === 2, 'DMCA snapshot should count open cases.');
-    dmca_assert((int) (($snapshot['summary']['content_disabled'] ?? 0)) === 1, 'DMCA snapshot should count disabled cases.');
-    dmca_assert((int) (($snapshot['summary']['effective_strikes'] ?? 0)) === 2, 'DMCA snapshot should count only in-window effective strikes.');
-    dmca_assert(count((array) ($snapshot['items'] ?? [])) >= 3, 'DMCA list should include seeded cases.');
+    dmca_assert((int) (($snapshot['summary']['open_cases'] ?? 0)) === 2, 'Snapshot should count open uploader cases after auto-delete processing.');
+    dmca_assert((int) (($snapshot['summary']['pending_delete'] ?? 0)) === 2, 'Snapshot should count active 24-hour cases.');
+    dmca_assert((int) (($snapshot['summary']['responses_received'] ?? 0)) === 0, 'Snapshot should start with zero uploader responses.');
+    dmca_assert((int) (($snapshot['summary']['deleted_videos'] ?? 0)) === 1, 'Snapshot should count the overdue auto-deleted case.');
 
     $resolvedOnly = dmca_json($client->request('GET', '/api/dmca?status=resolved'));
-    dmca_assert(count((array) ($resolvedOnly['items'] ?? [])) === 2, 'Resolved filter should return restored and withdrawn cases.');
+    dmca_assert(count((array) ($resolvedOnly['items'] ?? [])) === 2, 'Resolved filter should include restored and auto-deleted cases.');
 
-    $detail = dmca_json($client->request('GET', '/api/dmca/DMCA-QA-OPEN'));
-    dmca_assert(($detail['notice']['status'] ?? null) === VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED, 'DMCA detail should expose the open disabled case.');
-    dmca_assert((bool) ($detail['notice']['can_submit_counter_notice'] ?? false) === true, 'Open disabled case should allow counter notices.');
+    $detail = dmca_json($client->request('GET', '/api/dmca/DMCA-QA-RESP'));
+    dmca_assert(($detail['notice']['status'] ?? null) === VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED, 'Response case should still wait for uploader action.');
+    dmca_assert((bool) ($detail['notice']['can_submit_response'] ?? false) === true, 'Response case should allow optional uploader information.');
+    dmca_assert((bool) ($detail['notice']['can_delete_video'] ?? false) === true, 'Response case should allow direct video deletion.');
+    dmca_assert(count((array) ($detail['notice']['evidence_urls'] ?? [])) === 1, 'Response case should expose evidence URLs.');
 
-    $counterResponse = dmca_json($client->request('POST', '/api/dmca/DMCA-QA-OPEN/counter-notice', [
+    $responsePayload = dmca_json($client->request('POST', '/api/dmca/DMCA-QA-RESP/response', [
         'form' => [
             'token' => $postLoginCsrf,
-            'full_name' => 'Uploader QA',
-            'email' => 'uploader@example.com',
-            'phone' => '+1 555 111 2222',
-            'address_line' => '123 QA Street',
-            'city' => 'Testville',
-            'country' => 'US',
-            'postal_code' => '90210',
-            'removed_material_location' => 'https://127.0.0.1/d/dmcacase0001',
-            'mistake_statement' => 'I have a good-faith belief that the material was removed as a result of mistake or misidentification.',
-            'jurisdiction_statement' => 'I consent to the jurisdiction of the appropriate Federal District Court and accept service of process.',
-            'signature_name' => 'Uploader QA',
+            'contact_email' => '',
+            'contact_phone' => '',
+            'notes' => '',
         ],
     ]));
-    dmca_assert(($counterResponse['status'] ?? null) === 'ok', 'Counter notice submission should succeed.');
-    dmca_assert(($counterResponse['notice']['status'] ?? null) === VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED, 'Counter notice should move the case into the pending restoration state.');
-    dmca_assert(trim((string) ($counterResponse['notice']['restoration_earliest_at'] ?? '')) !== '', 'Counter notice should expose the restoration window.');
+    dmca_assert(($responsePayload['status'] ?? null) === 'ok', 'Optional uploader response should succeed with blank fields.');
+    dmca_assert(($responsePayload['notice']['status'] ?? null) === VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED, 'Uploader response should move the case into response_submitted.');
+    dmca_assert((bool) ($responsePayload['notice']['can_submit_response'] ?? true) === false, 'Uploader response should disable resubmission.');
 
-    $postCounter = dmca_json($client->request('GET', '/api/dmca/DMCA-QA-OPEN'));
-    dmca_assert(($postCounter['notice']['counter_notice']['status'] ?? null) === VE_DMCA_COUNTER_STATUS_SUBMITTED, 'Counter notice detail should be stored.');
-    dmca_assert((bool) ($postCounter['notice']['can_submit_counter_notice'] ?? true) === false, 'Counter notice should disable resubmission.');
+    $postResponse = dmca_json($client->request('GET', '/api/dmca/DMCA-QA-RESP'));
+    dmca_assert(($postResponse['notice']['uploader_response']['notes'] ?? null) === '', 'Blank uploader notes should be stored as empty text.');
+    dmca_assert(($postResponse['notice']['status_label'] ?? null) === 'Info sent', 'Uploader response should expose the uploader-facing status label.');
 
-    dmca_assert(str_contains($dmcaPage['body'], 'data-dmca-manager'), 'DMCA dashboard page should render the managed root.');
-    dmca_assert(str_contains($dmcaPage['body'], '/assets/js/dashboard_dmca.js'), 'DMCA dashboard page should load the managed DMCA bundle.');
+    $deletePayload = dmca_json($client->request('POST', '/api/dmca/DMCA-QA-DELETE/delete-video', [
+        'form' => [
+            'token' => $postLoginCsrf,
+        ],
+    ]));
+    dmca_assert(($deletePayload['status'] ?? null) === 'ok', 'Direct delete should succeed.');
+    dmca_assert(($deletePayload['notice']['status'] ?? null) === VE_DMCA_NOTICE_STATUS_UPLOADER_DELETED, 'Direct delete should close the case as uploader deleted.');
+    dmca_assert(ve_video_get_by_id($deleteVideoId) === null, 'Deleted DMCA video should be removed from the database.');
+
+    $finalSnapshot = dmca_json($client->request('GET', '/api/dmca'));
+    dmca_assert((int) (($finalSnapshot['summary']['open_cases'] ?? 0)) === 1, 'Final summary should keep only the response-submitted case open.');
+    dmca_assert((int) (($finalSnapshot['summary']['pending_delete'] ?? 0)) === 0, 'Final summary should have no remaining 24-hour delete timers.');
+    dmca_assert((int) (($finalSnapshot['summary']['responses_received'] ?? 0)) === 1, 'Final summary should count the uploader response.');
+    dmca_assert((int) (($finalSnapshot['summary']['deleted_videos'] ?? 0)) === 2, 'Final summary should count uploader-deleted and auto-deleted videos.');
+
+    $resolvedAfterActions = dmca_json($client->request('GET', '/api/dmca?status=resolved'));
+    dmca_assert(count((array) ($resolvedAfterActions['items'] ?? [])) === 3, 'Resolved filter should include restored, auto-deleted, and uploader-deleted cases after actions.');
 
     echo "DMCA manager tests passed.\n";
 } finally {

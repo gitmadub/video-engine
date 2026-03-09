@@ -11,151 +11,136 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
     <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/css/iziToast.min.css">
     <link rel="stylesheet" type="text/css" href="/assets/css/panel.min__q_e2207d238712.css">
-    <style>
-        .dmca-meta {
-            color: #8f9397;
-            font-size: 12px;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
+    <style type="text/css">
+        .settings-panel {
+            padding-right: 10px;
         }
-        .dmca-summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 16px;
+
+        .settings-panel-title {
+            font-size: 1.2857142857rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .settings-panel-subtitle {
+            color: #7f7f7f;
             margin-bottom: 24px;
         }
-        .dmca-summary-card {
-            background: #1c1c1c;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            padding: 18px;
+
+        .settings-note {
+            color: #7f7f7f;
+            float: right;
+            margin-top: 30px;
         }
-        .dmca-summary-card strong {
-            display: block;
-            color: #fff;
-            font-size: 28px;
-            margin-top: 8px;
+
+        .settings-table-wrap {
+            padding: 0;
+            background: #434645;
+            border-radius: 3px;
+            margin-bottom: 30px;
         }
-        .dmca-banner {
-            background: linear-gradient(135deg, rgba(255, 153, 0, 0.12), rgba(255, 153, 0, 0.03));
-            border: 1px solid rgba(255, 153, 0, 0.18);
-            border-radius: 8px;
-            padding: 18px 20px;
-            margin-bottom: 24px;
+
+        .settings-table-wrap .table {
+            margin-bottom: 0;
         }
-        .dmca-filters {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 20px;
+
+        .settings-table-wrap .table > tbody > tr:first-child > td {
+            border-top: 0;
         }
-        .dmca-filters .btn {
-            min-width: 92px;
-        }
-        .dmca-error {
+
+        .dmca-inline-feedback {
             display: none;
         }
-        .dmca-error.is-visible {
+
+        .dmca-inline-feedback.is-visible {
             display: block;
         }
-        .dmca-list {
-            list-style: none;
-            margin: 0;
-            padding: 0;
+
+        .dmca-quick-note {
+            color: #7f7f7f;
+            font-size: 0.8571428571rem;
+            line-height: 1.7;
         }
-        .dmca-item {
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-            padding: 16px 0;
+
+        .dmca-filter-buttons .btn {
+            min-width: 88px;
         }
-        .dmca-item:last-child {
-            border-bottom: 0;
-        }
-        .dmca-item-title {
-            color: #fff;
+
+        .dmca-status {
+            display: inline-block;
+            font-size: 0.8571428571rem;
             font-weight: 700;
+        }
+
+        .dmca-status.warning {
+            color: #ffb74d;
+        }
+
+        .dmca-status.info {
+            color: #8ab4ff;
+        }
+
+        .dmca-status.success {
+            color: #7ecf9c;
+        }
+
+        .dmca-status.secondary {
+            color: #c0c0c0;
+        }
+
+        .dmca-table-actions .btn {
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+
+        .dmca-detail-list {
+            margin: 0;
+        }
+
+        .dmca-detail-list dt {
+            color: #7f7f7f;
+            font-weight: 600;
             margin-bottom: 4px;
         }
-        .dmca-item-copy,
-        .dmca-policy-copy,
-        .dmca-empty-copy,
-        .dmca-item-meta {
-            color: #8f9397;
-        }
-        .dmca-status-pill {
-            display: inline-flex;
-            align-items: center;
-            border-radius: 999px;
-            padding: 4px 10px;
-            font-size: 12px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-        .dmca-status-pill.tone-warning {
-            background: rgba(255, 170, 0, 0.14);
-            color: #ffb347;
-        }
-        .dmca-status-pill.tone-danger {
-            background: rgba(255, 92, 92, 0.14);
-            color: #ff8f8f;
-        }
-        .dmca-status-pill.tone-info {
-            background: rgba(71, 147, 255, 0.14);
-            color: #84b6ff;
-        }
-        .dmca-status-pill.tone-success {
-            background: rgba(66, 185, 131, 0.14);
-            color: #7ae0ad;
-        }
-        .dmca-status-pill.tone-secondary {
-            background: rgba(255, 255, 255, 0.08);
-            color: #d1d5db;
-        }
-        .dmca-empty-state {
-            text-align: center;
-            padding: 48px 20px;
-        }
-        .dmca-empty-state i {
-            font-size: 42px;
-            color: #42b983;
+
+        .dmca-detail-list dd {
             margin-bottom: 14px;
+            word-break: break-word;
         }
-        .dmca-policy-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 16px;
-            margin-top: 24px;
-        }
-        .dmca-policy-box {
-            background: #191919;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            padding: 18px;
-        }
+
         .dmca-timeline {
             list-style: none;
+            margin: 0;
             padding: 0;
+        }
+
+        .dmca-timeline li {
+            padding-bottom: 14px;
+            margin-bottom: 14px;
+            border-bottom: 1px solid rgba(67, 70, 69, 0.8);
+        }
+
+        .dmca-timeline li:last-child {
+            border-bottom: 0;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .dmca-timeline strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .dmca-timeline span,
+        .dmca-timeline p {
+            color: #7f7f7f;
             margin: 0;
         }
-        .dmca-timeline li {
-            position: relative;
-            padding-left: 18px;
-            margin-bottom: 16px;
-        }
-        .dmca-timeline li::before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 6px;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #ff9900;
-        }
-        .dmca-modal-copy {
-            color: #8f9397;
-        }
-        .dmca-modal-value {
-            color: #fff;
-            font-weight: 600;
+
+        .dmca-empty-icon {
+            font-size: 2rem;
+            color: #7f7f7f;
+            margin-bottom: 12px;
         }
     </style>
 </head>
@@ -171,30 +156,38 @@
             <a href="/" class="navbar-brand">
                 <img src="/assets/img/logo-s.png" height="30" alt="" class="d-inline-block align-top">
             </a>
+
             <ul class="notifications-mobile d-block d-sm-none m-0 p-0 ml-auto">
                 <li class="nav-item dropdown notifications">
-                    <a href="#" id="notificationsMobile" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+                    <a href="#" id="notifications-mobile-toggle" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
                         <i class="fad fa-bell"></i>
                     </a>
-                    <div aria-labelledby="notificationsMobile" class="dropdown-menu dropdown-menu-right notifications-box">
-                        <div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div>
+                    <div aria-labelledby="notifications-mobile-toggle" class="dropdown-menu dropdown-menu-right notifications-box">
+                        <div class="title d-flex flex-wrap align-items-center justify-content-between">
+                            <span>Notifications</span>
+                        </div>
                         <ul class="notifications-list m-0 p-0"></ul>
                     </div>
                 </li>
             </ul>
+
             <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation">
                 <i class="fad fa-bars"></i>
             </button>
+
             <ul class="navbar-nav px-3 ml-auto d-none d-sm-flex">
                 <li class="nav-item dropdown notifications">
-                    <a href="#" id="notificationsDesktop" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+                    <a href="#" id="notifications-desktop-toggle" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
                         <i class="fad fa-bell"></i>
                     </a>
-                    <div aria-labelledby="notificationsDesktop" class="dropdown-menu dropdown-menu-right notifications-box">
-                        <div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div>
+                    <div aria-labelledby="notifications-desktop-toggle" class="dropdown-menu dropdown-menu-right notifications-box">
+                        <div class="title d-flex flex-wrap align-items-center justify-content-between">
+                            <span>Notifications</span>
+                        </div>
                         <ul class="notifications-list m-0 p-0"></ul>
                     </div>
                 </li>
+
                 <li class="nav-item dropdown">
                     <a href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
                         <i class="fad fa-user-circle"></i> videoengine <span class="far fa-chevron-down arrow"></span>
@@ -233,84 +226,202 @@
     </nav>
 
     <div class="container-fluid pt-3 pt-sm-5 mt-sm-5">
-        <div class="the_box mb-5" data-dmca-manager data-endpoint="/api/dmca">
-            <div class="d-flex align-items-center justify-content-between flex-wrap mb-3">
-                <div>
-                    <h2 class="title mb-1">DMCA Manager</h2>
-                    <div class="dmca-meta">Case tracking, repeat-infringer visibility, and counter-notice handling</div>
-                </div>
-                <div class="dmca-meta" data-dmca-updated>Waiting for live data...</div>
-            </div>
-
-            <div class="alert alert-danger dmca-error mb-4" data-dmca-error role="alert"></div>
-
-            <div class="dmca-banner">
-                <div class="row align-items-center">
-                    <div class="col-lg-8">
-                        <h4 class="mb-2">What this manager does</h4>
-                        <p class="dmca-policy-copy mb-0">Every effective complaint is tracked here with its file, current enforcement state, timeline, and the standard counter-notice restoration window. Even when there are no active complaints, the dashboard keeps the policy visible so the screen does not collapse into a blank placeholder.</p>
+        <div data-dmca-manager data-endpoint="/api/dmca">
+            <div class="d-flex widget_area justify-content-between flex-wrap">
+                <div class="widget_box d-flex justify-content-between flex-wrap align-items-center">
+                    <div class="info">
+                        <span class="money d-block" data-dmca-open>0</span>
+                        <span class="d-block">Open cases</span>
+                        <a href="#dmca_cases" data-dmca-nav>Review cases <i class="fad fa-arrow-to-right"></i></a>
                     </div>
-                    <div class="col-lg-4 mt-3 mt-lg-0">
-                        <div class="dmca-meta mb-2">Compliance inbox</div>
-                        <div class="dmca-modal-value" data-dmca-email>dmca@doodstream.com</div>
+                    <div class="icon">
+                        <i class="fad fa-folder-open"></i>
                     </div>
                 </div>
-            </div>
 
-            <div class="dmca-summary-grid">
-                <div class="dmca-summary-card">
-                    <span class="dmca-meta">Open cases</span>
-                    <strong data-dmca-open>0</strong>
+                <div class="widget_box d-flex justify-content-between flex-wrap align-items-center">
+                    <div class="info">
+                        <span class="money d-block" data-dmca-pending-delete>0</span>
+                        <span class="d-block">Waiting 24 hours</span>
+                        <a href="#dmca_cases" data-dmca-nav>Pending auto delete <i class="fad fa-arrow-to-right"></i></a>
+                    </div>
+                    <div class="icon">
+                        <i class="fad fa-clock"></i>
+                    </div>
                 </div>
-                <div class="dmca-summary-card">
-                    <span class="dmca-meta">Content disabled</span>
-                    <strong data-dmca-disabled>0</strong>
-                </div>
-                <div class="dmca-summary-card">
-                    <span class="dmca-meta">Counter notices pending</span>
-                    <strong data-dmca-counter>0</strong>
-                </div>
-                <div class="dmca-summary-card">
-                    <span class="dmca-meta">Effective strikes / 6 months</span>
-                    <strong data-dmca-strikes>0</strong>
-                </div>
-            </div>
 
-            <form class="dmca-filters align-items-center" data-dmca-filters>
-                <div class="btn-group" role="group" aria-label="DMCA filters">
-                    <button type="button" class="btn btn-primary" data-filter-status="all">All</button>
-                    <button type="button" class="btn btn-white" data-filter-status="open">Open</button>
-                    <button type="button" class="btn btn-white" data-filter-status="resolved">Resolved</button>
+                <div class="widget_box d-flex justify-content-between flex-wrap align-items-center">
+                    <div class="info">
+                        <span class="money d-block" data-dmca-response>0</span>
+                        <span class="d-block">Responses sent</span>
+                        <a href="#dmca_overview" data-dmca-nav>Optional uploader info <i class="fad fa-arrow-to-right"></i></a>
+                    </div>
+                    <div class="icon">
+                        <i class="fad fa-comment-alt-lines"></i>
+                    </div>
                 </div>
-                <div class="ml-auto w-100 w-md-auto">
-                    <input type="search" class="form-control" placeholder="Search by case code, claimant, or file title" data-dmca-query>
-                </div>
-            </form>
 
-            <div data-dmca-list-shell>
-                <div class="dmca-empty-state d-none" data-dmca-empty>
-                    <i class="fad fa-shield-check"></i>
-                    <h4 class="mb-2">No active DMCA complaints</h4>
-                    <p class="dmca-empty-copy mb-0">Your account currently has no open copyright cases. If a valid notice arrives, it will appear here with the affected file, timeline, strike count, and counter-notice action.</p>
-                </div>
-                <ul class="dmca-list" data-dmca-list></ul>
-                <div class="text-center mt-4 d-none" data-dmca-load-more-wrap>
-                    <button type="button" class="btn btn-white" data-dmca-load-more>Load more</button>
+                <div class="widget_box d-flex justify-content-between flex-wrap align-items-center">
+                    <div class="info">
+                        <span class="money d-block" data-dmca-deleted>0</span>
+                        <span class="d-block">Videos deleted</span>
+                        <a href="#dmca_policy" data-dmca-nav>Review process <i class="fad fa-arrow-to-right"></i></a>
+                    </div>
+                    <div class="icon">
+                        <i class="fad fa-trash-alt"></i>
+                    </div>
                 </div>
             </div>
 
-            <div class="dmca-policy-grid">
-                <div class="dmca-policy-box">
-                    <div class="dmca-meta mb-2">Repeat infringer policy</div>
-                    <div class="dmca-modal-value" data-dmca-threshold>3 effective complaints in 6 months</div>
+            <div class="d-flex justify-content-between flex-wrap the_box mb-4">
+                <div class="sidebar settings-page">
+                    <div class="status-block d-flex align-items-center mb-4">
+                        <i class="fad fa-folder-times"></i>
+                        <div class="info ml-3">
+                            <h4 class="m-0">DMCA manager</h4>
+                            <a href="#dmca_cases" data-dmca-nav>Open complaints <i class="fad fa-arrow-to-right"></i></a>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="menu settings_menu">
+                        <ul class="p-0 m-0 mb-4">
+                            <li>
+                                <a href="#dmca_overview" class="d-flex flex-wrap align-items-center active">
+                                    <i class="fad fa-info-circle"></i>
+                                    <span>Overview</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="#dmca_cases" class="d-flex flex-wrap align-items-center">
+                                    <i class="fad fa-list"></i>
+                                    <span>Cases</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="#dmca_policy" class="d-flex flex-wrap align-items-center">
+                                    <i class="fad fa-shield-check"></i>
+                                    <span>How it works</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <hr>
+
+                    <div class="dmca-quick-note">
+                        <strong class="d-block mb-2 text-white">Compliance inbox</strong>
+                        <span class="d-block mb-3" data-dmca-email>dmca@doodstream.com</span>
+                        Reported files stay hidden while the uploader has up to <span data-dmca-window>24</span> hours to reply or delete them directly.
+                    </div>
                 </div>
-                <div class="dmca-policy-box">
-                    <div class="dmca-meta mb-2">Counter-notice window</div>
-                    <div class="dmca-modal-value" data-dmca-counter-window>10 to 14 business days</div>
-                </div>
-                <div class="dmca-policy-box">
-                    <div class="dmca-meta mb-2">Default action</div>
-                    <div class="dmca-modal-value">Disable public access, preserve the timeline, allow a formal response</div>
+
+                <div class="content_box settings_data">
+                    <div class="data settings-panel active" id="dmca_overview">
+                        <span class="settings-note" data-dmca-updated>Waiting for live data...</span>
+                        <div class="settings-panel-title">Uploader DMCA overview</div>
+                        <p class="settings-panel-subtitle">This manager is only for uploaders. Sending information is optional. If nothing is submitted within 24 hours, the reported file is deleted automatically.</p>
+
+                        <div class="alert alert-danger dmca-inline-feedback" data-dmca-error role="alert"></div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-4">
+                                <div class="the_box h-100">
+                                    <h4 class="mb-3">What uploaders can do</h4>
+                                    <p class="mb-2">Open the case, review the complaint details, and send optional information if they want manual review.</p>
+                                    <p class="mb-2">Leave the form blank if there is nothing to add. The system still records that the uploader responded.</p>
+                                    <p class="mb-0">Delete the reported video immediately from the manager if removal is the correct outcome.</p>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-4">
+                                <div class="the_box h-100">
+                                    <h4 class="mb-3">What happens automatically</h4>
+                                    <p class="mb-2">When a complaint is received, the video is hidden from public access and the case appears here.</p>
+                                    <p class="mb-2">If the uploader does not respond and does not delete the video, the file is removed after <span data-dmca-window-copy>24</span> hours.</p>
+                                    <p class="mb-0">Resolved cases remain visible in the history so the uploader can see what happened.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="data settings-panel" id="dmca_cases">
+                        <div class="settings-panel-title">DMCA cases</div>
+                        <p class="settings-panel-subtitle">View complaints, send optional uploader information, or delete the reported file directly.</p>
+
+                        <div class="the_box mb-4">
+                            <div class="row align-items-end">
+                                <div class="col-md-4 mb-3">
+                                    <label class="d-block">Filter</label>
+                                    <div class="btn-group d-flex dmca-filter-buttons" role="group">
+                                        <button type="button" class="btn btn-primary" data-filter-status="all">All</button>
+                                        <button type="button" class="btn btn-white" data-filter-status="open">Open</button>
+                                        <button type="button" class="btn btn-white" data-filter-status="resolved">Resolved</button>
+                                    </div>
+                                </div>
+                                <div class="col-md-5 mb-3">
+                                    <label class="d-block">Search</label>
+                                    <input type="search" class="form-control" placeholder="Case code, title, or claimed work" data-dmca-query>
+                                </div>
+                                <div class="col-md-3 mb-3 text-md-right">
+                                    <small class="text-muted d-block">Response window</small>
+                                    <strong><span data-dmca-window-inline>24</span> hours</strong>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-table-wrap">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Case</th>
+                                        <th>File</th>
+                                        <th>Status</th>
+                                        <th>Deadline</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody data-dmca-list></tbody>
+                            </table>
+                        </div>
+
+                        <div class="the_box file_manager mt-2 mb-4 d-none" data-dmca-empty>
+                            <div class="text-center">
+                                <div class="dmca-empty-icon">
+                                    <i class="fad fa-folder-open"></i>
+                                </div>
+                                <p class="mb-0">No DMCA complaints right now.</p>
+                            </div>
+                        </div>
+
+                        <div class="text-center mb-4 d-none" data-dmca-load-more-wrap>
+                            <button type="button" class="btn btn-white" data-dmca-load-more>Load More</button>
+                        </div>
+                    </div>
+
+                    <div class="data settings-panel" id="dmca_policy">
+                        <div class="settings-panel-title">How this works</div>
+                        <p class="settings-panel-subtitle">The uploader workflow is intentionally simple and does not require a full legal counter-notice form inside the dashboard.</p>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-4">
+                                <div class="the_box h-100">
+                                    <h4 class="mb-3">Dashboard behavior</h4>
+                                    <p class="mb-2">The case appears for the uploader after the file is hidden. Most uploaders will never add extra information, so the form is optional.</p>
+                                    <p class="mb-2">If the uploader does nothing, the file is deleted after the response window ends.</p>
+                                    <p class="mb-0">If the uploader deletes the file themselves, the case closes immediately as uploader deleted.</p>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-4">
+                                <div class="the_box h-100">
+                                    <h4 class="mb-3">Stored information</h4>
+                                    <p class="mb-2">Each case keeps a snapshot of the file title, file ID, complaint timestamps, and the case timeline.</p>
+                                    <p class="mb-2">Optional uploader information can include contact email, contact phone, or free-form notes.</p>
+                                    <p class="mb-0">The dashboard shows the complaint source, reference links, and any attached evidence URLs when available.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
