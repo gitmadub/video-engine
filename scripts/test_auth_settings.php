@@ -316,6 +316,85 @@ function set_test_user_plan(string $dbPath, string $username, string $planCode, 
     assert_true($stmt->rowCount() === 1, 'Unable to update the test user plan state.');
 }
 
+function seed_test_user_daily_stat(string $dbPath, string $username, int $earnedMicroUsd, int $bandwidthBytes = 0, ?string $statDate = null): void
+{
+    $pdo = new PDO('sqlite:' . str_replace('\\', '/', $dbPath));
+    $userStmt = $pdo->prepare('SELECT id FROM users WHERE username = :username LIMIT 1');
+    $userStmt->execute([':username' => $username]);
+    $userId = (int) $userStmt->fetchColumn();
+    assert_true($userId > 0, 'Unable to resolve the test user for daily stat seeding.');
+
+    $statDate = $statDate ?: gmdate('Y-m-d');
+    $now = gmdate('Y-m-d H:i:s');
+    $stmt = $pdo->prepare(
+        'INSERT INTO user_stats_daily (
+            user_id, stat_date, views, earned_micro_usd, referral_earned_micro_usd, bandwidth_bytes, created_at, updated_at
+         ) VALUES (
+            :user_id, :stat_date, :views, :earned_micro_usd, :referral_earned_micro_usd, :bandwidth_bytes, :created_at, :updated_at
+         )
+         ON CONFLICT(user_id, stat_date) DO UPDATE SET
+            views = excluded.views,
+            earned_micro_usd = excluded.earned_micro_usd,
+            referral_earned_micro_usd = excluded.referral_earned_micro_usd,
+            bandwidth_bytes = excluded.bandwidth_bytes,
+            updated_at = excluded.updated_at'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':stat_date' => $statDate,
+        ':views' => 125,
+        ':earned_micro_usd' => $earnedMicroUsd,
+        ':referral_earned_micro_usd' => 0,
+        ':bandwidth_bytes' => $bandwidthBytes,
+        ':created_at' => $now,
+        ':updated_at' => $now,
+    ]);
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function fetch_test_user_record(string $dbPath, string $username): array
+{
+    $pdo = new PDO('sqlite:' . str_replace('\\', '/', $dbPath));
+    $stmt = $pdo->prepare('SELECT * FROM users WHERE username = :username LIMIT 1');
+    $stmt->execute([':username' => $username]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    assert_true(is_array($row), 'Unable to load the requested test user record.');
+    return $row;
+}
+
+function fetch_test_user_balance_ledger_sum(string $dbPath, string $username): int
+{
+    $pdo = new PDO('sqlite:' . str_replace('\\', '/', $dbPath));
+    $stmt = $pdo->prepare(
+        'SELECT COALESCE(SUM(account_balance_ledger.amount_micro_usd), 0)
+         FROM account_balance_ledger
+         INNER JOIN users ON users.id = account_balance_ledger.user_id
+         WHERE users.username = :username'
+    );
+    $stmt->execute([':username' => $username]);
+    return (int) $stmt->fetchColumn();
+}
+
+/**
+ * @return array<int, array<string, mixed>>
+ */
+function fetch_test_user_premium_orders(string $dbPath, string $username): array
+{
+    $pdo = new PDO('sqlite:' . str_replace('\\', '/', $dbPath));
+    $stmt = $pdo->prepare(
+        'SELECT premium_orders.*
+         FROM premium_orders
+         INNER JOIN users ON users.id = premium_orders.user_id
+         WHERE users.username = :username
+         ORDER BY premium_orders.id ASC'
+    );
+    $stmt->execute([':username' => $username]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    return is_array($rows) ? $rows : [];
+}
+
 $root = dirname(__DIR__);
 $php = 'C:\\xampp\\php\\php.exe';
 $dbPath = getenv('VE_TEST_DB_PATH') ?: ($root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'test-suite.sqlite');
@@ -466,11 +545,17 @@ try {
         preg_match('/name="op" value="(?:my_account|my_password|my_email|premium_settings|api_settings)">\s*[A-Fa-f0-9]{32}">/i', $settingsPage['body']) !== 1,
         'CSRF tokens must never leak as visible plaintext in the settings DOM.'
     );
+    seed_test_user_daily_stat($dbPath, 'alice_case', 50000000, 2147483648);
     $premiumPlansPage = $client->request('GET', '/premium-plans');
     assert_true($premiumPlansPage['status'] === 200, 'Premium plans page should load.');
     assert_true(str_contains($premiumPlansPage['body'], '<my-premium '), 'Premium plans page should serve the original premium component shell.');
     assert_true(str_contains($premiumPlansPage['body'], '/assets/js/theme_panel__q_f247575e8408.js'), 'Premium plans page should load the original dashboard shell bundle.');
     assert_true(str_contains($premiumPlansPage['body'], '/assets/js/premium_page__q_f247575e8408.js'), 'Premium plans page should load the original premium page bundle.');
+    assert_true(str_contains($premiumPlansPage['body'], '/assets/css/premium_checkout_runtime.css'), 'Premium plans page should load the dedicated checkout runtime CSS.');
+    assert_true(str_contains($premiumPlansPage['body'], '/assets/js/premium_checkout_runtime.js'), 'Premium plans page should load the dedicated checkout runtime JS.');
+    assert_true(str_contains($premiumPlansPage['body'], 'balance_label'), 'Premium plans page should inject live checkout summary data instead of the static placeholder payload.');
+    assert_true($client->request('GET', '/?op=payments&amount=7.99')['status'] === 410, 'Legacy payment checkout endpoints should be disabled.');
+    assert_true($client->request('GET', '/?op=crypto_payments&coin=BTC')['status'] === 410, 'Legacy crypto checkout endpoints should be disabled.');
     $csrf = extract_hidden_token($settingsPage['body']);
     $oldApiKey = extract_api_key($settingsPage['body']);
 
@@ -530,9 +615,90 @@ try {
     assert_true(str_contains($settingsAfterPartialPlayerSave['body'], 'value="720"'), 'Partial player saves should keep the updated embed width.');
     assert_true(str_contains($settingsAfterPartialPlayerSave['body'], 'value="405"'), 'Partial player saves should keep the updated embed height.');
     assert_true(str_contains($settingsAfterPartialPlayerSave['body'], 'value="ff9900"'), 'Partial player saves should restore the persisted player colour in the rendered settings page.');
-
-    set_test_user_plan($dbPath, 'alice_case', 'premium', gmdate('Y-m-d H:i:s', time() + 86400 * 30));
     $csrf = extract_hidden_token($settingsAfterPartialPlayerSave['body']);
+
+    $premiumQuoteResponse = $client->request('POST', '/api/premium/checkout/quote', [
+        'form' => [
+            'token' => $csrf,
+            'purchase_type' => 'account',
+            'package_id' => 'monthly',
+            'payment_method' => 'balance',
+        ],
+    ]);
+    assert_json_content_type($premiumQuoteResponse, 'Premium balance quotes should return JSON.');
+    $premiumQuote = json_response($premiumQuoteResponse);
+    assert_true(($premiumQuote['status'] ?? null) === 'ok', 'Premium balance quotes should succeed.');
+    assert_true(($premiumQuote['checkout']['can_pay'] ?? null) === true, 'Seeded earnings should make the monthly premium plan payable by balance.');
+
+    $insufficientQuoteResponse = $client->request('POST', '/api/premium/checkout/quote', [
+        'form' => [
+            'token' => $csrf,
+            'purchase_type' => 'bandwidth',
+            'package_id' => '200tb',
+            'payment_method' => 'balance',
+        ],
+    ]);
+    assert_json_content_type($insufficientQuoteResponse, 'Insufficient premium balance quotes should still return JSON.');
+    $insufficientQuote = json_response($insufficientQuoteResponse);
+    assert_true(($insufficientQuote['status'] ?? null) === 'ok', 'Insufficient premium balance quotes should still return a quote payload.');
+    assert_true(($insufficientQuote['checkout']['can_pay'] ?? null) === false, 'Oversized balance purchases should be quoted as not payable.');
+
+    $insufficientBalanceCheckoutResponse = $client->request('POST', '/api/premium/checkout/balance', [
+        'form' => [
+            'token' => $csrf,
+            'purchase_type' => 'bandwidth',
+            'package_id' => '200tb',
+            'payment_method' => 'balance',
+        ],
+    ]);
+    assert_json_content_type($insufficientBalanceCheckoutResponse, 'Rejected premium balance purchases should return JSON.');
+    assert_true($insufficientBalanceCheckoutResponse['status'] === 422, 'Insufficient balance purchases should be rejected with 422.');
+    $insufficientBalanceCheckout = json_response($insufficientBalanceCheckoutResponse);
+    assert_true(($insufficientBalanceCheckout['status'] ?? null) === 'fail', 'Insufficient balance purchases should fail cleanly.');
+
+    $balanceCheckoutResponse = $client->request('POST', '/api/premium/checkout/balance', [
+        'form' => [
+            'token' => $csrf,
+            'purchase_type' => 'account',
+            'package_id' => 'monthly',
+            'payment_method' => 'balance',
+        ],
+    ]);
+    assert_json_content_type($balanceCheckoutResponse, 'Premium balance purchases should return JSON.');
+    $balanceCheckout = json_response($balanceCheckoutResponse);
+    assert_true(($balanceCheckout['status'] ?? null) === 'ok', 'Premium balance purchases should succeed.');
+    assert_true(($balanceCheckout['summary']['plan_label'] ?? null) === 'Premium active', 'Premium balance purchases should upgrade the live premium summary.');
+
+    $userAfterBalanceCheckout = fetch_test_user_record($dbPath, 'alice_case');
+    assert_true((string) ($userAfterBalanceCheckout['plan_code'] ?? '') === 'premium', 'Premium balance purchases should persist the premium plan code.');
+    assert_true(is_string($userAfterBalanceCheckout['premium_until'] ?? null) && trim((string) $userAfterBalanceCheckout['premium_until']) !== '', 'Premium balance purchases should set a premium expiry timestamp.');
+    assert_true(fetch_test_user_balance_ledger_sum($dbPath, 'alice_case') === -7990000, 'Premium balance purchases should debit the account balance ledger.');
+
+    $premiumOrders = fetch_test_user_premium_orders($dbPath, 'alice_case');
+    assert_true(count($premiumOrders) >= 1, 'Premium balance purchases should create a premium order.');
+    assert_true((string) ($premiumOrders[0]['status'] ?? '') === 'completed', 'Completed premium balance purchases should persist as completed orders.');
+    assert_true((string) ($premiumOrders[0]['purchase_type'] ?? '') === 'account', 'The first premium order should capture the account upgrade.');
+    assert_true((string) ($premiumOrders[0]['payment_method'] ?? '') === 'balance', 'The first premium order should record the balance payment method.');
+
+    $cryptoCheckoutResponse = $client->request('POST', '/api/premium/checkout/crypto', [
+        'form' => [
+            'token' => $csrf,
+            'purchase_type' => 'bandwidth',
+            'package_id' => '10tb',
+            'payment_method' => 'BTC',
+        ],
+    ]);
+    assert_json_content_type($cryptoCheckoutResponse, 'Crypto premium invoices should return JSON.');
+    $cryptoCheckout = json_response($cryptoCheckoutResponse);
+    assert_true(($cryptoCheckout['status'] ?? null) === 'ok', 'Crypto premium invoices should be creatable.');
+    assert_true(is_string($cryptoCheckout['invoice']['qr'] ?? null) && $cryptoCheckout['invoice']['qr'] !== '', 'Crypto premium invoices should return a QR image URL.');
+    assert_true(is_string($cryptoCheckout['invoice']['address'] ?? null) && $cryptoCheckout['invoice']['address'] !== '', 'Crypto premium invoices should return a dummy wallet address.');
+
+    $premiumOrders = fetch_test_user_premium_orders($dbPath, 'alice_case');
+    assert_true(count($premiumOrders) >= 2, 'Crypto premium invoices should create a second premium order.');
+    assert_true((string) ($premiumOrders[1]['status'] ?? '') === 'pending', 'Crypto premium invoices should remain pending until a real gateway is connected.');
+    assert_true((string) ($premiumOrders[1]['purchase_type'] ?? '') === 'bandwidth', 'The crypto invoice should capture the bandwidth purchase type.');
+    assert_true((string) ($premiumOrders[1]['payment_method'] ?? '') === 'BTC', 'The crypto invoice should capture the selected crypto currency.');
 
     $premiumPlayerSaveResponse = $client->request('POST', '/account/player', [
         'form' => [

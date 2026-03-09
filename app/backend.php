@@ -296,6 +296,48 @@ function ve_run_database_migrations(PDO $pdo): void
     );
 
     $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS account_balance_ledger (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            entry_type TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            source_key TEXT NOT NULL,
+            amount_micro_usd INTEGER NOT NULL,
+            description TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT "{}",
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )'
+    );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS premium_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_code TEXT NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL,
+            purchase_type TEXT NOT NULL,
+            package_id TEXT NOT NULL,
+            package_title TEXT NOT NULL,
+            payment_method TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT "pending",
+            amount_micro_usd INTEGER NOT NULL,
+            bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
+            plan_interval_spec TEXT NOT NULL DEFAULT "",
+            crypto_currency_code TEXT NOT NULL DEFAULT "",
+            crypto_currency_name TEXT NOT NULL DEFAULT "",
+            crypto_amount TEXT NOT NULL DEFAULT "",
+            crypto_address TEXT NOT NULL DEFAULT "",
+            payment_uri TEXT NOT NULL DEFAULT "",
+            qr_url TEXT NOT NULL DEFAULT "",
+            metadata_json TEXT NOT NULL DEFAULT "{}",
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            completed_at TEXT DEFAULT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )'
+    );
+
+    $pdo->exec(
         'CREATE TABLE IF NOT EXISTS remote_uploads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -441,6 +483,10 @@ function ve_run_database_migrations(PDO $pdo): void
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_created ON api_request_logs(user_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_kind_created ON api_request_logs(user_id, request_kind, created_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_account_balance_ledger_user_created ON account_balance_ledger(user_id, created_at DESC)');
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_account_balance_ledger_source_entry ON account_balance_ledger(source_type, source_key, entry_type)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_premium_orders_user_created ON premium_orders(user_id, created_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_premium_orders_status_created ON premium_orders(status, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_folders_user_parent_name ON video_folders(user_id, parent_id, name)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_folders_user_parent_created ON video_folders(user_id, parent_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_videos_user_folder_created ON videos(user_id, folder_id, created_at DESC)');
@@ -824,15 +870,21 @@ function ve_user_is_premium(array $user): bool
     $planCode = ve_user_plan_code($user);
     $premiumUntil = trim((string) ($user['premium_until'] ?? ''));
 
+    if (in_array($planCode, ['enterprise', 'lifetime'], true)) {
+        return true;
+    }
+
     if ($premiumUntil !== '') {
         $premiumUntilDate = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $premiumUntil, new DateTimeZone('UTC'));
 
         if ($premiumUntilDate instanceof DateTimeImmutable && $premiumUntilDate >= new DateTimeImmutable('now', new DateTimeZone('UTC'))) {
             return true;
         }
+
+        return false;
     }
 
-    return in_array($planCode, ['premium', 'enterprise', 'lifetime'], true);
+    return $planCode === 'premium';
 }
 
 function ve_player_splash_preview_html(array $settings): string
@@ -1532,7 +1584,535 @@ function ve_dashboard_balance_micro_usd(int $userId): int
     );
     $stmt->execute([':user_id' => $userId]);
 
+    return (int) $stmt->fetchColumn() + ve_account_balance_ledger_adjustment_micro_usd($userId);
+}
+
+function ve_account_balance_ledger_adjustment_micro_usd(int $userId): int
+{
+    $stmt = ve_db()->prepare(
+        'SELECT COALESCE(SUM(amount_micro_usd), 0)
+         FROM account_balance_ledger
+         WHERE user_id = :user_id'
+    );
+    $stmt->execute([':user_id' => $userId]);
+
     return (int) $stmt->fetchColumn();
+}
+
+function ve_premium_account_plan_catalog(): array
+{
+    static $plans;
+
+    if (is_array($plans)) {
+        return $plans;
+    }
+
+    $plans = [
+        'monthly' => [
+            'id' => 'monthly',
+            'kind' => 'account',
+            'title' => 'Monthly',
+            'amount_micro_usd' => 7990000,
+            'interval_spec' => 'P1M',
+            'description' => 'Monthly premium account',
+        ],
+        'half_yearly' => [
+            'id' => 'half_yearly',
+            'kind' => 'account',
+            'title' => 'Half Yearly',
+            'amount_micro_usd' => 37990000,
+            'interval_spec' => 'P6M',
+            'description' => 'Half-year premium account',
+        ],
+        'yearly' => [
+            'id' => 'yearly',
+            'kind' => 'account',
+            'title' => 'Yearly',
+            'amount_micro_usd' => 77990000,
+            'interval_spec' => 'P1Y',
+            'description' => 'Yearly premium account',
+        ],
+    ];
+
+    return $plans;
+}
+
+function ve_premium_bandwidth_package_catalog(): array
+{
+    static $packages;
+
+    if (is_array($packages)) {
+        return $packages;
+    }
+
+    $tb = 1024 ** 4;
+    $packages = [
+        '10tb' => [
+            'id' => '10tb',
+            'kind' => 'bandwidth',
+            'title' => '10 TB',
+            'amount_micro_usd' => 20000000,
+            'bandwidth_bytes' => 10 * $tb,
+            'description' => '10 TB premium bandwidth',
+        ],
+        '25tb' => [
+            'id' => '25tb',
+            'kind' => 'bandwidth',
+            'title' => '25 TB',
+            'amount_micro_usd' => 50000000,
+            'bandwidth_bytes' => 25 * $tb,
+            'description' => '25 TB premium bandwidth',
+        ],
+        '50tb' => [
+            'id' => '50tb',
+            'kind' => 'bandwidth',
+            'title' => '50 TB',
+            'amount_micro_usd' => 100000000,
+            'bandwidth_bytes' => 50 * $tb,
+            'description' => '50 TB premium bandwidth',
+        ],
+        '100tb' => [
+            'id' => '100tb',
+            'kind' => 'bandwidth',
+            'title' => '100 TB',
+            'amount_micro_usd' => 200000000,
+            'bandwidth_bytes' => 100 * $tb,
+            'description' => '100 TB premium bandwidth',
+        ],
+        '200tb' => [
+            'id' => '200tb',
+            'kind' => 'bandwidth',
+            'title' => '200 TB',
+            'amount_micro_usd' => 400000000,
+            'bandwidth_bytes' => 200 * $tb,
+            'description' => '200 TB premium bandwidth',
+        ],
+    ];
+
+    return $packages;
+}
+
+function ve_premium_payment_catalog(): array
+{
+    static $payments;
+
+    if (is_array($payments)) {
+        return $payments;
+    }
+
+    $payments = [
+        'balance' => [
+            'code' => 'balance',
+            'label' => 'Balance',
+            'kind' => 'balance',
+        ],
+        'BTC' => [
+            'code' => 'BTC',
+            'label' => 'Bitcoin',
+            'kind' => 'crypto',
+            'currency_code' => 'BTC',
+            'currency_name' => 'Bitcoin',
+            'address' => 'bc1qdummypremiumcheckout0000000000000000000000',
+            'usd_rate' => 66400.00,
+            'precision' => 8,
+            'uri_scheme' => 'bitcoin',
+        ],
+        'ETH' => [
+            'code' => 'ETH',
+            'label' => 'Ethereum',
+            'kind' => 'crypto',
+            'currency_code' => 'ETH',
+            'currency_name' => 'Ethereum',
+            'address' => '0xDEADBEEF00000000000000000000000000BEEF00',
+            'usd_rate' => 3325.00,
+            'precision' => 6,
+            'uri_scheme' => 'ethereum',
+        ],
+        'BCH' => [
+            'code' => 'BCH',
+            'label' => 'Bitcoin Cash',
+            'kind' => 'crypto',
+            'currency_code' => 'BCH',
+            'currency_name' => 'Bitcoin Cash',
+            'address' => 'bitcoincash:qrdummypremiumcheckout0000000000000000000',
+            'usd_rate' => 425.00,
+            'precision' => 6,
+            'uri_scheme' => 'bitcoincash',
+        ],
+        'LTC' => [
+            'code' => 'LTC',
+            'label' => 'Litecoin',
+            'kind' => 'crypto',
+            'currency_code' => 'LTC',
+            'currency_name' => 'Litecoin',
+            'address' => 'ltc1qdummypremiumcheckout000000000000000000000',
+            'usd_rate' => 84.00,
+            'precision' => 6,
+            'uri_scheme' => 'litecoin',
+        ],
+        'USDTTRC20' => [
+            'code' => 'USDTTRC20',
+            'label' => 'USDT TRC20',
+            'kind' => 'crypto',
+            'currency_code' => 'USDTTRC20',
+            'currency_name' => 'USDT TRC20',
+            'address' => 'TDummyPremiumCheckoutWallet1111111111111111',
+            'usd_rate' => 1.00,
+            'precision' => 2,
+            'uri_scheme' => 'tron',
+        ],
+    ];
+
+    return $payments;
+}
+
+function ve_premium_normalize_purchase_type(string $purchaseType): ?string
+{
+    $normalized = strtolower(trim($purchaseType));
+
+    return match ($normalized) {
+        'account', 'plan', 'premium_account' => 'account',
+        'bandwidth', 'premium_bw', 'premium_bandwidth' => 'bandwidth',
+        default => null,
+    };
+}
+
+function ve_premium_normalize_payment_code(string $paymentCode): string
+{
+    $paymentCode = trim($paymentCode);
+
+    return strcasecmp($paymentCode, 'balance') === 0 ? 'balance' : strtoupper($paymentCode);
+}
+
+function ve_premium_project_expiry(array $user, string $intervalSpec): ?string
+{
+    try {
+        $base = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $premiumUntil = trim((string) ($user['premium_until'] ?? ''));
+
+        if ($premiumUntil !== '') {
+            $premiumUntilDate = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $premiumUntil, new DateTimeZone('UTC'));
+
+            if ($premiumUntilDate instanceof DateTimeImmutable && $premiumUntilDate > $base) {
+                $base = $premiumUntilDate;
+            }
+        }
+
+        return $base->add(new DateInterval($intervalSpec))->format('Y-m-d H:i:s');
+    } catch (Throwable $throwable) {
+        return null;
+    }
+}
+
+function ve_premium_bandwidth_totals(int $userId): array
+{
+    $purchasedStmt = ve_db()->prepare(
+        'SELECT COALESCE(SUM(bandwidth_bytes), 0)
+         FROM premium_orders
+         WHERE user_id = :user_id
+           AND purchase_type = :purchase_type
+           AND status = :status'
+    );
+    $purchasedStmt->execute([
+        ':user_id' => $userId,
+        ':purchase_type' => 'bandwidth',
+        ':status' => 'completed',
+    ]);
+    $purchasedBytes = (int) $purchasedStmt->fetchColumn();
+
+    $usedStmt = ve_db()->prepare(
+        'SELECT COALESCE(SUM(bandwidth_bytes), 0)
+         FROM user_stats_daily
+         WHERE user_id = :user_id'
+    );
+    $usedStmt->execute([':user_id' => $userId]);
+    $usedBytes = (int) $usedStmt->fetchColumn();
+
+    return [
+        'purchased_bytes' => $purchasedBytes,
+        'used_bytes' => $usedBytes,
+        'available_bytes' => max(0, $purchasedBytes - $usedBytes),
+    ];
+}
+
+function ve_premium_chart_payload(int $userId, int $lookbackDays = 7): array
+{
+    $range = ve_dashboard_normalize_date_range(null, null, $lookbackDays);
+    $series = ve_dashboard_chart_series($userId, $range['from'], $range['to']);
+    $labels = [];
+    $stats = [];
+
+    foreach ($series as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $labels[] = (string) ($entry['time'] ?? '');
+        $stats[] = round(((int) ($entry['bandwidth_bytes'] ?? 0)) / (1024 * 1024), 2);
+    }
+
+    return [
+        'labels' => $labels,
+        'stats' => $stats,
+    ];
+}
+
+function ve_premium_page_payload(int $userId): array
+{
+    $user = ve_get_user_by_id($userId);
+    $balanceMicroUsd = ve_dashboard_balance_micro_usd($userId);
+    $bandwidth = ve_premium_bandwidth_totals($userId);
+    $chart = ve_premium_chart_payload($userId, 7);
+    $premiumUntil = is_array($user) ? trim((string) ($user['premium_until'] ?? '')) : '';
+
+    return [
+        'usr_money' => number_format($balanceMicroUsd / 1000000, 5, '.', ''),
+        'balance_micro_usd' => $balanceMicroUsd,
+        'balance_label' => ve_dashboard_format_currency_micro_usd($balanceMicroUsd),
+        'rand' => strtolower(substr(ve_random_token(6), 0, 6)),
+        'accept_paypal' => 0,
+        'used_bw' => (int) ($bandwidth['used_bytes'] ?? 0),
+        'available_bw' => (int) ($bandwidth['available_bytes'] ?? 0),
+        'purchased_bw' => (int) ($bandwidth['purchased_bytes'] ?? 0),
+        'stats' => $chart['stats'],
+        'labels' => $chart['labels'],
+        'plan_label' => is_array($user) && ve_user_is_premium($user) ? 'Premium active' : 'Free account',
+        'premium_until_raw' => $premiumUntil,
+        'premium_until_label' => $premiumUntil !== '' ? ve_format_datetime_label($premiumUntil, 'Active') : 'No active renewal',
+    ];
+}
+
+function ve_premium_order_code(): string
+{
+    return 'po_' . strtolower(ve_random_token(9));
+}
+
+function ve_premium_checkout_context_from_request(int $userId, array $request): array
+{
+    $purchaseType = ve_premium_normalize_purchase_type((string) ($request['purchase_type'] ?? $request['premium'] ?? ''));
+
+    if ($purchaseType === null) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Choose a valid premium product before continuing.',
+        ], 422);
+    }
+
+    $packageId = strtolower(trim((string) ($request['package_id'] ?? $request['plan_id'] ?? $request['package'] ?? '')));
+
+    if ($packageId === '') {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Choose a valid plan or bandwidth package before continuing.',
+        ], 422);
+    }
+
+    $catalog = $purchaseType === 'account' ? ve_premium_account_plan_catalog() : ve_premium_bandwidth_package_catalog();
+    $product = $catalog[$packageId] ?? null;
+
+    if (!is_array($product)) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'The selected package is no longer available.',
+        ], 422);
+    }
+
+    $paymentCode = ve_premium_normalize_payment_code((string) ($request['payment_method'] ?? $request['coin'] ?? $request['submethod'] ?? 'balance'));
+    $payments = ve_premium_payment_catalog();
+    $payment = $payments[$paymentCode] ?? null;
+
+    if (!is_array($payment)) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Choose a valid payment method before continuing.',
+        ], 422);
+    }
+
+    return [
+        'purchase_type' => $purchaseType,
+        'product' => $product,
+        'payment' => $payment,
+        'quote' => ve_premium_checkout_quote($userId, $purchaseType, $product, $payment),
+    ];
+}
+
+function ve_premium_checkout_quote(int $userId, string $purchaseType, array $product, array $payment): array
+{
+    $user = ve_get_user_by_id($userId);
+    $balanceMicroUsd = ve_dashboard_balance_micro_usd($userId);
+    $amountMicroUsd = (int) ($product['amount_micro_usd'] ?? 0);
+    $remainingBalanceMicroUsd = $balanceMicroUsd - $amountMicroUsd;
+    $canPay = ($payment['kind'] ?? '') !== 'balance' || $remainingBalanceMicroUsd >= 0;
+    $projectedPremiumUntil = $purchaseType === 'account'
+        ? ve_premium_project_expiry(is_array($user) ? $user : [], (string) ($product['interval_spec'] ?? 'P1M'))
+        : null;
+    $benefitLabel = $purchaseType === 'account'
+        ? ((string) ($product['title'] ?? 'Premium') . ' premium account')
+        : ((string) ($product['title'] ?? 'Premium') . ' premium bandwidth');
+
+    return [
+        'purchase_type' => $purchaseType,
+        'package_id' => (string) ($product['id'] ?? ''),
+        'package_title' => (string) ($product['title'] ?? ''),
+        'description' => (string) ($product['description'] ?? $benefitLabel),
+        'payment_method' => (string) ($payment['code'] ?? ''),
+        'payment_label' => (string) ($payment['label'] ?? ''),
+        'amount_micro_usd' => $amountMicroUsd,
+        'amount_label' => ve_dashboard_format_currency_micro_usd($amountMicroUsd),
+        'balance_micro_usd' => $balanceMicroUsd,
+        'balance_label' => ve_dashboard_format_currency_micro_usd($balanceMicroUsd),
+        'remaining_balance_micro_usd' => $remainingBalanceMicroUsd,
+        'remaining_balance_label' => ve_dashboard_format_currency_micro_usd($remainingBalanceMicroUsd),
+        'can_pay' => $canPay,
+        'insufficient_balance_message' => $canPay ? '' : 'Your current balance is not high enough for this purchase.',
+        'bandwidth_bytes' => (int) ($product['bandwidth_bytes'] ?? 0),
+        'bandwidth_label' => isset($product['bandwidth_bytes']) ? ve_human_bytes((int) $product['bandwidth_bytes']) : '',
+        'projected_premium_until_raw' => $projectedPremiumUntil,
+        'projected_premium_until_label' => $projectedPremiumUntil !== null ? ve_format_datetime_label($projectedPremiumUntil, 'Pending activation') : '',
+        'benefit_label' => $benefitLabel,
+    ];
+}
+
+function ve_insert_balance_ledger_entry(PDO $pdo, int $userId, string $entryType, string $sourceType, string $sourceKey, int $amountMicroUsd, string $description, array $metadata = []): void
+{
+    $metadataJson = json_encode($metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+    if (!is_string($metadataJson)) {
+        $metadataJson = '{}';
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO account_balance_ledger (
+            user_id, entry_type, source_type, source_key, amount_micro_usd, description, metadata_json, created_at
+        ) VALUES (
+            :user_id, :entry_type, :source_type, :source_key, :amount_micro_usd, :description, :metadata_json, :created_at
+        )'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':entry_type' => $entryType,
+        ':source_type' => $sourceType,
+        ':source_key' => $sourceKey,
+        ':amount_micro_usd' => $amountMicroUsd,
+        ':description' => $description,
+        ':metadata_json' => $metadataJson,
+        ':created_at' => ve_now(),
+    ]);
+}
+
+function ve_insert_premium_order(PDO $pdo, array $order): void
+{
+    $metadataJson = json_encode((array) ($order['metadata'] ?? []), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+    if (!is_string($metadataJson)) {
+        $metadataJson = '{}';
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO premium_orders (
+            order_code, user_id, purchase_type, package_id, package_title, payment_method, status, amount_micro_usd,
+            bandwidth_bytes, plan_interval_spec, crypto_currency_code, crypto_currency_name, crypto_amount, crypto_address,
+            payment_uri, qr_url, metadata_json, created_at, updated_at, completed_at
+        ) VALUES (
+            :order_code, :user_id, :purchase_type, :package_id, :package_title, :payment_method, :status, :amount_micro_usd,
+            :bandwidth_bytes, :plan_interval_spec, :crypto_currency_code, :crypto_currency_name, :crypto_amount, :crypto_address,
+            :payment_uri, :qr_url, :metadata_json, :created_at, :updated_at, :completed_at
+        )'
+    );
+    $stmt->execute([
+        ':order_code' => (string) ($order['order_code'] ?? ''),
+        ':user_id' => (int) ($order['user_id'] ?? 0),
+        ':purchase_type' => (string) ($order['purchase_type'] ?? ''),
+        ':package_id' => (string) ($order['package_id'] ?? ''),
+        ':package_title' => (string) ($order['package_title'] ?? ''),
+        ':payment_method' => (string) ($order['payment_method'] ?? ''),
+        ':status' => (string) ($order['status'] ?? 'pending'),
+        ':amount_micro_usd' => (int) ($order['amount_micro_usd'] ?? 0),
+        ':bandwidth_bytes' => (int) ($order['bandwidth_bytes'] ?? 0),
+        ':plan_interval_spec' => (string) ($order['plan_interval_spec'] ?? ''),
+        ':crypto_currency_code' => (string) ($order['crypto_currency_code'] ?? ''),
+        ':crypto_currency_name' => (string) ($order['crypto_currency_name'] ?? ''),
+        ':crypto_amount' => (string) ($order['crypto_amount'] ?? ''),
+        ':crypto_address' => (string) ($order['crypto_address'] ?? ''),
+        ':payment_uri' => (string) ($order['payment_uri'] ?? ''),
+        ':qr_url' => (string) ($order['qr_url'] ?? ''),
+        ':metadata_json' => $metadataJson,
+        ':created_at' => (string) ($order['created_at'] ?? ve_now()),
+        ':updated_at' => (string) ($order['updated_at'] ?? ve_now()),
+        ':completed_at' => $order['completed_at'] ?? null,
+    ]);
+}
+
+function ve_premium_dummy_payment_uri(array $payment, string $address, string $amount, string $orderCode): string
+{
+    $scheme = (string) ($payment['uri_scheme'] ?? '');
+    $query = 'amount=' . rawurlencode($amount) . '&invoice=' . rawurlencode($orderCode);
+
+    if (($payment['code'] ?? '') === 'USDTTRC20') {
+        $query .= '&token=USDTTRC20';
+    }
+
+    if ($scheme === '') {
+        return $address . '?' . $query;
+    }
+
+    return $scheme . ':' . $address . '?' . $query;
+}
+
+function ve_premium_dummy_crypto_invoice(array $payment, array $quote, string $orderCode): array
+{
+    $usdAmount = ((int) ($quote['amount_micro_usd'] ?? 0)) / 1000000;
+    $usdRate = max(0.000001, (float) ($payment['usd_rate'] ?? 1));
+    $precision = max(2, min(8, (int) ($payment['precision'] ?? 8)));
+    $cryptoAmount = number_format($usdAmount / $usdRate, $precision, '.', '');
+    $address = (string) ($payment['address'] ?? '');
+    $paymentUri = ve_premium_dummy_payment_uri($payment, $address, $cryptoAmount, $orderCode);
+
+    return [
+        'order_code' => $orderCode,
+        'currency_code' => (string) ($payment['currency_code'] ?? ($payment['code'] ?? '')),
+        'currency_name' => (string) ($payment['currency_name'] ?? ($payment['label'] ?? 'Crypto')),
+        'amount' => $cryptoAmount,
+        'address' => $address,
+        'payment_uri' => $paymentUri,
+        'qr' => 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' . rawurlencode($paymentUri),
+    ];
+}
+
+function ve_apply_premium_purchase(PDO $pdo, int $userId, string $purchaseType, array $product): array
+{
+    if ($purchaseType === 'account') {
+        $user = ve_get_user_by_id($userId);
+        $premiumUntil = ve_premium_project_expiry(is_array($user) ? $user : [], (string) ($product['interval_spec'] ?? 'P1M'));
+
+        if ($premiumUntil === null) {
+            throw new RuntimeException('Unable to compute the premium renewal date.');
+        }
+
+        $stmt = $pdo->prepare(
+            'UPDATE users
+             SET plan_code = :plan_code,
+                 premium_until = :premium_until,
+                 updated_at = :updated_at
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            ':plan_code' => 'premium',
+            ':premium_until' => $premiumUntil,
+            ':updated_at' => ve_now(),
+            ':id' => $userId,
+        ]);
+
+        return [
+            'premium_until' => $premiumUntil,
+            'message' => 'Premium account active until ' . ve_format_datetime_label($premiumUntil, 'Active') . '.',
+        ];
+    }
+
+    return [
+        'premium_until' => null,
+        'message' => (string) ($product['title'] ?? 'Premium bandwidth') . ' was added to your account.',
+    ];
 }
 
 function ve_dashboard_storage_bytes(int $userId): int
@@ -2922,6 +3502,203 @@ function ve_list_custom_domains(int $userId): array
     }
 
     return $domains;
+}
+
+function ve_handle_premium_checkout_quote(): void
+{
+    $user = ve_require_auth();
+    ve_require_csrf(ve_request_csrf_token());
+
+    $context = ve_premium_checkout_context_from_request((int) $user['id'], $_POST);
+
+    ve_json([
+        'status' => 'ok',
+        'checkout' => $context['quote'],
+        'summary' => ve_premium_page_payload((int) $user['id']),
+    ]);
+}
+
+function ve_handle_premium_checkout_balance(): void
+{
+    $user = ve_require_auth();
+    ve_require_csrf(ve_request_csrf_token());
+
+    $context = ve_premium_checkout_context_from_request((int) $user['id'], $_POST);
+    $payment = (array) ($context['payment'] ?? []);
+
+    if (($payment['code'] ?? '') !== 'balance') {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Balance checkout requires the balance payment method.',
+        ], 422);
+    }
+
+    $quote = (array) ($context['quote'] ?? []);
+
+    if (!((bool) ($quote['can_pay'] ?? false))) {
+        ve_json([
+            'status' => 'fail',
+            'message' => (string) ($quote['insufficient_balance_message'] ?? 'Your current balance is not high enough for this purchase.'),
+            'checkout' => $quote,
+            'summary' => ve_premium_page_payload((int) $user['id']),
+        ], 422);
+    }
+
+    $userId = (int) $user['id'];
+    $product = (array) ($context['product'] ?? []);
+    $purchaseType = (string) ($context['purchase_type'] ?? '');
+    $amountMicroUsd = (int) ($product['amount_micro_usd'] ?? 0);
+    $orderCode = ve_premium_order_code();
+    $pdo = ve_db();
+
+    try {
+        $pdo->beginTransaction();
+
+        if (ve_dashboard_balance_micro_usd($userId) < $amountMicroUsd) {
+            throw new RuntimeException('insufficient_balance');
+        }
+
+        $now = ve_now();
+        ve_insert_premium_order($pdo, [
+            'order_code' => $orderCode,
+            'user_id' => $userId,
+            'purchase_type' => $purchaseType,
+            'package_id' => (string) ($product['id'] ?? ''),
+            'package_title' => (string) ($product['title'] ?? ''),
+            'payment_method' => 'balance',
+            'status' => 'completed',
+            'amount_micro_usd' => $amountMicroUsd,
+            'bandwidth_bytes' => (int) ($product['bandwidth_bytes'] ?? 0),
+            'plan_interval_spec' => (string) ($product['interval_spec'] ?? ''),
+            'metadata' => [
+                'payment_label' => 'Balance',
+                'description' => (string) ($product['description'] ?? ''),
+            ],
+            'created_at' => $now,
+            'updated_at' => $now,
+            'completed_at' => $now,
+        ]);
+        ve_insert_balance_ledger_entry(
+            $pdo,
+            $userId,
+            'debit',
+            'premium_order',
+            $orderCode,
+            -$amountMicroUsd,
+            'Premium checkout: ' . (string) ($product['description'] ?? ($product['title'] ?? 'Premium purchase')),
+            [
+                'purchase_type' => $purchaseType,
+                'package_id' => (string) ($product['id'] ?? ''),
+                'payment_method' => 'balance',
+            ]
+        );
+        $purchaseResult = ve_apply_premium_purchase($pdo, $userId, $purchaseType, $product);
+        $pdo->commit();
+    } catch (Throwable $throwable) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        if ($throwable->getMessage() === 'insufficient_balance') {
+            ve_json([
+                'status' => 'fail',
+                'message' => 'Your current balance is not high enough for this purchase.',
+                'checkout' => ve_premium_checkout_quote($userId, $purchaseType, $product, $payment),
+                'summary' => ve_premium_page_payload($userId),
+            ], 422);
+        }
+
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Unable to complete the premium purchase right now.',
+        ], 500);
+    }
+
+    ve_current_user(true);
+    $message = (string) ($purchaseResult['message'] ?? 'Premium purchase completed successfully.');
+    ve_add_notification(
+        $userId,
+        $purchaseType === 'account' ? 'Premium account purchased' : 'Premium bandwidth purchased',
+        $message
+    );
+
+    ve_json([
+        'status' => 'ok',
+        'message' => $message,
+        'order_code' => $orderCode,
+        'summary' => ve_premium_page_payload($userId),
+    ]);
+}
+
+function ve_handle_premium_checkout_crypto(): void
+{
+    $user = ve_require_auth();
+    ve_require_csrf(ve_request_csrf_token());
+
+    $context = ve_premium_checkout_context_from_request((int) $user['id'], $_POST);
+    $payment = (array) ($context['payment'] ?? []);
+
+    if (($payment['kind'] ?? '') !== 'crypto') {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Crypto checkout requires a crypto payment method.',
+        ], 422);
+    }
+
+    $userId = (int) $user['id'];
+    $product = (array) ($context['product'] ?? []);
+    $purchaseType = (string) ($context['purchase_type'] ?? '');
+    $quote = (array) ($context['quote'] ?? []);
+    $orderCode = ve_premium_order_code();
+    $invoice = ve_premium_dummy_crypto_invoice($payment, $quote, $orderCode);
+    $now = ve_now();
+
+    try {
+        ve_insert_premium_order(ve_db(), [
+            'order_code' => $orderCode,
+            'user_id' => $userId,
+            'purchase_type' => $purchaseType,
+            'package_id' => (string) ($product['id'] ?? ''),
+            'package_title' => (string) ($product['title'] ?? ''),
+            'payment_method' => (string) ($payment['code'] ?? ''),
+            'status' => 'pending',
+            'amount_micro_usd' => (int) ($product['amount_micro_usd'] ?? 0),
+            'bandwidth_bytes' => (int) ($product['bandwidth_bytes'] ?? 0),
+            'plan_interval_spec' => (string) ($product['interval_spec'] ?? ''),
+            'crypto_currency_code' => (string) ($invoice['currency_code'] ?? ''),
+            'crypto_currency_name' => (string) ($invoice['currency_name'] ?? ''),
+            'crypto_amount' => (string) ($invoice['amount'] ?? ''),
+            'crypto_address' => (string) ($invoice['address'] ?? ''),
+            'payment_uri' => (string) ($invoice['payment_uri'] ?? ''),
+            'qr_url' => (string) ($invoice['qr'] ?? ''),
+            'metadata' => [
+                'sandbox' => true,
+                'payment_label' => (string) ($payment['label'] ?? ''),
+                'description' => (string) ($product['description'] ?? ''),
+            ],
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+    } catch (Throwable $throwable) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'Unable to create the crypto invoice right now.',
+        ], 500);
+    }
+
+    ve_add_notification(
+        $userId,
+        'Crypto invoice created',
+        'A sandbox ' . (string) ($payment['label'] ?? 'crypto') . ' invoice was generated for ' . (string) ($product['title'] ?? 'your premium checkout') . '.'
+    );
+
+    ve_json([
+        'status' => 'ok',
+        'message' => 'Sandbox crypto invoice created. Real on-chain confirmation will be added when the payment gateway is connected.',
+        'checkout' => $quote,
+        'invoice' => $invoice,
+        'summary' => ve_premium_page_payload($userId),
+    ]);
 }
 
 function ve_handle_custom_domain_list(): void
@@ -4529,11 +5306,45 @@ function ve_dashboard_premium_plans_content(array $user): string
 HTML;
 }
 
+function ve_premium_page_component_markup(array $pagePayload): string
+{
+    $json = json_encode($pagePayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+    if (!is_string($json)) {
+        $json = '{}';
+    }
+
+    return '<my-premium :page=\'' . ve_h($json) . '\'></my-premium>';
+}
+
 function ve_render_premium_plans_page(): void
 {
-    ve_require_auth();
+    $user = ve_require_auth();
     $html = (string) file_get_contents(ve_root_path('dashboard', 'premium-plans.html'));
     $html = ve_runtime_html_transform($html, 'dashboard/premium-plans.html');
+    $pageMarkup = ve_premium_page_component_markup(ve_premium_page_payload((int) $user['id']));
+    $html = preg_replace_callback(
+        '/<my-premium\b[^>]*><\/my-premium>/i',
+        static fn (): string => $pageMarkup,
+        $html,
+        1
+    ) ?? $html;
+
+    $checkoutCss = '<link rel="stylesheet" type="text/css" href="' . ve_h(ve_url('/assets/css/premium_checkout_runtime.css')) . '">';
+    $checkoutJs = '<script src="' . ve_h(ve_url('/assets/js/premium_checkout_runtime.js')) . '"></script>';
+
+    if (str_contains($html, '</head>')) {
+        $html = str_replace('</head>', $checkoutCss . '</head>', $html);
+    } else {
+        $html = $checkoutCss . $html;
+    }
+
+    if (str_contains($html, '</body>')) {
+        $html = str_replace('</body>', $checkoutJs . '</body>', $html);
+    } else {
+        $html .= $checkoutJs;
+    }
+
     ve_html(ve_rewrite_html_paths($html));
 }
 

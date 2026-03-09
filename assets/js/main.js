@@ -32,7 +32,9 @@ $(document).ready(function() {
         }
     });
 
-    $('[data-toggle="tooltip"]').tooltip();
+    if ($.fn.tooltip) {
+        $('[data-toggle="tooltip"]').tooltip();
+    }
 
     $('.settings_menu li a').on('click', function(e) {
         e.preventDefault();

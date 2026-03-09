@@ -1,0 +1,579 @@
+(function () {
+    'use strict';
+
+    function appUrl(path) {
+        var basePath = window.VE_BASE_PATH || '';
+
+        if (!path) {
+            return basePath || '/';
+        }
+
+        if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(path)) {
+            return path;
+        }
+
+        if (basePath && (path === basePath || path.indexOf(basePath + '/') === 0)) {
+            return path;
+        }
+
+        if (path.charAt(0) !== '/') {
+            path = '/' + path;
+        }
+
+        return basePath + path;
+    }
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
+            return {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[character];
+        });
+    }
+
+    function ensureCheckoutModal() {
+        if (window.__vePremiumCheckoutModal) {
+            return window.__vePremiumCheckoutModal;
+        }
+
+        var root = document.createElement('div');
+        root.id = 've-premium-checkout-modal';
+        root.className = 've-premium-modal';
+        root.setAttribute('aria-hidden', 'true');
+        root.innerHTML = ''
+            + '<div class="ve-premium-modal-backdrop" data-close-modal="1"></div>'
+            + '<div class="ve-premium-modal-shell">'
+            + '  <div class="ve-premium-modal-card the_box" role="dialog" aria-modal="true" aria-labelledby="ve-premium-checkout-title">'
+            + '    <div class="ve-premium-modal-header">'
+            + '      <div>'
+            + '        <span class="ve-premium-modal-kicker">Premium checkout</span>'
+            + '        <h3 class="ve-premium-modal-title" id="ve-premium-checkout-title">Checkout</h3>'
+            + '        <p class="ve-premium-modal-subtitle"></p>'
+            + '      </div>'
+            + '      <button type="button" class="ve-premium-modal-close" data-close-modal="1" aria-label="Close checkout">&times;</button>'
+            + '    </div>'
+            + '    <div class="ve-premium-modal-notice is-hidden"></div>'
+            + '    <div class="ve-premium-modal-body"></div>'
+            + '    <div class="ve-premium-modal-footer"></div>'
+            + '  </div>'
+            + '</div>';
+        document.body.appendChild(root);
+
+        var modal = {
+            root: root,
+            title: root.querySelector('.ve-premium-modal-title'),
+            subtitle: root.querySelector('.ve-premium-modal-subtitle'),
+            notice: root.querySelector('.ve-premium-modal-notice'),
+            body: root.querySelector('.ve-premium-modal-body'),
+            footer: root.querySelector('.ve-premium-modal-footer')
+        };
+
+        root.addEventListener('click', function (event) {
+            if (event.target.closest('[data-close-modal="1"]')) {
+                closeCheckoutModal();
+            }
+        });
+
+        modal.body.addEventListener('click', function (event) {
+            var copyButton = event.target.closest('[data-copy-address="1"]');
+
+            if (!copyButton) {
+                return;
+            }
+
+            event.preventDefault();
+
+            var address = modal.root.getAttribute('data-copy-value') || '';
+
+            if (!address) {
+                return;
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(address).then(function () {
+                    copyButton.textContent = 'Copied';
+                    window.setTimeout(function () {
+                        copyButton.textContent = 'Copy address';
+                    }, 1600);
+                    setCheckoutNotice('info', 'Address copied.');
+                }, function () {
+                    setCheckoutNotice('warning', 'Copy the address manually from the invoice.');
+                });
+                return;
+            }
+
+            setCheckoutNotice('warning', 'Copy the address manually from the invoice.');
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && modal.root.classList.contains('is-open')) {
+                closeCheckoutModal();
+            }
+        });
+
+        window.__vePremiumCheckoutModal = modal;
+        return modal;
+    }
+
+    function computeHeaderOffset() {
+        var header = document.querySelector('.main-menu');
+
+        if (!header) {
+            return 96;
+        }
+
+        var rect = header.getBoundingClientRect();
+        return Math.max(72, Math.round(rect.bottom) + 12);
+    }
+
+    function openCheckoutModal() {
+        var modal = ensureCheckoutModal();
+        modal.root.style.setProperty('--ve-premium-header-offset', computeHeaderOffset() + 'px');
+        modal.root.classList.add('is-open');
+        modal.root.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('ve-premium-modal-active');
+    }
+
+    function closeCheckoutModal() {
+        var modal = ensureCheckoutModal();
+        modal.root.classList.remove('is-open');
+        modal.root.setAttribute('aria-hidden', 'true');
+        modal.root.removeAttribute('data-copy-value');
+        document.body.classList.remove('ve-premium-modal-active');
+    }
+
+    function setCheckoutNotice(type, message) {
+        var modal = ensureCheckoutModal();
+        modal.notice.className = 've-premium-modal-notice';
+
+        if (!message) {
+            modal.notice.classList.add('is-hidden');
+            modal.notice.textContent = '';
+            return;
+        }
+
+        modal.notice.classList.add('is-' + (type || 'info'));
+        modal.notice.textContent = message;
+    }
+
+    function setCheckoutActions(actions) {
+        var modal = ensureCheckoutModal();
+        modal.footer.innerHTML = '';
+
+        (actions || []).forEach(function (action) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = action.primary ? 'btn btn-primary' : 'btn ve-premium-btn-secondary';
+            button.textContent = action.label || 'Continue';
+            button.disabled = !!action.disabled;
+
+            if (typeof action.onClick === 'function') {
+                button.addEventListener('click', action.onClick);
+            }
+
+            modal.footer.appendChild(button);
+        });
+    }
+
+    function showCheckoutModal(title, subtitle, bodyHtml, noticeType, noticeMessage, actions) {
+        var modal = ensureCheckoutModal();
+        modal.title.textContent = title || 'Checkout';
+        modal.subtitle.textContent = subtitle || '';
+        modal.body.innerHTML = bodyHtml || '';
+        setCheckoutNotice(noticeType, noticeMessage || '');
+        setCheckoutActions(actions || []);
+        openCheckoutModal();
+    }
+
+    function showCheckoutLoading(title, subtitle) {
+        showCheckoutModal(
+            title,
+            subtitle,
+            '<div class="ve-premium-checkout-loading">'
+                + '<div><strong class="d-block mb-2">Preparing your checkout</strong><span class="text-muted">Fetching the latest pricing, balance, and entitlement state.</span></div>'
+            + '</div>',
+            '',
+            '',
+            [
+                {
+                    label: 'Close',
+                    primary: false,
+                    onClick: closeCheckoutModal
+                }
+            ]
+        );
+    }
+
+    function requestJson(path, payload) {
+        var formData = new URLSearchParams();
+        payload = payload || {};
+
+        Object.keys(payload).forEach(function (key) {
+            if (payload[key] !== undefined && payload[key] !== null) {
+                formData.append(key, String(payload[key]));
+            }
+        });
+
+        if (!formData.has('token')) {
+            formData.append('token', window.VE_CSRF_TOKEN || '');
+        }
+
+        return fetch(appUrl(path), {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-Token': window.VE_CSRF_TOKEN || ''
+            },
+            credentials: 'same-origin',
+            body: formData.toString()
+        }).then(function (response) {
+            return response.text().then(function (text) {
+                var parsed = {};
+
+                try {
+                    parsed = text ? JSON.parse(text) : {};
+                } catch (error) {
+                    var parseError = new Error(text || 'The server returned an invalid JSON response.');
+                    parseError.status = response.status;
+                    throw parseError;
+                }
+
+                if (!response.ok || parsed.status === 'fail') {
+                    var requestError = new Error(parsed.message || 'The request could not be completed.');
+                    requestError.status = response.status;
+                    requestError.payload = parsed;
+                    throw requestError;
+                }
+
+                return parsed;
+            });
+        });
+    }
+
+    function buildPremiumSelection(vm, purchaseType) {
+        var isAccount = purchaseType === 'account';
+        var selection = isAccount
+            ? vm.premium_plans[vm.premium_selected.index]
+            : vm.packages[vm.package_selected.index];
+        var paymentCode = isAccount ? vm.payment_selected : vm.payment_selected_bw;
+
+        return {
+            purchase_type: purchaseType,
+            package_id: selection && selection.id ? selection.id : '',
+            package_title: selection && selection.title ? selection.title : '',
+            payment_method: paymentCode || 'balance'
+        };
+    }
+
+    function applyPremiumSummary(vm, summary) {
+        if (!vm || !summary || !vm.data || !vm.data.page) {
+            return;
+        }
+
+        Object.keys(summary).forEach(function (key) {
+            if (typeof vm.$set === 'function') {
+                vm.$set(vm.data.page, key, summary[key]);
+            } else {
+                vm.data.page[key] = summary[key];
+            }
+
+            if (vm.page) {
+                vm.page[key] = summary[key];
+            }
+        });
+
+        if (vm.chart_data) {
+            vm.chart_data.labels = Array.isArray(summary.labels) ? summary.labels.slice() : [];
+
+            if (Array.isArray(vm.chart_data.datasets) && vm.chart_data.datasets[0]) {
+                vm.chart_data.datasets[0].data = Array.isArray(summary.stats) ? summary.stats.slice() : [];
+            }
+        }
+
+        if (typeof vm.$forceUpdate === 'function') {
+            vm.$forceUpdate();
+        }
+    }
+
+    function renderBalanceCheckoutBody(quote) {
+        var expiryCard = '';
+
+        if (quote.purchase_type === 'account') {
+            expiryCard = ''
+                + '<div class="ve-premium-checkout-cardline">'
+                + '  <h6>After purchase</h6>'
+                + '  <p>Premium access will run until <strong>' + escapeHtml(quote.projected_premium_until_label || 'the updated renewal date') + '</strong>.</p>'
+                + '</div>';
+        } else {
+            expiryCard = ''
+                + '<div class="ve-premium-checkout-cardline">'
+                + '  <h6>Bandwidth credit</h6>'
+                + '  <p><strong>' + escapeHtml(quote.bandwidth_label || quote.package_title) + '</strong> will be added immediately after confirmation.</p>'
+                + '</div>';
+        }
+
+        return ''
+            + '<div class="ve-premium-checkout-grid">'
+            + '  <div class="ve-premium-checkout-stat">'
+            + '    <span>Current balance</span>'
+            + '    <strong>' + escapeHtml(quote.balance_label || '$0.00000') + '</strong>'
+            + '  </div>'
+            + '  <div class="ve-premium-checkout-stat">'
+            + '    <span>Charge now</span>'
+            + '    <strong>' + escapeHtml(quote.amount_label || '$0.00000') + '</strong>'
+            + '  </div>'
+            + '  <div class="ve-premium-checkout-stat' + ((quote.remaining_balance_micro_usd || 0) < 0 ? ' negative' : '') + '">'
+            + '    <span>Balance after</span>'
+            + '    <strong>' + escapeHtml(quote.remaining_balance_label || '$0.00000') + '</strong>'
+            + '  </div>'
+            + '</div>'
+            + '<div class="ve-premium-checkout-meta">'
+            + '  <div class="ve-premium-checkout-cardline">'
+            + '    <h6>Selected package</h6>'
+            + '    <p>' + escapeHtml(quote.package_title || '') + ' via ' + escapeHtml(quote.payment_label || 'Balance') + '. This purchase is processed instantly and keeps you on the same page.</p>'
+            + '  </div>'
+            +      expiryCard
+            + '</div>';
+    }
+
+    function renderCryptoInvoiceBody(quote, invoice) {
+        return ''
+            + '<div class="ve-premium-invoice-layout">'
+            + '  <div class="ve-premium-qr-wrap">'
+            + '    <img alt="Crypto payment QR" src="' + escapeHtml(invoice.qr || '') + '">'
+            + '    <div class="ve-premium-inline-actions">'
+            + '      <a class="btn btn-primary btn-block" target="_blank" rel="noopener" href="' + escapeHtml(invoice.payment_uri || '#') + '">Click here to pay</a>'
+            + '      <button type="button" class="btn ve-premium-btn-secondary btn-block ve-premium-invoice-copy" data-copy-address="1">Copy address</button>'
+            + '    </div>'
+            + '  </div>'
+            + '  <div>'
+            + '    <p class="text-muted mb-2">Send exactly <strong>' + escapeHtml(invoice.amount || '') + ' ' + escapeHtml(invoice.currency_code || '') + '</strong> to the following address.</p>'
+            + '    <div class="ve-premium-address-block">' + escapeHtml(invoice.address || '') + '</div>'
+            + '    <p class="text-muted">This is a sandbox invoice in the same product flow. Real crypto settlement and automatic crediting will be wired in when the payment gateway is connected.</p>'
+            + '    <div class="ve-premium-invoice-meta">'
+            + '      <div class="ve-premium-checkout-stat">'
+            + '        <span>Invoice</span>'
+            + '        <strong>' + escapeHtml(invoice.order_code || '') + '</strong>'
+            + '      </div>'
+            + '      <div class="ve-premium-checkout-stat">'
+            + '        <span>Package</span>'
+            + '        <strong>' + escapeHtml(quote.package_title || '') + '</strong>'
+            + '      </div>'
+            + '    </div>'
+            + '  </div>'
+            + '</div>';
+    }
+
+    function renderBalanceConfirmation(vm, quote, noticeType, noticeMessage) {
+        var title = (quote.package_title || 'Premium') + ' - ' + (quote.purchase_type === 'account' ? 'Plan' : 'Package') + ' - Balance payment';
+        var subtitle = quote.purchase_type === 'account'
+            ? 'Confirm the balance charge to activate premium without leaving the page.'
+            : 'Confirm the balance charge to add premium bandwidth instantly.';
+
+        showCheckoutModal(
+            title,
+            subtitle,
+            renderBalanceCheckoutBody(quote),
+            noticeType || (quote.can_pay ? 'info' : 'warning'),
+            noticeMessage || (quote.can_pay ? 'Balance payments are applied immediately after confirmation.' : (quote.insufficient_balance_message || 'Your current balance is not high enough for this purchase.')),
+            [
+                {
+                    label: 'Cancel',
+                    primary: false,
+                    onClick: closeCheckoutModal
+                },
+                {
+                    label: quote.can_pay ? 'Confirm purchase' : 'Balance too low',
+                    primary: true,
+                    disabled: !quote.can_pay,
+                    onClick: function () {
+                        confirmBalanceCheckout(vm, quote);
+                    }
+                }
+            ]
+        );
+    }
+
+    function renderPurchaseSuccess(vm, quote, response) {
+        applyPremiumSummary(vm, response.summary || null);
+
+        var bodyHtml = ''
+            + '<div class="ve-premium-checkout-grid">'
+            + '  <div class="ve-premium-checkout-stat">'
+            + '    <span>Order</span>'
+            + '    <strong>' + escapeHtml(response.order_code || '') + '</strong>'
+            + '  </div>'
+            + '  <div class="ve-premium-checkout-stat">'
+            + '    <span>Package</span>'
+            + '    <strong>' + escapeHtml(quote.package_title || '') + '</strong>'
+            + '  </div>'
+            + '  <div class="ve-premium-checkout-stat">'
+            + '    <span>Charged</span>'
+            + '    <strong>' + escapeHtml(quote.amount_label || '') + '</strong>'
+            + '  </div>'
+            + '</div>';
+
+        showCheckoutModal(
+            'Purchase completed',
+            'Your account has been updated without a page reload.',
+            bodyHtml,
+            'success',
+            response.message || 'Premium purchase completed successfully.',
+            [
+                {
+                    label: 'Done',
+                    primary: true,
+                    onClick: closeCheckoutModal
+                }
+            ]
+        );
+    }
+
+    function showCheckoutFailure(title, message) {
+        showCheckoutModal(
+            title,
+            'The checkout request did not complete.',
+            '<p class="text-muted mb-0">Review the message below and try again.</p>',
+            'danger',
+            message || 'Unable to complete the checkout right now.',
+            [
+                {
+                    label: 'Close',
+                    primary: false,
+                    onClick: closeCheckoutModal
+                }
+            ]
+        );
+    }
+
+    function confirmBalanceCheckout(vm, quote) {
+        showCheckoutLoading('Processing balance purchase', 'Applying your premium purchase and refreshing the account state.');
+
+        requestJson('/api/premium/checkout/balance', {
+            purchase_type: quote.purchase_type,
+            package_id: quote.package_id,
+            payment_method: 'balance'
+        }).then(function (response) {
+            renderPurchaseSuccess(vm, quote, response);
+        }).catch(function (error) {
+            var payload = error && error.payload ? error.payload : null;
+
+            if (payload && payload.checkout) {
+                renderBalanceConfirmation(vm, payload.checkout, 'warning', payload.message || error.message);
+                return;
+            }
+
+            showCheckoutFailure('Balance checkout failed', error.message || 'Unable to complete the balance purchase right now.');
+        });
+    }
+
+    function openBalanceCheckout(vm, purchaseType) {
+        var selection = buildPremiumSelection(vm, purchaseType);
+        showCheckoutLoading('Preparing balance checkout', 'Fetching your live balance and premium entitlement state.');
+
+        requestJson('/api/premium/checkout/quote', {
+            purchase_type: selection.purchase_type,
+            package_id: selection.package_id,
+            payment_method: 'balance'
+        }).then(function (response) {
+            renderBalanceConfirmation(vm, response.checkout || {}, '', '');
+        }).catch(function (error) {
+            showCheckoutFailure('Unable to prepare balance checkout', error.message || 'Unable to prepare the balance checkout right now.');
+        });
+    }
+
+    function openCryptoCheckout(vm, purchaseType, paymentMethod) {
+        var selection = buildPremiumSelection(vm, purchaseType);
+        showCheckoutLoading('Generating crypto invoice', 'Creating a sandbox payment invoice in the same premium flow.');
+
+        requestJson('/api/premium/checkout/crypto', {
+            purchase_type: selection.purchase_type,
+            package_id: selection.package_id,
+            payment_method: paymentMethod
+        }).then(function (response) {
+            var quote = response.checkout || {};
+            var invoice = response.invoice || {};
+            var title = (quote.package_title || 'Premium') + ' - ' + (quote.purchase_type === 'account' ? 'Plan' : 'Package') + ' - ' + (quote.payment_label || paymentMethod) + ' payment';
+            var subtitle = 'Sandbox crypto invoice generated in the native premium checkout flow.';
+            var noticeMessage = response.message || 'This invoice is pending. No balance will change until a real crypto gateway is connected.';
+
+            ensureCheckoutModal().root.setAttribute('data-copy-value', invoice.address || '');
+            showCheckoutModal(
+                title,
+                subtitle,
+                renderCryptoInvoiceBody(quote, invoice),
+                'info',
+                noticeMessage,
+                [
+                    {
+                        label: 'Close',
+                        primary: true,
+                        onClick: closeCheckoutModal
+                    }
+                ]
+            );
+        }).catch(function (error) {
+            showCheckoutFailure('Unable to generate crypto invoice', error.message || 'Unable to generate the crypto invoice right now.');
+        });
+    }
+
+    function bindPremiumCheckout(vm) {
+        if (!vm || vm.__vePremiumCheckoutBound) {
+            return;
+        }
+
+        vm.__vePremiumCheckoutBound = true;
+
+        vm.pay_ajax_balance = function (payload) {
+            openBalanceCheckout(vm, payload && payload.premium === 'bandwidth' ? 'bandwidth' : 'account');
+        };
+
+        vm.pay_ajax = function (payload) {
+            openCryptoCheckout(
+                vm,
+                payload && payload.premium === 'bandwidth' ? 'bandwidth' : 'account',
+                payload && (payload.coin || payload.submethod) ? (payload.coin || payload.submethod) : 'BTC'
+            );
+        };
+    }
+
+    function tryBindPremiumCheckout() {
+        var root = document.querySelector('.my-premium');
+
+        if (!root || !root.__vue__) {
+            return false;
+        }
+
+        bindPremiumCheckout(root.__vue__);
+        return true;
+    }
+
+    function initPremiumCheckout() {
+        ensureCheckoutModal();
+
+        if (tryBindPremiumCheckout()) {
+            return;
+        }
+
+        var attempts = 0;
+        var timer = window.setInterval(function () {
+            attempts += 1;
+
+            if (tryBindPremiumCheckout() || attempts > 120) {
+                window.clearInterval(timer);
+            }
+        }, 100);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initPremiumCheckout);
+    } else {
+        initPremiumCheckout();
+    }
+})();

@@ -1,0 +1,318 @@
+.my-premium #pay_bw,
+.my-premium #pay_plan,
+.my-premium #view {
+    display: none !important;
+}
+
+body.ve-premium-modal-active {
+    overflow: hidden;
+}
+
+.ve-premium-modal {
+    --ve-premium-header-offset: 96px;
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+    display: none;
+}
+
+.ve-premium-modal.is-open {
+    display: block;
+}
+
+.ve-premium-modal-backdrop {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(var(--ve-premium-header-offset) - 12px);
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.65);
+}
+
+.ve-premium-modal-shell {
+    position: relative;
+    min-height: 100%;
+    padding: calc(var(--ve-premium-header-offset) + 8px) 20px 24px;
+    overflow-y: auto;
+}
+
+.ve-premium-modal-card {
+    max-width: 860px;
+    margin: 0 auto;
+    border: 1px solid #434645;
+    background: #1c1c1c;
+    box-shadow: none;
+    color: #ffffff;
+    overflow: hidden;
+}
+
+.ve-premium-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 20px;
+    border-bottom: 1px solid #434645;
+    background: #1c1c1c;
+}
+
+.ve-premium-modal-kicker {
+    display: none;
+}
+
+.ve-premium-modal-title {
+    margin: 0;
+    font-size: 1.4285714285714286rem;
+    font-weight: 700;
+    line-height: 1.3;
+    color: #ffffff;
+}
+
+.ve-premium-modal-subtitle {
+    margin: 6px 0 0;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 1rem;
+    line-height: 1.5;
+}
+
+.ve-premium-modal-close {
+    flex: 0 0 auto;
+    padding: 0 0 0 20px;
+    border: 0;
+    background: transparent;
+    color: #ffffff;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: none;
+}
+
+.ve-premium-modal-notice {
+    margin: 20px 20px 0;
+    padding: 12px 15px;
+    border: 1px solid #434645;
+    background: #434645;
+    color: #ffffff;
+    font-size: 0.9285714285714286rem;
+    line-height: 1.6;
+}
+
+.ve-premium-modal-notice.is-hidden {
+    display: none;
+}
+
+.ve-premium-modal-notice.is-info {
+    border-left: 3px solid #ff9900;
+}
+
+.ve-premium-modal-notice.is-success {
+    border-left: 3px solid #ff9900;
+}
+
+.ve-premium-modal-notice.is-warning {
+    border-left: 3px solid #ff9900;
+}
+
+.ve-premium-modal-notice.is-danger {
+    border-left: 3px solid #dc3545;
+}
+
+.ve-premium-modal-body {
+    padding: 20px;
+}
+
+.ve-premium-modal-body p:last-child {
+    margin-bottom: 0;
+}
+
+.ve-premium-modal-body .text-muted {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.ve-premium-modal-body .btn,
+.ve-premium-modal-footer .btn {
+    border-radius: 0;
+}
+
+.ve-premium-checkout-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.ve-premium-checkout-stat {
+    padding: 15px;
+    border: 1px solid #434645;
+    background: #434645;
+}
+
+.ve-premium-checkout-stat span {
+    display: block;
+    margin-bottom: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.8571428571428571rem;
+    font-weight: 600;
+}
+
+.ve-premium-checkout-stat strong {
+    display: block;
+    color: #ffffff;
+    font-size: 1.4285714285714286rem;
+    line-height: 1.3;
+    word-break: break-word;
+}
+
+.ve-premium-checkout-stat.negative strong {
+    color: #dc3545;
+}
+
+.ve-premium-checkout-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+}
+
+.ve-premium-checkout-cardline {
+    padding: 15px;
+    border: 1px solid #434645;
+    background: #434645;
+}
+
+.ve-premium-checkout-cardline h6 {
+    margin: 0 0 8px;
+    color: #ffffff;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.ve-premium-checkout-cardline p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.9285714285714286rem;
+    line-height: 1.6;
+}
+
+.ve-premium-checkout-loading {
+    display: flex;
+    align-items: center;
+    min-height: 140px;
+    padding: 20px;
+    border: 1px solid #434645;
+    background: #434645;
+    color: #ffffff;
+}
+
+.ve-premium-invoice-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+}
+
+.ve-premium-qr-wrap {
+    padding: 20px;
+    text-align: center;
+    border: 1px solid #434645;
+    background: #434645;
+}
+
+.ve-premium-qr-wrap img {
+    width: 100%;
+    max-width: 240px;
+    background: #ffffff;
+    padding: 10px;
+}
+
+.ve-premium-qr-wrap .btn {
+    margin-top: 16px;
+}
+
+.ve-premium-invoice-copy {
+    margin-top: 16px;
+}
+
+.ve-premium-address-block {
+    margin: 14px 0;
+    padding: 16px;
+    border: 1px solid #434645;
+    background: #434645;
+    word-break: break-all;
+    font-family: Consolas, "Courier New", monospace;
+    color: #ffffff;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.ve-premium-invoice-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+    margin-top: 18px;
+}
+
+.ve-premium-invoice-meta .ve-premium-checkout-stat strong {
+    font-size: 18px;
+}
+
+.ve-premium-inline-actions {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+}
+
+.ve-premium-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 15px;
+    padding: 20px;
+    border-top: 1px solid #434645;
+    background: #1c1c1c;
+}
+
+.ve-premium-btn-secondary {
+    min-width: 140px;
+    border: 1px solid #434645;
+    background: #434645;
+    color: #ffffff;
+    box-shadow: none;
+}
+
+.ve-premium-btn-secondary:hover {
+    border-color: #ff9900;
+    color: #ffffff;
+}
+
+.ve-premium-modal-footer .btn {
+    min-width: 148px;
+}
+
+@media (max-width: 767.98px) {
+    .ve-premium-modal-shell {
+        padding: calc(var(--ve-premium-header-offset) + 6px) 12px 18px;
+    }
+
+    .ve-premium-modal-header,
+    .ve-premium-modal-body,
+    .ve-premium-modal-footer {
+        padding-left: 15px;
+        padding-right: 15px;
+    }
+
+    .ve-premium-checkout-grid,
+    .ve-premium-checkout-meta,
+    .ve-premium-invoice-layout,
+    .ve-premium-invoice-meta {
+        grid-template-columns: 1fr;
+    }
+
+    .ve-premium-modal-footer {
+        flex-direction: column-reverse;
+    }
+
+    .ve-premium-modal-footer .btn {
+        width: 100%;
+    }
+}

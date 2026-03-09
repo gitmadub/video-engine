@@ -787,20 +787,10 @@ function ve_handle_op(string $op, string $path): bool
             ve_handle_legacy_marker();
 
         case 'payments':
-            if (isset($_GET['amount'])) {
-                ve_html(ve_payment_page('Payment checkout'));
-            }
-
-            ve_json([
-                'status' => 'ok',
-                'message' => 'Payment endpoint is stubbed.',
-            ]);
+            ve_legacy_endpoint_removed('/api/premium/checkout/balance', ['POST']);
 
         case 'crypto_payments':
-            ve_json([
-                'status' => 'ok',
-                'message' => 'Crypto payment endpoint is stubbed.',
-            ]);
+            ve_legacy_endpoint_removed('/api/premium/checkout/crypto', ['POST']);
 
         case 'register_save':
         case 'my_account':
@@ -1037,6 +1027,42 @@ function ve_dispatch(): void
         }
 
         ve_method_not_allowed(['GET', 'POST']);
+    }
+
+    if ($path === '/api/premium/summary') {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        $user = ve_require_auth();
+        ve_json([
+            'status' => 'ok',
+            'summary' => ve_premium_page_payload((int) $user['id']),
+        ]);
+    }
+
+    if ($path === '/api/premium/checkout/quote') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_premium_checkout_quote();
+    }
+
+    if ($path === '/api/premium/checkout/balance') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_premium_checkout_balance();
+    }
+
+    if ($path === '/api/premium/checkout/crypto') {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_premium_checkout_crypto();
     }
 
     if (preg_match('#^/api/domains/(.+)$#', $path, $matches) === 1) {

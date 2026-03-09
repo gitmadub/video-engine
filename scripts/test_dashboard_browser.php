@@ -117,6 +117,28 @@ function dashboard_browser_add_stats(int $videoId, int $userId, string $date, in
     ve_dashboard_record_video_bandwidth($videoId, $userId, $bandwidthBytes, $date);
 }
 
+function dashboard_browser_seed_user_earnings(PDO $pdo, int $userId, string $statDate, int $earnedMicroUsd): void
+{
+    $now = ve_now();
+    $stmt = $pdo->prepare(
+        'INSERT INTO user_stats_daily (
+            user_id, stat_date, views, earned_micro_usd, referral_earned_micro_usd, bandwidth_bytes, created_at, updated_at
+        ) VALUES (
+            :user_id, :stat_date, 0, :earned_micro_usd, 0, 0, :created_at, :updated_at
+        )
+        ON CONFLICT(user_id, stat_date) DO UPDATE SET
+            earned_micro_usd = user_stats_daily.earned_micro_usd + excluded.earned_micro_usd,
+            updated_at = excluded.updated_at'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':stat_date' => $statDate,
+        ':earned_micro_usd' => $earnedMicroUsd,
+        ':created_at' => $now,
+        ':updated_at' => $now,
+    ]);
+}
+
 $root = dirname(__DIR__);
 $php = 'C:\\xampp\\php\\php.exe';
 $node = 'node';
@@ -161,6 +183,7 @@ dashboard_browser_add_stats($betaId, $userId, $sixDaysAgoDate, 1, 150 * 1024 * 1
 dashboard_browser_add_stats($alphaId, $userId, $yesterdayDate, 3, 400 * 1024 * 1024);
 dashboard_browser_add_stats($alphaId, $userId, $todayDate, 1, 25 * 1024 * 1024);
 dashboard_browser_add_stats($betaId, $userId, $todayDate, 1, 50 * 1024 * 1024);
+dashboard_browser_seed_user_earnings($pdo, $userId, $todayDate, 50000000);
 
 $playbackInsert = $pdo->prepare(
     'INSERT INTO video_playback_sessions (
