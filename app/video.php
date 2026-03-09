@@ -2583,6 +2583,7 @@ function ve_video_process_pending_jobs(int $maxJobs = 0): int
     $processed = 0;
 
     try {
+        ve_video_cleanup_inactive_zero_view_videos();
         ve_video_requeue_stale_jobs();
 
         while ($maxJobs === 0 || $processed < $maxJobs) {
@@ -2601,6 +2602,64 @@ function ve_video_process_pending_jobs(int $maxJobs = 0): int
     }
 
     return $processed;
+}
+
+function ve_video_inactive_zero_view_retention_days(): int
+{
+    return max(1, (int) (getenv('VE_VIDEO_ZERO_VIEW_RETENTION_DAYS') ?: 30));
+}
+
+function ve_video_cleanup_inactive_zero_view_videos(int $limit = 100): int
+{
+    $limit = max(1, $limit);
+    $retentionDays = ve_video_inactive_zero_view_retention_days();
+    $cutoff = gmdate('Y-m-d H:i:s', ve_timestamp() - ($retentionDays * 86400));
+    $sql = <<<SQL
+SELECT videos.*
+FROM videos
+LEFT JOIN (
+    SELECT video_id, COALESCE(SUM(views), 0) AS total_views
+    FROM video_stats_daily
+    GROUP BY video_id
+) AS stats ON stats.video_id = videos.id
+WHERE videos.deleted_at IS NULL
+  AND videos.status = :status
+  AND COALESCE(videos.ready_at, videos.created_at) <= :cutoff
+  AND COALESCE(stats.total_views, 0) = 0
+ORDER BY COALESCE(videos.ready_at, videos.created_at) ASC
+LIMIT {$limit}
+SQL;
+
+    $stmt = ve_db()->prepare($sql);
+    $stmt->execute([
+        ':status' => VE_VIDEO_STATUS_READY,
+        ':cutoff' => $cutoff,
+    ]);
+
+    $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (!is_array($videos) || $videos === []) {
+        return 0;
+    }
+
+    foreach ($videos as $video) {
+        if (!is_array($video)) {
+            continue;
+        }
+
+        $userId = (int) ($video['user_id'] ?? 0);
+        $title = trim((string) ($video['title'] ?? 'Untitled video'));
+
+        if ($userId > 0) {
+            ve_add_notification(
+                $userId,
+                'Inactive video deleted',
+                '"' . $title . '" was deleted automatically after ' . $retentionDays . ' days without any views.'
+            );
+        }
+    }
+
+    return ve_video_delete_video_rows($videos);
 }
 
 function ve_video_cleanup_output_files(array $video): void
@@ -5357,24 +5416,6 @@ function ve_video_home_panel(?array $user): string
 HTML;
 }
 
-function ve_home_hero_panel(): string
-{
-    return <<<'HTML'
-<div class="banner">
-    <div class="container">
-        <h3 class="text-center">Make <b class="pcolour">money</b> by sharing <b class="pcolour">videos</b></h3>
-        <p class="text-center hp-top">Upload &amp; share your videos to make real money online.</p>
-        <div class="points">
-            <span class="fs"></span>
-            <span class="sc"></span>
-            <span class="th"></span>
-            <span class="fth"></span>
-        </div>
-    </div>
-</div>
-HTML;
-}
-
 function ve_video_dashboard_panel(): string
 {
     $user = ve_current_user();
@@ -5570,8 +5611,6 @@ function ve_render_home_page(): void
 {
     $html = (string) file_get_contents(ve_root_path('index.html'));
     $html = ve_runtime_html_transform($html, 'index.html');
-    $html = str_replace('<script src="/assets/js/home_page.js" type="text/javascript"></script>', '', $html);
-    $html = str_replace('<home-upload :upload="{ utype: \'anon\', sess_id: \'\' }"></home-upload>', ve_home_hero_panel(), $html);
 
     ve_html(ve_rewrite_html_paths($html));
 }
