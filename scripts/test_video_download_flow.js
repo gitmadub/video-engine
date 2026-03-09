@@ -1,6 +1,4 @@
 const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const { chromium } = require('playwright');
 
 function firstExistingPath(paths) {
@@ -116,6 +114,29 @@ async function fetchHtmlStatus(page, url, options = {}) {
   });
 }
 
+async function fetchBinaryStatus(page, url, form) {
+  return page.evaluate(async (request) => {
+    const response = await fetch(request.url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      },
+      body: new URLSearchParams(request.form).toString(),
+    });
+    const buffer = await response.arrayBuffer();
+
+    return {
+      status: response.status,
+      bytes: buffer.byteLength,
+      contentType: response.headers.get('content-type') || '',
+    };
+  }, {
+    url,
+    form,
+  });
+}
+
 async function extractInlineStringVariable(page, variableName) {
   const html = await page.content();
   const pattern = new RegExp(`var\\s+${variableName}\\s*=\\s*(\"(?:\\\\.|[^\\\\\"])*\"|'(?:\\\\.|[^\\\\'])*')`);
@@ -174,11 +195,8 @@ async function elementDocumentBox(page, selector) {
   });
 
   try {
-    const freeDownloadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 've-video-free-'));
     const anonymousContext = await browser.newContext({
       baseURL,
-      acceptDownloads: true,
-      downloadsPath: freeDownloadsDir,
     });
     const freePage = await anonymousContext.newPage();
     await freePage.goto(watchUrl, { waitUntil: 'networkidle' });
@@ -257,18 +275,13 @@ async function elementDocumentBox(page, selector) {
       throw new Error('Protected download meta block should be visible after the token is issued.');
     }
 
-    const [freeDownload] = await Promise.all([
-      freePage.waitForEvent('download', { timeout: 15000 }),
-      freePage.locator('#ve-download-button').click(),
-    ]);
+    const freeDownloadResult = await fetchBinaryStatus(freePage, freeResolveBody.download_action, {
+      token: freeCsrfToken,
+      download_token: freeResolveBody.download_token,
+    });
 
-    const freeDownloadPath = path.join(freeDownloadsDir, `free-${publicId}.bin`);
-    await freeDownload.saveAs(freeDownloadPath);
-
-    const freeDownloadedBytes = fs.statSync(freeDownloadPath).size;
-
-    if (freeDownloadedBytes <= 0) {
-      throw new Error('Protected free download was empty.');
+    if (freeDownloadResult.status !== 200 || freeDownloadResult.bytes <= 0) {
+      throw new Error(`Protected free download failed. status=${freeDownloadResult.status}, bytes=${freeDownloadResult.bytes}`);
     }
 
     const freeReplay = await fetchHtmlStatus(freePage, freeResolveBody.download_action, {
@@ -334,11 +347,8 @@ async function elementDocumentBox(page, selector) {
     await anonymousContext.close();
 
     if (!skipPremium) {
-      const premiumDownloadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 've-video-premium-'));
       const premiumContext = await browser.newContext({
         baseURL,
-        acceptDownloads: true,
-        downloadsPath: premiumDownloadsDir,
       });
 
       await loginWithApi(premiumContext, baseURL, pathPrefix, username, password);
@@ -360,17 +370,26 @@ async function elementDocumentBox(page, selector) {
         throw new Error(`Unexpected premium status text: ${premiumStatusText}`);
       }
 
-      const premiumRequestPromise = premiumPage.waitForResponse((response) => {
-        return response.url().includes(`/api/videos/${publicId}/download/request`) && response.request().method() === 'POST';
-      }, { timeout: 15000 });
-
+      const premiumCsrfToken = await extractInlineStringVariable(premiumPage, 'downloadCsrfToken');
       const premiumStart = Date.now();
-      const [premiumDownload] = await Promise.all([
-        premiumPage.waitForEvent('download', { timeout: 15000 }),
-        premiumPage.locator('#ve-download-button').click(),
-      ]);
-      const premiumRequestResponse = await premiumRequestPromise;
-      const premiumRequestBody = await premiumRequestResponse.json();
+      const premiumRequestBody = await premiumPage.evaluate(async (request) => {
+        const response = await fetch(request.url, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          },
+          body: new URLSearchParams({
+            token: request.csrf,
+          }).toString(),
+        });
+
+        return response.json();
+      }, {
+        url: appPath(`/api/videos/${publicId}/download/request`, pathPrefix),
+        csrf: premiumCsrfToken,
+      });
       const premiumElapsedSeconds = (Date.now() - premiumStart) / 1000;
 
       if (premiumRequestBody.status !== 'ok' || premiumRequestBody.ready !== true || !premiumRequestBody.download_token || !premiumRequestBody.download_action) {
@@ -381,14 +400,15 @@ async function elementDocumentBox(page, selector) {
         throw new Error(`Premium protected download should be effectively instant. Observed ${premiumElapsedSeconds.toFixed(2)}s.`);
       }
 
-      const premiumDownloadPath = path.join(premiumDownloadsDir, `premium-${publicId}.bin`);
-      await premiumDownload.saveAs(premiumDownloadPath);
+      const premiumDownloadResult = await fetchBinaryStatus(premiumPage, premiumRequestBody.download_action, {
+        token: premiumCsrfToken,
+        download_token: premiumRequestBody.download_token,
+      });
 
-      if (fs.statSync(premiumDownloadPath).size <= 0) {
-        throw new Error('Protected premium download was empty.');
+      if (premiumDownloadResult.status !== 200 || premiumDownloadResult.bytes <= 0) {
+        throw new Error(`Protected premium download failed. status=${premiumDownloadResult.status}, bytes=${premiumDownloadResult.bytes}`);
       }
 
-      const premiumCsrfToken = await extractInlineStringVariable(premiumPage, 'downloadCsrfToken');
       const premiumReplay = await fetchHtmlStatus(premiumPage, premiumRequestBody.download_action, {
         method: 'POST',
         credentials: 'same-origin',
