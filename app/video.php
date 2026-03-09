@@ -4031,6 +4031,117 @@ function ve_video_record_qualified_view(array $video, array $session, int $watch
     ];
 }
 
+function ve_video_full_play_threshold_seconds(array $video): int
+{
+    $durationSeconds = max(0.0, (float) ($video['duration_seconds'] ?? 0));
+
+    if ($durationSeconds <= 0) {
+        return 1;
+    }
+
+    return max(1, (int) ceil($durationSeconds - 0.75));
+}
+
+/**
+ * @return array{status:string,message:string,already_recorded:bool,watched_seconds:int,required_seconds:int,remaining_seconds:int,full_play:bool}
+ */
+function ve_video_record_full_play(array $video, array $session, int $watchedSeconds): array
+{
+    $sessionId = (int) ($session['id'] ?? 0);
+
+    if ($sessionId <= 0) {
+        return [
+            'status' => 'fail',
+            'message' => 'The playback session is incomplete.',
+            'already_recorded' => false,
+            'watched_seconds' => $watchedSeconds,
+            'required_seconds' => ve_video_full_play_threshold_seconds($video),
+            'remaining_seconds' => ve_video_full_play_threshold_seconds($video),
+            'full_play' => false,
+        ];
+    }
+
+    $requiredSeconds = ve_video_full_play_threshold_seconds($video);
+    $lastPulseWatchedSeconds = max(0, (int) ($session['last_pulse_watched_seconds'] ?? 0));
+    $acceptedWatchedSeconds = max($lastPulseWatchedSeconds, $watchedSeconds);
+    $reportedAt = trim((string) ($session['full_play_reported_at'] ?? ''));
+    $reportedWatchedSeconds = max(0, (int) ($session['full_play_watched_seconds'] ?? 0));
+
+    if ($reportedAt !== '') {
+        return [
+            'status' => 'ok',
+            'message' => 'This playback session was already recorded as a full play.',
+            'already_recorded' => true,
+            'watched_seconds' => max($acceptedWatchedSeconds, $reportedWatchedSeconds),
+            'required_seconds' => $requiredSeconds,
+            'remaining_seconds' => 0,
+            'full_play' => true,
+        ];
+    }
+
+    if ($acceptedWatchedSeconds < $requiredSeconds) {
+        return [
+            'status' => 'pending',
+            'message' => 'Playback has not reached the full-play threshold yet.',
+            'already_recorded' => false,
+            'watched_seconds' => $acceptedWatchedSeconds,
+            'required_seconds' => $requiredSeconds,
+            'remaining_seconds' => max(0, $requiredSeconds - $acceptedWatchedSeconds),
+            'full_play' => false,
+        ];
+    }
+
+    if ((int) ($session['bandwidth_bytes_served'] ?? 0) <= 0) {
+        return [
+            'status' => 'pending',
+            'message' => 'Playback data has not been streamed long enough to record a full play yet.',
+            'already_recorded' => false,
+            'watched_seconds' => $acceptedWatchedSeconds,
+            'required_seconds' => $requiredSeconds,
+            'remaining_seconds' => 1,
+            'full_play' => false,
+        ];
+    }
+
+    $recordedAt = ve_now();
+    $update = ve_db()->prepare(
+        'UPDATE video_playback_sessions
+         SET full_play_reported_at = :full_play_reported_at,
+             full_play_watched_seconds = :full_play_watched_seconds
+         WHERE id = :id
+           AND full_play_reported_at IS NULL'
+    );
+    $update->execute([
+        ':full_play_reported_at' => $recordedAt,
+        ':full_play_watched_seconds' => $acceptedWatchedSeconds,
+        ':id' => $sessionId,
+    ]);
+
+    if ($update->rowCount() < 1) {
+        $freshSession = ve_video_fetch_playback_session_by_id($sessionId);
+
+        return [
+            'status' => 'ok',
+            'message' => 'This playback session was already recorded as a full play.',
+            'already_recorded' => true,
+            'watched_seconds' => max($acceptedWatchedSeconds, (int) ($freshSession['full_play_watched_seconds'] ?? 0)),
+            'required_seconds' => $requiredSeconds,
+            'remaining_seconds' => 0,
+            'full_play' => true,
+        ];
+    }
+
+    return [
+        'status' => 'ok',
+        'message' => 'The full play was recorded successfully.',
+        'already_recorded' => false,
+        'watched_seconds' => $acceptedWatchedSeconds,
+        'required_seconds' => $requiredSeconds,
+        'remaining_seconds' => 0,
+        'full_play' => true,
+    ];
+}
+
 function ve_video_playback_qualify_api(string $publicId): void
 {
     if (!ve_is_method('POST')) {
@@ -4134,6 +4245,63 @@ function ve_video_playback_pulse_api(string $publicId): void
 
     $session = ve_video_fetch_playback_session_by_id((int) ($session['id'] ?? 0)) ?? $session;
     $result = ve_video_record_playback_pulse($video, $session, $watchedSeconds);
+    $result['rotation'] = ve_video_rotation_payload($video, $session);
+    $statusCode = match ($result['status'] ?? 'ok') {
+        'pending' => 202,
+        'fail' => 422,
+        default => 200,
+    };
+
+    ve_json($result, $statusCode);
+}
+
+function ve_video_playback_full_api(string $publicId): void
+{
+    if (!ve_is_method('POST')) {
+        ve_method_not_allowed(['POST']);
+    }
+
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || !ve_video_is_request_visible($video) || (string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        ve_not_found();
+    }
+
+    $token = trim((string) ($_POST['playback_token'] ?? ''));
+    $sessionToken = trim((string) ($_POST['session_token'] ?? ''));
+    if ($sessionToken === '') {
+        $sessionToken = trim((string) ($_SERVER['HTTP_X_PLAYBACK_SESSION'] ?? ''));
+    }
+
+    if ($token === '') {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'The playback session token is missing.',
+        ], 422);
+    }
+
+    $session = ve_video_find_playback_session($video, $sessionToken !== '' ? $sessionToken : $token);
+
+    if (!is_array($session)) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'The playback session is invalid or has expired.',
+        ], 403);
+    }
+
+    $watchedSeconds = max(0, (int) round((float) ($_POST['watched_seconds'] ?? 0)));
+
+    try {
+        ve_video_validate_playback_request_state($session, 'full', $watchedSeconds, $token);
+    } catch (RuntimeException $exception) {
+        ve_json([
+            'status' => 'fail',
+            'message' => $exception->getMessage(),
+        ], 403);
+    }
+
+    $session = ve_video_fetch_playback_session_by_id((int) ($session['id'] ?? 0)) ?? $session;
+    $result = ve_video_record_full_play($video, $session, $watchedSeconds);
     $result['rotation'] = ve_video_rotation_payload($video, $session);
     $statusCode = match ($result['status'] ?? 'ok') {
         'pending' => 202,
@@ -4665,6 +4833,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
     $previewUrl = json_encode($previewVttUrl !== null ? ve_absolute_url($previewVttUrl) : '', JSON_UNESCAPED_SLASHES);
     $pulseViewUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/pulse'), JSON_UNESCAPED_SLASHES);
     $qualifyViewUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/qualify'), JSON_UNESCAPED_SLASHES);
+    $fullPlayUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/full'), JSON_UNESCAPED_SLASHES);
     $minimumWatchSeconds = max(5, $minimumWatchSeconds);
     $pulseIntervalSeconds = ve_video_pulse_interval_seconds($minimumWatchSeconds);
     $requiredPulseCount = ve_video_required_pulse_count($minimumWatchSeconds);
@@ -4686,6 +4855,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         var fallbackUrl = {$homeUrl};
         var pulseViewUrl = {$pulseViewUrl};
         var qualifyViewUrl = {$qualifyViewUrl};
+        var fullPlayUrl = {$fullPlayUrl};
         var minimumWatchSeconds = {$minimumWatchSeconds};
         var pulseIntervalSeconds = {$pulseIntervalSeconds};
         var requiredPulseCount = {$requiredPulseCount};
@@ -4712,11 +4882,16 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         var qualificationSent = false;
         var qualificationInFlight = false;
         var qualificationRetryTimer = null;
+        var fullPlaySent = false;
+        var fullPlayInFlight = false;
+        var fullPlayRetryTimer = null;
         var nativePlay = video && typeof video.play === 'function' ? video.play.bind(video) : null;
         var hls = null;
         var hlsMediaAttached = false;
         var hlsSourceLoaded = false;
         var hlsLoaderActive = false;
+        var hlsFragRequestActive = false;
+        var hlsBufferingPaused = false;
         var pendingSourceLoad = false;
         var playbackStartRequested = false;
         var awaitingInitialPlayback = false;
@@ -4768,6 +4943,16 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             });
         }
 
+        function warmPlaybackRuntime() {
+            importProofKey().catch(function () {
+                return null;
+            });
+
+            if (window.Hls && window.Hls.isSupported()) {
+                ensureHlsPipeline();
+            }
+        }
+
         function bufferedAheadSeconds() {
             if (!video || !video.buffered) {
                 return 0;
@@ -4787,7 +4972,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             return 0;
         }
 
-        function stopHlsLoading() {
+        function stopHlsLoading(forceAbort) {
             if (!hls || !hlsLoaderActive) {
                 return;
             }
@@ -4799,11 +4984,44 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             } catch (error) {}
         }
 
+        function pauseHlsBuffering() {
+            if (!hls || hlsBufferingPaused) {
+                return;
+            }
+
+            if (typeof hls.pauseBuffering === 'function') {
+                try {
+                    hls.pauseBuffering();
+                    hlsBufferingPaused = true;
+                    return;
+                } catch (error) {}
+            }
+
+            if (!hlsFragRequestActive) {
+                stopHlsLoading(false);
+            }
+        }
+
+        function resumeHlsBuffering() {
+            if (!hls || !hlsBufferingPaused) {
+                return;
+            }
+
+            if (typeof hls.resumeBuffering === 'function') {
+                try {
+                    hls.resumeBuffering();
+                } catch (error) {}
+            }
+
+            hlsBufferingPaused = false;
+        }
+
         function startHlsLoading() {
             if (!hls || !hlsSourceLoaded || hlsLoaderActive) {
                 return;
             }
 
+            resumeHlsBuffering();
             hlsLoaderActive = true;
 
             try {
@@ -4819,27 +5037,29 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             }
 
             if (!video || video.ended) {
-                stopHlsLoading();
+                resumeHlsBuffering();
+                stopHlsLoading(false);
                 return;
             }
 
             if (video.paused && !awaitingInitialPlayback) {
-                stopHlsLoading();
+                pauseHlsBuffering();
                 return;
             }
 
             if (bufferedAheadSeconds() >= bufferHighWatermark) {
-                stopHlsLoading();
+                pauseHlsBuffering();
                 return;
             }
 
+            resumeHlsBuffering();
             startHlsLoading();
         }
 
         function failSecurePlayback(message) {
             sourceFailure = true;
             awaitingInitialPlayback = false;
-            stopHlsLoading();
+            stopHlsLoading(true);
             setOverlayMode('default');
             setState(message, true);
         }
@@ -4878,7 +5098,10 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
                 hlsLoaderActive = false;
-                startHlsLoading();
+                hlsBufferingPaused = false;
+                if (streamActivated || playbackStartRequested) {
+                    startHlsLoading();
+                }
 
                 if (playbackStartRequested && video && video.paused && typeof nativePlay === 'function') {
                     nativePlay().catch(function () {});
@@ -4889,7 +5112,17 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 }
             });
 
+            hls.on(window.Hls.Events.FRAG_LOADING, function () {
+                hlsFragRequestActive = true;
+            });
+
+            hls.on(window.Hls.Events.FRAG_LOADED, function () {
+                hlsFragRequestActive = false;
+            });
+
             hls.on(window.Hls.Events.FRAG_BUFFERED, function () {
+                hlsFragRequestActive = false;
+
                 syncManagedLoading();
             });
 
@@ -4920,7 +5153,6 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             streamActivated = true;
             playbackBootstrapped = true;
-            bootUi();
             setOverlayMode('loading');
             setState('Loading encrypted video stream...');
 
@@ -5013,6 +5245,13 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             }
         }
 
+        function clearFullPlayRetry() {
+            if (fullPlayRetryTimer !== null) {
+                window.clearTimeout(fullPlayRetryTimer);
+                fullPlayRetryTimer = null;
+            }
+        }
+
         function scheduleQualificationRetry(seconds) {
             if (qualificationSent) {
                 return;
@@ -5022,6 +5261,18 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             qualificationRetryTimer = window.setTimeout(function () {
                 qualificationRetryTimer = null;
                 maybeQualifyView();
+            }, Math.max(1, seconds) * 1000);
+        }
+
+        function scheduleFullPlayRetry(seconds) {
+            if (fullPlaySent) {
+                return;
+            }
+
+            clearFullPlayRetry();
+            fullPlayRetryTimer = window.setTimeout(function () {
+                fullPlayRetryTimer = null;
+                maybeReportFullPlay();
             }, Math.max(1, seconds) * 1000);
         }
 
@@ -5224,7 +5475,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             return proofKeyPromise;
         }
 
-        function buildPlaybackProof(kind, watchedSeconds, requestUrl) {
+        function buildPlaybackProof(kind, requestWatchedSeconds, requestUrl) {
             var pathname = '/';
 
             try {
@@ -5241,7 +5492,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 playbackClientToken,
                 playbackServerToken,
                 playbackToken,
-                String(Math.max(0, Math.floor(watchedSeconds)))
+                String(Math.max(0, Math.floor(requestWatchedSeconds)))
             ].join('\\n');
 
             return importProofKey().then(function (cryptoKey) {
@@ -5255,12 +5506,55 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             });
         }
 
-        function buildPlaybackBody() {
+        function buildPlaybackBody(requestWatchedSeconds) {
             var params = new URLSearchParams();
             params.set('session_token', sessionToken);
             params.set('playback_token', playbackToken);
-            params.set('watched_seconds', String(Math.max(0, Math.floor(watchedSeconds))));
+            params.set('watched_seconds', String(Math.max(0, Math.floor(requestWatchedSeconds))));
             return params.toString();
+        }
+
+        function requestWatchedSecondsFor(kind) {
+            var requestWatchedSeconds = watchedSeconds;
+
+            if (kind === 'full' && video) {
+                requestWatchedSeconds = Math.max(requestWatchedSeconds, Number(video.currentTime || 0));
+            }
+
+            return Math.max(0, requestWatchedSeconds);
+        }
+
+        function playbackEndThresholdSeconds() {
+            if (!video) {
+                return Number.POSITIVE_INFINITY;
+            }
+
+            var duration = Number(video.duration || 0);
+
+            if (!Number.isFinite(duration) || duration <= 0) {
+                return Number.POSITIVE_INFINITY;
+            }
+
+            return Math.max(1, Math.ceil(duration - 0.75));
+        }
+
+        function hasReachedPlaybackEnd() {
+            if (!video) {
+                return false;
+            }
+
+            if (video.ended) {
+                return true;
+            }
+
+            var duration = Number(video.duration || 0);
+            var currentTime = Number(video.currentTime || 0);
+
+            if (!Number.isFinite(duration) || duration <= 0) {
+                return false;
+            }
+
+            return currentTime >= Math.max(0, duration - 0.75);
         }
 
         function applyRotationPayload(rotation) {
@@ -5294,7 +5588,9 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         }
 
         function postPlaybackRequest(url, kind) {
-            return buildPlaybackProof(kind, watchedSeconds, url).then(function (proof) {
+            var requestWatchedSeconds = requestWatchedSecondsFor(kind);
+
+            return buildPlaybackProof(kind, requestWatchedSeconds, url).then(function (proof) {
                 return fetch(url, {
                     method: 'POST',
                     credentials: 'same-origin',
@@ -5308,7 +5604,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                         'X-Playback-Sequence': String(Math.max(0, playbackSequence)),
                         'X-Playback-Proof': proof
                     },
-                    body: buildPlaybackBody()
+                    body: buildPlaybackBody(requestWatchedSeconds)
                 });
             }).then(function (response) {
                 return response.json().catch(function () {
@@ -5366,6 +5662,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                     maybeQualifyView();
                 }
 
+                maybeReportFullPlay();
                 return result.payload.status === 'ok';
             }).catch(function () {
                 pulseInFlight = false;
@@ -5401,6 +5698,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 if (result.payload.status === 'ok') {
                     qualificationSent = true;
                     clearQualificationRetry();
+                    maybeReportFullPlay();
                     return;
                 }
 
@@ -5432,6 +5730,78 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             submitQualifiedView();
         }
 
+        function submitFullPlay() {
+            if (
+                fullPlaySent
+                || fullPlayInFlight
+                || fullPlayRetryTimer !== null
+                || pulseInFlight
+                || qualificationInFlight
+                || !fullPlayUrl
+                || !canSignPlaybackRequests()
+                || !hasReachedPlaybackEnd()
+            ) {
+                return;
+            }
+
+            fullPlayInFlight = true;
+
+            postPlaybackRequest(fullPlayUrl, 'full').then(function (result) {
+                fullPlayInFlight = false;
+
+                if (!result) {
+                    scheduleFullPlayRetry(2);
+                    return;
+                }
+
+                if (!result.payload || typeof result.payload.status !== 'string') {
+                    if (Number(result.statusCode || 0) === 200) {
+                        fullPlaySent = true;
+                        clearFullPlayRetry();
+                        return;
+                    }
+
+                    scheduleFullPlayRetry(2);
+                    return;
+                }
+
+                applyRotationPayload(result.payload.rotation || null);
+
+                if (result.payload.status === 'ok') {
+                    fullPlaySent = true;
+                    clearFullPlayRetry();
+                    return;
+                }
+
+                if (result.payload.status === 'pending') {
+                    scheduleFullPlayRetry(Number(result.payload.remaining_seconds || 1));
+                    return;
+                }
+
+                scheduleFullPlayRetry(2);
+            }).catch(function () {
+                fullPlayInFlight = false;
+                scheduleFullPlayRetry(2);
+            });
+        }
+
+        function maybeReportFullPlay() {
+            if (fullPlaySent || !hasReachedPlaybackEnd()) {
+                return;
+            }
+
+            if (!qualificationSent && watchedSeconds >= minimumWatchSeconds) {
+                maybeQualifyView();
+
+                if (qualificationInFlight || qualificationRetryTimer !== null) {
+                    scheduleFullPlayRetry(1);
+                    return;
+                }
+            }
+
+            submitFullPlay();
+        }
+
         function auditWatchProgress() {
             if (!video) {
                 return;
@@ -5455,6 +5825,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                     submitPlaybackPulse(false);
                 }
                 maybeQualifyView();
+                maybeReportFullPlay();
             }
 
             lastWatchSampleAt = sampleAt;
@@ -5486,6 +5857,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             }
 
             resetWatchSample();
+            maybeReportFullPlay();
         }
 
         function bindWatchTracking() {
@@ -5551,6 +5923,13 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         }
 
         bindWatchTracking();
+        if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(function () {
+                window.setTimeout(warmPlaybackRuntime, 0);
+            });
+        } else {
+            window.setTimeout(warmPlaybackRuntime, 32);
+        }
         setState('');
         setOverlayMode('default');
         video.preload = 'none';
@@ -5577,6 +5956,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
         video.addEventListener('playing', function () {
             awaitingInitialPlayback = false;
+            bootUi();
             setOverlayMode('hidden');
             setState('');
 
@@ -5642,10 +6022,21 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         ['pause', 'ended'].forEach(function (eventName) {
             video.addEventListener(eventName, function () {
                 awaitingInitialPlayback = false;
+
+                if (hls && eventName === 'pause') {
+                    syncManagedLoading();
+                    return;
+                }
+
                 if (hls) {
-                    stopHlsLoading();
+                    stopHlsLoading(false);
                 }
             });
+        });
+
+        video.addEventListener('ended', function () {
+            maybeQualifyView();
+            maybeReportFullPlay();
         });
 
         video.addEventListener('error', function () {

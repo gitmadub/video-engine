@@ -429,6 +429,7 @@ async function elementDocumentBox(page, selector) {
       manifest: 0,
       segment: 0,
     };
+    const prePlayPlaybackCalls = [];
     const pulsePlaybackTokens = [];
     let playbackTriggeredAt = 0;
     let startupSegmentRequests = 0;
@@ -437,6 +438,14 @@ async function elementDocumentBox(page, selector) {
 
       if (!url.includes('/stream/') && !url.includes('/playback/')) {
         return;
+      }
+
+      if (playbackTriggeredAt === 0 && url.includes('/playback/')) {
+        prePlayPlaybackCalls.push({
+          method: request.method(),
+          url,
+          body: request.postData() || '',
+        });
       }
 
       if (url.includes('/playback/pulse') && request.method() === 'POST') {
@@ -510,8 +519,16 @@ async function elementDocumentBox(page, selector) {
       throw new Error(`Preview thumbnails should stay cold before playback starts. Observed ${JSON.stringify(prePlayNetwork)}.`);
     }
 
-    if (prePlayNetwork.manifest !== 0 || prePlayNetwork.segment !== 0) {
-      throw new Error(`Secure stream data should not preload before playback starts. Observed ${JSON.stringify(prePlayNetwork)}.`);
+    if (prePlayNetwork.segment !== 0) {
+      throw new Error(`Secure stream segments should not preload before playback starts. Observed ${JSON.stringify(prePlayNetwork)}.`);
+    }
+
+    if (prePlayNetwork.manifest > 1) {
+      throw new Error(`Secure playback should at most warm the manifest once before playback starts. Observed ${JSON.stringify(prePlayNetwork)}.`);
+    }
+
+    if (prePlayPlaybackCalls.length !== 0) {
+      throw new Error(`Secure playback APIs should stay idle until playback starts. Observed: ${JSON.stringify(prePlayPlaybackCalls)}.`);
     }
 
     const forgedQualification = await fetchJsonStatus(embedPage, appPath(`/api/videos/${publicId}/playback/qualify`, pathPrefix), {
@@ -537,7 +554,11 @@ async function elementDocumentBox(page, selector) {
         && response.request().method() === 'POST'
         && response.status() === 200;
     }, { timeout: qualificationTimeoutMs });
-
+    const firstFullPlayPromise = embedPage.waitForResponse((response) => {
+      return response.url().includes(`/api/videos/${publicId}/playback/full`)
+        && response.request().method() === 'POST'
+        && response.status() === 200;
+    }, { timeout: qualificationTimeoutMs + 45000 });
     await embedPage.evaluate(async () => {
       const video = document.getElementById('ve-secure-player');
 
@@ -581,6 +602,17 @@ async function elementDocumentBox(page, selector) {
       if (uniquePulseTokens.size !== nonEmptyPulseTokens.length) {
         throw new Error(`Playback pulse requests reused a playback token. Observed tokens: ${JSON.stringify(pulsePlaybackTokens)}.`);
       }
+    }
+
+    await embedPage.waitForFunction(() => {
+      const video = document.getElementById('ve-secure-player');
+      return Boolean(video && video.ended);
+    }, null, { timeout: qualificationTimeoutMs + 45000 });
+
+    const firstFullPlay = await (await firstFullPlayPromise).json();
+
+    if (firstFullPlay.status !== 'ok') {
+      throw new Error(`The first playback should report a full-play completion. Received: ${JSON.stringify(firstFullPlay)}`);
     }
 
     await embedPage.close();

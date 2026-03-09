@@ -379,6 +379,8 @@ CREATE TABLE IF NOT EXISTS video_playback_sessions (
     last_pulse_at TEXT DEFAULT NULL,
     last_pulse_watched_seconds INTEGER NOT NULL DEFAULT 0,
     last_pulse_bandwidth_bytes INTEGER NOT NULL DEFAULT 0,
+    full_play_reported_at TEXT DEFAULT NULL,
+    full_play_watched_seconds INTEGER NOT NULL DEFAULT 0,
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
