@@ -4767,6 +4767,24 @@ function ve_video_home_panel(?array $user): string
 HTML;
 }
 
+function ve_home_hero_panel(): string
+{
+    return <<<'HTML'
+<div class="banner">
+    <div class="container">
+        <h3 class="text-center">Make <b class="pcolour">money</b> by sharing <b class="pcolour">videos</b></h3>
+        <p class="text-center hp-top">Upload &amp; share your videos to make real money online.</p>
+        <div class="points">
+            <span class="fs"></span>
+            <span class="sc"></span>
+            <span class="th"></span>
+            <span class="fth"></span>
+        </div>
+    </div>
+</div>
+HTML;
+}
+
 function ve_video_dashboard_panel(): string
 {
     $user = ve_current_user();
@@ -4960,22 +4978,10 @@ HTML;
 
 function ve_render_home_page(): void
 {
-    $user = ve_current_user();
     $html = (string) file_get_contents(ve_root_path('index.html'));
     $html = ve_runtime_html_transform($html, 'index.html');
     $html = str_replace('<script src="/assets/js/home_page.js" type="text/javascript"></script>', '', $html);
-    $html = str_replace('<home-upload :upload="{ utype: \'anon\', sess_id: \'\' }"></home-upload>', ve_video_home_panel($user), $html);
-    $html = str_replace('</head>', ve_video_portal_assets() . "\n</head>", $html);
-
-    if (is_array($user)) {
-        $logoutForm = '<form method="POST" action="' . ve_h(ve_url('/api/auth/logout')) . '" class="form-inline ml-0 ml-sm-3">' .
-            '<input type="hidden" name="token" value="' . ve_h(ve_csrf_token()) . '">' .
-            '<button type="submit" class="btn btn-primary">Logout</button>' .
-            '</form>';
-        $dashboardLink = '<li class="nav-item"><a class="nav-link" href="' . ve_h(ve_url('/dashboard/videos')) . '">Dashboard</a></li>';
-        $html = str_replace('<li class="nav-item"> <a class="nav-link" data-toggle="modal" data-target="#login" href="#login">Sign in</a> </li>', $dashboardLink, $html);
-        $html = preg_replace('/<div class="form-inline ml-0 ml-sm-3">.*?<\/div>/s', $logoutForm, $html, 1) ?? $html;
-    }
+    $html = str_replace('<home-upload :upload="{ utype: \'anon\', sess_id: \'\' }"></home-upload>', ve_home_hero_panel(), $html);
 
     ve_html(ve_rewrite_html_paths($html));
 }

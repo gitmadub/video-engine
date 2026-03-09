@@ -24,6 +24,16 @@ $(document).ready(function() {
     var pathname = window.location.pathname;
     var l_first = true;
 
+    function isLogoutHref(href) {
+        var logoutUrl = veAppUrl('/logout');
+
+        if (!href) {
+            return false;
+        }
+
+        return href === logoutUrl || href === '/logout';
+    }
+
     $('.sidebar .nav .nav-item .nav-link').each(function() {
         var path = $(this).attr('href');
 
@@ -209,7 +219,13 @@ $(document).ready(function() {
         clearNotifications();
     });
 
-    $(document).on('click', 'a.logout', function(e) {
+    $(document).on('click', 'a.logout, a[href="/logout"], a[href$="/logout"]', function(e) {
+        var href = $(this).attr('href') || '';
+
+        if (!isLogoutHref(href)) {
+            return;
+        }
+
         e.preventDefault();
 
         var form = $('<form method="POST" action="' + veAppUrl('/api/auth/logout') + '"></form>');

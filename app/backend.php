@@ -3823,6 +3823,46 @@ function ve_runtime_script_tag(): string
     return '<script>window.VE_BASE_PATH=' . json_encode(ve_base_path(), JSON_UNESCAPED_SLASHES) . ';window.VE_CSRF_TOKEN=' . json_encode(ve_csrf_token(), JSON_UNESCAPED_SLASHES) . ';</script>';
 }
 
+function ve_site_page_key(string $relativePath): string
+{
+    return match ($relativePath) {
+        'index.html' => 'home',
+        'pages/earn-money.html' => 'earn-money',
+        'pages/premium.html' => 'premium',
+        default => '',
+    };
+}
+
+function ve_site_nav_item(string $label, string $url, bool $active = false): string
+{
+    $class = $active ? 'nav-item active' : 'nav-item';
+
+    return '<li class="' . $class . '"> <a class="nav-link" href="' . ve_h($url) . '">' . ve_h($label) . '</a> </li>';
+}
+
+function ve_site_navbar_contents(string $relativePath, ?array $user): string
+{
+    $pageKey = ve_site_page_key($relativePath);
+    $homeItem = ve_site_nav_item('Home', ve_url('/'), $pageKey === 'home');
+    $earnMoneyItem = ve_site_nav_item('Earn Money', ve_url('/earn-money'), $pageKey === 'earn-money');
+    $premiumItem = ve_site_nav_item('Premium', ve_url('/premium'), $pageKey === 'premium');
+
+    if (is_array($user)) {
+        $dashboardItem = ve_site_nav_item('Dashboard', ve_url('/dashboard'));
+        $logoutUrl = ve_h(ve_url('/logout'));
+
+        return <<<HTML
+ <button class="navbar-toggler d-block d-sm-none" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation"> <i class="fad fa-times"></i> </button> <ul class="navbar-nav ml-auto"> {$homeItem} {$earnMoneyItem} {$premiumItem} {$dashboardItem} </ul> <div class="form-inline ml-0 ml-sm-3"> <a href="{$logoutUrl}" class="btn btn-danger" type="button">Logout <i class="fad fa-sign-out-alt ml-2"></i></a> </div>
+HTML;
+    }
+
+    $signInItem = '<li class="nav-item"> <a class="nav-link" data-toggle="modal" data-target="#login" href="#login">Sign in</a> </li>';
+
+    return <<<HTML
+ <button class="navbar-toggler d-block d-sm-none" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation"> <i class="fad fa-times"></i> </button> <ul class="navbar-nav ml-auto"> {$homeItem} {$earnMoneyItem} {$premiumItem} {$signInItem} </ul> <div class="form-inline ml-0 ml-sm-3"> <a href="#register" class="btn btn-primary" data-toggle="modal" data-target="#register">Sign up</a> </div>
+HTML;
+}
+
 function ve_runtime_html_transform(string $html, string $relativePath = ''): string
 {
     $runtimeScript = ve_runtime_script_tag();
@@ -3854,6 +3894,14 @@ function ve_runtime_html_transform(string $html, string $relativePath = ''): str
         $html = str_replace('href="/logout" class="dropdown-item"', 'href="/logout" class="dropdown-item logout"', $html);
         $html = str_replace("href='/logout' class='nav-link'", "href='/logout' class='nav-link logout'", $html);
         $html = str_replace("href='/logout' class='dropdown-item'", "href='/logout' class='dropdown-item logout'", $html);
+    }
+
+    if ($relativePath === 'index.html' || str_starts_with($relativePath, 'pages/')) {
+        $html = ve_html_replace_element_contents_by_id(
+            $html,
+            'navbarSupportedContent',
+            ve_site_navbar_contents($relativePath, ve_current_user())
+        );
     }
 
     if ($relativePath === 'index.html') {
