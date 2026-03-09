@@ -114,6 +114,27 @@ async function fetchHtmlStatus(page, url, options = {}) {
   });
 }
 
+async function fetchJsonStatus(page, url, options = {}) {
+  return page.evaluate(async (request) => {
+    const response = await fetch(request.url, request.options || {});
+    let body = {};
+
+    try {
+      body = await response.json();
+    } catch (error) {
+      body = {};
+    }
+
+    return {
+      status: response.status,
+      body,
+    };
+  }, {
+    url,
+    options,
+  });
+}
+
 async function fetchBinaryStatus(page, url, form) {
   return page.evaluate(async (request) => {
     const response = await fetch(request.url, {
@@ -176,6 +197,7 @@ async function elementDocumentBox(page, selector) {
   const pathPrefix = (process.env.VIDEO_DOWNLOAD_BROWSER_PATH_PREFIX || '').replace(/^\/+|\/+$/g, '');
   const waitFree = optionalNumber('VIDEO_DOWNLOAD_BROWSER_WAIT_FREE', 15);
   const waitPremium = optionalNumber('VIDEO_DOWNLOAD_BROWSER_WAIT_PREMIUM', 0);
+  const minWatchSeconds = optionalNumber('VIDEO_DOWNLOAD_BROWSER_MIN_WATCH_SECONDS', 30);
   const skipPremium = process.env.VIDEO_DOWNLOAD_BROWSER_SKIP_PREMIUM === '1';
   const browserPath = firstExistingPath([
     process.env.VIDEO_DOWNLOAD_BROWSER_EXECUTABLE || '',
@@ -212,9 +234,14 @@ async function elementDocumentBox(page, selector) {
     }
 
     const freeStatusText = ((await freePage.locator('#ve-download-status').textContent()) || '').trim();
+    const sizeText = ((await freePage.locator('.title-wrap .size').textContent()) || '').trim();
 
     if (!freeStatusText.includes(`Free download unlocks after ${waitFree} seconds.`)) {
       throw new Error(`Unexpected free download status text: ${freeStatusText}`);
+    }
+
+    if (!/\bMB\b/.test(sizeText)) {
+      throw new Error(`Video size should be displayed in MB for large values. Received: ${sizeText}`);
     }
 
     const pageHtml = await freePage.content();
@@ -227,6 +254,19 @@ async function elementDocumentBox(page, selector) {
 
     if (!freeButtonBoxBefore) {
       throw new Error('Unable to measure the free download button before activation.');
+    }
+
+    const freeButtonStyle = await freePage.locator('#ve-download-button').evaluate((element) => {
+      const styles = window.getComputedStyle(element);
+      return {
+        display: styles.display,
+        alignItems: styles.alignItems,
+        justifyContent: styles.justifyContent,
+      };
+    });
+
+    if (!String(freeButtonStyle.display || '').includes('flex') || freeButtonStyle.alignItems !== 'center' || freeButtonStyle.justifyContent !== 'center') {
+      throw new Error(`Download button should use centered flex layout. Received: ${JSON.stringify(freeButtonStyle)}`);
     }
 
     const freeCsrfToken = await extractInlineStringVariable(freePage, 'downloadCsrfToken');
@@ -342,9 +382,87 @@ async function elementDocumentBox(page, selector) {
       return Boolean(state && !state.classList.contains('is-visible'));
     }, null, { timeout: 15000 });
 
+    const firstQualifiedViewPromise = embedPage.waitForResponse((response) => {
+      return response.url().includes(`/api/videos/${publicId}/playback/qualify`)
+        && response.request().method() === 'POST'
+        && response.status() === 200;
+    }, { timeout: (minWatchSeconds + 15) * 1000 });
+
+    await embedPage.evaluate(async () => {
+      const video = document.getElementById('ve-secure-player');
+
+      if (!video) {
+        return;
+      }
+
+      video.muted = true;
+
+      try {
+        await video.play();
+      } catch (error) {
+        // The readiness check below will fail if playback never begins.
+      }
+    });
+
+    await embedPage.waitForFunction(() => {
+      const video = document.getElementById('ve-secure-player');
+      return Boolean(video && !video.paused);
+    }, null, { timeout: 15000 });
+
+    const firstQualifiedView = await (await firstQualifiedViewPromise).json();
+
+    if (firstQualifiedView.status !== 'ok' || firstQualifiedView.payable !== true || firstQualifiedView.counted !== true) {
+      throw new Error(`The first playback qualification should be payable. Received: ${JSON.stringify(firstQualifiedView)}`);
+    }
+
     await embedPage.close();
     await freePage.close();
     await anonymousContext.close();
+
+    const repeatContext = await browser.newContext({ baseURL });
+    const repeatEmbedPage = await repeatContext.newPage();
+    await repeatEmbedPage.goto(embedUrl, { waitUntil: 'networkidle' });
+    await repeatEmbedPage.waitForSelector('#ve-secure-player', { timeout: 15000 });
+    await repeatEmbedPage.waitForFunction(() => {
+      const state = document.getElementById('ve-player-state');
+      return Boolean(state && !state.classList.contains('is-visible'));
+    }, null, { timeout: 15000 });
+
+    const secondQualifiedViewPromise = repeatEmbedPage.waitForResponse((response) => {
+      return response.url().includes(`/api/videos/${publicId}/playback/qualify`)
+        && response.request().method() === 'POST'
+        && response.status() === 200;
+    }, { timeout: (minWatchSeconds + 15) * 1000 });
+
+    await repeatEmbedPage.evaluate(async () => {
+      const video = document.getElementById('ve-secure-player');
+
+      if (!video) {
+        return;
+      }
+
+      video.muted = true;
+
+      try {
+        await video.play();
+      } catch (error) {
+        // The readiness check below will fail if playback never begins.
+      }
+    });
+
+    await repeatEmbedPage.waitForFunction(() => {
+      const video = document.getElementById('ve-secure-player');
+      return Boolean(video && !video.paused);
+    }, null, { timeout: 15000 });
+
+    const secondQualifiedView = await (await secondQualifiedViewPromise).json();
+
+    if (secondQualifiedView.status !== 'ok' || secondQualifiedView.payable !== false || secondQualifiedView.counted !== false) {
+      throw new Error(`The second playback from the same viewer should not be payable. Received: ${JSON.stringify(secondQualifiedView)}`);
+    }
+
+    await repeatEmbedPage.close();
+    await repeatContext.close();
 
     if (!skipPremium) {
       const premiumContext = await browser.newContext({
@@ -368,6 +486,23 @@ async function elementDocumentBox(page, selector) {
 
       if (!premiumStatusText.includes('Instant protected download is available')) {
         throw new Error(`Unexpected premium status text: ${premiumStatusText}`);
+      }
+
+      const reportDate = new Date().toISOString().slice(0, 10);
+      const premiumReports = await fetchJsonStatus(premiumPage, appPath(`/api/dashboard/reports?from=${reportDate}&to=${reportDate}`, pathPrefix), {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (premiumReports.status !== 200 || !premiumReports.body || premiumReports.body.status !== 'ok') {
+        throw new Error(`Owner dashboard reports should be available after playback qualification. Received: ${JSON.stringify(premiumReports)}`);
+      }
+
+      if (Number(premiumReports.body.totals && premiumReports.body.totals.views) !== 1) {
+        throw new Error(`Only one payable anonymous view should be counted for the day. Received: ${JSON.stringify(premiumReports.body.totals || null)}`);
       }
 
       const premiumCsrfToken = await extractInlineStringVariable(premiumPage, 'downloadCsrfToken');

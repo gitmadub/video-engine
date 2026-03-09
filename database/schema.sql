@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS referral_earnings (
     FOREIGN KEY (referred_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS app_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS user_settings (
     user_id INTEGER PRIMARY KEY,
     payment_method TEXT NOT NULL DEFAULT '',
@@ -273,6 +279,7 @@ CREATE INDEX IF NOT EXISTS idx_premium_orders_user_created ON premium_orders(use
 CREATE INDEX IF NOT EXISTS idx_premium_orders_status_created ON premium_orders(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_referral_earnings_referrer_date ON referral_earnings(referrer_user_id, stat_date DESC);
 CREATE INDEX IF NOT EXISTS idx_referral_earnings_referred_created ON referral_earnings(referred_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_app_settings_updated_at ON app_settings(updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS video_playback_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -294,6 +301,34 @@ CREATE TABLE IF NOT EXISTS video_playback_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_video_sessions_video_expires ON video_playback_sessions(video_id, expires_at);
+
+CREATE TABLE IF NOT EXISTS video_view_qualifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    playback_session_id INTEGER NOT NULL UNIQUE,
+    video_id INTEGER NOT NULL,
+    owner_user_id INTEGER NOT NULL,
+    viewer_user_id INTEGER DEFAULT NULL,
+    viewer_ip_address TEXT NOT NULL DEFAULT '',
+    viewer_ip_hash TEXT NOT NULL,
+    viewer_user_agent_hash TEXT NOT NULL,
+    viewer_identity_type TEXT NOT NULL DEFAULT 'ip',
+    viewer_identity_hash TEXT NOT NULL,
+    watched_seconds INTEGER NOT NULL DEFAULT 0,
+    minimum_watch_seconds INTEGER NOT NULL DEFAULT 30,
+    stat_date TEXT NOT NULL,
+    is_payable INTEGER NOT NULL DEFAULT 0,
+    payable_rank INTEGER NOT NULL DEFAULT 0,
+    qualified_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (playback_session_id) REFERENCES video_playback_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (viewer_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_view_qualifications_owner_date ON video_view_qualifications(owner_user_id, stat_date DESC);
+CREATE INDEX IF NOT EXISTS idx_video_view_qualifications_identity_date ON video_view_qualifications(owner_user_id, viewer_identity_hash, stat_date DESC);
+CREATE INDEX IF NOT EXISTS idx_video_view_qualifications_video_date ON video_view_qualifications(video_id, stat_date DESC);
 
 CREATE TABLE IF NOT EXISTS video_download_grants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -267,8 +267,8 @@ ve_video_mark_playback_started($hookVideo, $hookSession);
 ve_video_record_segment_delivery($hookVideo, $hookSession, 5 * 1024 * 1024);
 
 $earnPerView = ve_dashboard_earnings_per_view_micro_usd();
-$expectedTodayProfit = ve_dashboard_format_currency_micro_usd(3 * $earnPerView);
-$expectedBalance = ve_dashboard_format_currency_micro_usd(9 * $earnPerView);
+$expectedTodayProfit = ve_dashboard_format_currency_micro_usd(2 * $earnPerView);
+$expectedBalance = ve_dashboard_format_currency_micro_usd(8 * $earnPerView);
 
 $serverPid = null;
 
@@ -319,7 +319,7 @@ try {
             'to' => $todayDate,
         ],
     ]));
-    dashboard_api_assert((int) (($report['totals']['views'] ?? 0)) === 9, 'Dashboard reports totals should sum seeded views.');
+    dashboard_api_assert((int) (($report['totals']['views'] ?? 0)) === 8, 'Dashboard reports totals should sum seeded views.');
     dashboard_api_assert((string) ($report['totals']['profit'] ?? '') === $expectedBalance, 'Dashboard reports totals should sum seeded profit.');
     echo "reports api ok\n";
 

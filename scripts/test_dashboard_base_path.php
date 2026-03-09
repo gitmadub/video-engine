@@ -239,7 +239,7 @@ try {
         'DASHBOARD_BROWSER_PASSWORD' => 'DashPass123',
         'DASHBOARD_BROWSER_FROM' => $sevenDaysAgoDate,
         'DASHBOARD_BROWSER_TO' => $todayDate,
-        'DASHBOARD_BROWSER_EXPECTED_VIEWS' => '9',
+        'DASHBOARD_BROWSER_EXPECTED_VIEWS' => '8',
         'DASHBOARD_BROWSER_TOP_TITLE' => 'Alpha Alias Clip',
     ];
     $browserPrefix = '';

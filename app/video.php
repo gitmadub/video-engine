@@ -1448,6 +1448,11 @@ function ve_video_format_bytes(int $bytes): string
     $power = max(0, min($power, count($units) - 1));
     $value = $bytes / (1024 ** $power);
 
+    if ($power < count($units) - 1 && $value >= 1000) {
+        $power++;
+        $value = $bytes / (1024 ** $power);
+    }
+
     return number_format($value, $power === 0 ? 0 : 2) . ' ' . $units[$power];
 }
 
@@ -3287,13 +3292,334 @@ function ve_video_validate_playback_session(array $video, ?string $token): ?arra
     return $session;
 }
 
+/**
+ * @return array{minimum_watch_seconds:int,max_payable_views_per_viewer_per_day:int}
+ */
+function ve_video_payable_view_policy(): array
+{
+    return [
+        'minimum_watch_seconds' => ve_get_app_setting_int('video_payable_min_watch_seconds', 30, 5, 3600),
+        'max_payable_views_per_viewer_per_day' => ve_get_app_setting_int('video_payable_max_views_per_viewer_per_day', 1, 0, 1000),
+    ];
+}
+
+function ve_video_session_viewer_user_id(array $session): int
+{
+    // `owner_user_id` is the historical column name for the authenticated viewer tied to the playback session.
+    return max(0, (int) ($session['owner_user_id'] ?? 0));
+}
+
+function ve_video_fetch_qualified_view_by_session_id(int $sessionId): ?array
+{
+    if ($sessionId <= 0) {
+        return null;
+    }
+
+    $stmt = ve_db()->prepare(
+        'SELECT *
+         FROM video_view_qualifications
+         WHERE playback_session_id = :playback_session_id
+         LIMIT 1'
+    );
+    $stmt->execute([':playback_session_id' => $sessionId]);
+    $row = $stmt->fetch();
+
+    return is_array($row) ? $row : null;
+}
+
+/**
+ * @return array{status:string,message:string,counted:bool,payable:bool,already_recorded:bool,watched_seconds:int,required_seconds:int,remaining_seconds:int,max_payable_views_per_day:int,payable_rank:int}
+ */
+function ve_video_record_qualified_view(array $video, array $session, int $watchedSeconds): array
+{
+    $policy = ve_video_payable_view_policy();
+    $minimumWatchSeconds = max(1, (int) ($policy['minimum_watch_seconds'] ?? 30));
+    $maxPayableViewsPerDay = max(0, (int) ($policy['max_payable_views_per_viewer_per_day'] ?? 1));
+    $watchedSeconds = max(0, $watchedSeconds);
+    $sessionId = (int) ($session['id'] ?? 0);
+    $videoId = (int) ($video['id'] ?? 0);
+    $ownerUserId = (int) ($video['user_id'] ?? 0);
+
+    if ($sessionId <= 0 || $videoId <= 0 || $ownerUserId <= 0) {
+        return [
+            'status' => 'fail',
+            'message' => 'The playback session is incomplete.',
+            'counted' => false,
+            'payable' => false,
+            'already_recorded' => false,
+            'watched_seconds' => $watchedSeconds,
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => $minimumWatchSeconds,
+            'max_payable_views_per_day' => $maxPayableViewsPerDay,
+            'payable_rank' => 0,
+        ];
+    }
+
+    $existing = ve_video_fetch_qualified_view_by_session_id($sessionId);
+
+    if (is_array($existing)) {
+        return [
+            'status' => 'ok',
+            'message' => ((int) ($existing['is_payable'] ?? 0)) === 1
+                ? 'This payable view was already recorded.'
+                : 'This playback session was already processed.',
+            'counted' => ((int) ($existing['is_payable'] ?? 0)) === 1,
+            'payable' => ((int) ($existing['is_payable'] ?? 0)) === 1,
+            'already_recorded' => true,
+            'watched_seconds' => (int) ($existing['watched_seconds'] ?? 0),
+            'required_seconds' => (int) ($existing['minimum_watch_seconds'] ?? $minimumWatchSeconds),
+            'remaining_seconds' => 0,
+            'max_payable_views_per_day' => $maxPayableViewsPerDay,
+            'payable_rank' => (int) ($existing['payable_rank'] ?? 0),
+        ];
+    }
+
+    if ($watchedSeconds < $minimumWatchSeconds) {
+        return [
+            'status' => 'pending',
+            'message' => 'Playback has not reached the payable watch threshold yet.',
+            'counted' => false,
+            'payable' => false,
+            'already_recorded' => false,
+            'watched_seconds' => $watchedSeconds,
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => max(0, $minimumWatchSeconds - $watchedSeconds),
+            'max_payable_views_per_day' => $maxPayableViewsPerDay,
+            'payable_rank' => 0,
+        ];
+    }
+
+    $playbackStartedAt = trim((string) ($session['playback_started_at'] ?? ''));
+    $playbackStartedTimestamp = $playbackStartedAt !== '' ? strtotime($playbackStartedAt) : false;
+
+    if ($playbackStartedTimestamp === false || $playbackStartedTimestamp <= 0) {
+        return [
+            'status' => 'pending',
+            'message' => 'Playback has not started yet.',
+            'counted' => false,
+            'payable' => false,
+            'already_recorded' => false,
+            'watched_seconds' => $watchedSeconds,
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => $minimumWatchSeconds,
+            'max_payable_views_per_day' => $maxPayableViewsPerDay,
+            'payable_rank' => 0,
+        ];
+    }
+
+    $elapsedPlaybackSeconds = max(0, ve_timestamp() - $playbackStartedTimestamp);
+
+    if ($elapsedPlaybackSeconds < $minimumWatchSeconds) {
+        return [
+            'status' => 'pending',
+            'message' => 'Playback must remain active a little longer before the view can be counted.',
+            'counted' => false,
+            'payable' => false,
+            'already_recorded' => false,
+            'watched_seconds' => $watchedSeconds,
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => max(0, $minimumWatchSeconds - $elapsedPlaybackSeconds),
+            'max_payable_views_per_day' => $maxPayableViewsPerDay,
+            'payable_rank' => 0,
+        ];
+    }
+
+    if ((int) ($session['bandwidth_bytes_served'] ?? 0) <= 0) {
+        return [
+            'status' => 'pending',
+            'message' => 'Playback data has not been streamed long enough to qualify this view yet.',
+            'counted' => false,
+            'payable' => false,
+            'already_recorded' => false,
+            'watched_seconds' => $watchedSeconds,
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => 1,
+            'max_payable_views_per_day' => $maxPayableViewsPerDay,
+            'payable_rank' => 0,
+        ];
+    }
+
+    $viewerUserId = ve_video_session_viewer_user_id($session);
+    $viewerIpAddress = ve_client_ip();
+    $viewerIpHash = ve_video_playback_signature($viewerIpAddress);
+    $viewerUserAgentHash = ve_video_playback_signature(substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500));
+    $viewerIdentityType = $viewerUserId > 0 ? 'user' : 'ip';
+    $viewerIdentitySource = $viewerUserId > 0 ? 'user:' . $viewerUserId : 'ip:' . $viewerIpHash;
+    $viewerIdentityHash = ve_video_playback_signature($viewerIdentitySource);
+    $statDate = gmdate('Y-m-d');
+    $qualifiedAt = ve_now();
+    $isOwnerView = $viewerUserId > 0 && $viewerUserId === $ownerUserId;
+    $pdo = ve_db();
+
+    try {
+        $pdo->beginTransaction();
+
+        $existing = ve_video_fetch_qualified_view_by_session_id($sessionId);
+
+        if (is_array($existing)) {
+            $pdo->commit();
+
+            return [
+                'status' => 'ok',
+                'message' => ((int) ($existing['is_payable'] ?? 0)) === 1
+                    ? 'This payable view was already recorded.'
+                    : 'This playback session was already processed.',
+                'counted' => ((int) ($existing['is_payable'] ?? 0)) === 1,
+                'payable' => ((int) ($existing['is_payable'] ?? 0)) === 1,
+                'already_recorded' => true,
+                'watched_seconds' => (int) ($existing['watched_seconds'] ?? 0),
+                'required_seconds' => (int) ($existing['minimum_watch_seconds'] ?? $minimumWatchSeconds),
+                'remaining_seconds' => 0,
+                'max_payable_views_per_day' => $maxPayableViewsPerDay,
+                'payable_rank' => (int) ($existing['payable_rank'] ?? 0),
+            ];
+        }
+
+        $countStmt = $pdo->prepare(
+            'SELECT COUNT(*)
+             FROM video_view_qualifications
+             WHERE owner_user_id = :owner_user_id
+               AND viewer_identity_hash = :viewer_identity_hash
+               AND stat_date = :stat_date
+               AND is_payable = 1'
+        );
+        $countStmt->execute([
+            ':owner_user_id' => $ownerUserId,
+            ':viewer_identity_hash' => $viewerIdentityHash,
+            ':stat_date' => $statDate,
+        ]);
+        $existingPayableViews = (int) $countStmt->fetchColumn();
+        $payableRank = $isOwnerView ? 0 : ($existingPayableViews + 1);
+        $isPayable = !$isOwnerView && $payableRank <= $maxPayableViewsPerDay;
+
+        $insert = $pdo->prepare(
+            'INSERT INTO video_view_qualifications (
+                playback_session_id, video_id, owner_user_id, viewer_user_id, viewer_ip_address,
+                viewer_ip_hash, viewer_user_agent_hash, viewer_identity_type, viewer_identity_hash,
+                watched_seconds, minimum_watch_seconds, stat_date, is_payable, payable_rank,
+                qualified_at, created_at
+             ) VALUES (
+                :playback_session_id, :video_id, :owner_user_id, :viewer_user_id, :viewer_ip_address,
+                :viewer_ip_hash, :viewer_user_agent_hash, :viewer_identity_type, :viewer_identity_hash,
+                :watched_seconds, :minimum_watch_seconds, :stat_date, :is_payable, :payable_rank,
+                :qualified_at, :created_at
+             )'
+        );
+        $insert->execute([
+            ':playback_session_id' => $sessionId,
+            ':video_id' => $videoId,
+            ':owner_user_id' => $ownerUserId,
+            ':viewer_user_id' => $viewerUserId > 0 ? $viewerUserId : null,
+            ':viewer_ip_address' => $viewerIpAddress,
+            ':viewer_ip_hash' => $viewerIpHash,
+            ':viewer_user_agent_hash' => $viewerUserAgentHash,
+            ':viewer_identity_type' => $viewerIdentityType,
+            ':viewer_identity_hash' => $viewerIdentityHash,
+            ':watched_seconds' => $watchedSeconds,
+            ':minimum_watch_seconds' => $minimumWatchSeconds,
+            ':stat_date' => $statDate,
+            ':is_payable' => $isPayable ? 1 : 0,
+            ':payable_rank' => $isPayable ? $payableRank : 0,
+            ':qualified_at' => $qualifiedAt,
+            ':created_at' => $qualifiedAt,
+        ]);
+
+        if ($isPayable) {
+            ve_dashboard_record_video_view($videoId, $ownerUserId, $statDate, null, 'qualified-view-' . $sessionId);
+        }
+
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        $existing = ve_video_fetch_qualified_view_by_session_id($sessionId);
+
+        if (!is_array($existing)) {
+            throw $exception;
+        }
+
+        return [
+            'status' => 'ok',
+            'message' => ((int) ($existing['is_payable'] ?? 0)) === 1
+                ? 'This payable view was already recorded.'
+                : 'This playback session was already processed.',
+            'counted' => ((int) ($existing['is_payable'] ?? 0)) === 1,
+            'payable' => ((int) ($existing['is_payable'] ?? 0)) === 1,
+            'already_recorded' => true,
+            'watched_seconds' => (int) ($existing['watched_seconds'] ?? 0),
+            'required_seconds' => (int) ($existing['minimum_watch_seconds'] ?? $minimumWatchSeconds),
+            'remaining_seconds' => 0,
+            'max_payable_views_per_day' => $maxPayableViewsPerDay,
+            'payable_rank' => (int) ($existing['payable_rank'] ?? 0),
+        ];
+    }
+
+    return [
+        'status' => 'ok',
+        'message' => $isPayable
+            ? 'The payable view was recorded successfully.'
+            : ($isOwnerView
+                ? 'Owner playback sessions are not payable.'
+                : 'The daily payable view limit for this viewer was already reached.'),
+        'counted' => $isPayable,
+        'payable' => $isPayable,
+        'already_recorded' => false,
+        'watched_seconds' => $watchedSeconds,
+        'required_seconds' => $minimumWatchSeconds,
+        'remaining_seconds' => 0,
+        'max_payable_views_per_day' => $maxPayableViewsPerDay,
+        'payable_rank' => $isPayable ? $payableRank : 0,
+    ];
+}
+
+function ve_video_playback_qualify_api(string $publicId): void
+{
+    if (!ve_is_method('POST')) {
+        ve_method_not_allowed(['POST']);
+    }
+
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || !ve_video_is_request_visible($video) || (string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        ve_not_found();
+    }
+
+    $token = trim((string) ($_POST['playback_token'] ?? ''));
+
+    if ($token === '') {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'The playback session token is missing.',
+        ], 422);
+    }
+
+    $session = ve_video_validate_playback_session($video, $token);
+
+    if (!is_array($session)) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'The playback session is invalid or has expired.',
+        ], 403);
+    }
+
+    $watchedSeconds = max(0, (int) round((float) ($_POST['watched_seconds'] ?? 0)));
+    $result = ve_video_record_qualified_view($video, $session, $watchedSeconds);
+    $statusCode = match ($result['status'] ?? 'ok') {
+        'pending' => 202,
+        'fail' => 422,
+        default => 200,
+    };
+
+    ve_json($result, $statusCode);
+}
+
 function ve_video_mark_playback_started(array $video, array $session): void
 {
     $sessionId = (int) ($session['id'] ?? 0);
-    $videoId = (int) ($video['id'] ?? 0);
-    $userId = (int) ($video['user_id'] ?? 0);
 
-    if ($sessionId <= 0 || $videoId <= 0 || $userId <= 0) {
+    if ($sessionId <= 0) {
         return;
     }
 
@@ -3308,10 +3634,6 @@ function ve_video_mark_playback_started(array $video, array $session): void
         ':playback_started_at' => ve_now(),
         ':id' => $sessionId,
     ]);
-
-    if ($stmt->rowCount() > 0) {
-        ve_dashboard_record_video_view($videoId, $userId, null, null, 'playback-session-' . $sessionId);
-    }
 }
 
 function ve_video_record_segment_delivery(array $video, array $session, int $bytes): void
@@ -3368,8 +3690,6 @@ function ve_video_stream_manifest(string $publicId): void
     if ($session === null) {
         ve_video_stream_access_denied();
     }
-
-    ve_video_mark_playback_started($video, $session);
 
     $playlistPath = ve_video_playlist_path($video);
 
@@ -3807,12 +4127,14 @@ function ve_video_stream_preview_vtt(string $publicId): void
     exit;
 }
 
-function ve_video_secure_player_script(array $session, ?string $previewVttUrl = null): string
+function ve_video_secure_player_script(array $session, string $publicId, int $minimumWatchSeconds, ?string $previewVttUrl = null): string
 {
     $manifestUrl = json_encode(ve_absolute_url((string) $session['manifest_url']), JSON_UNESCAPED_SLASHES);
     $token = json_encode((string) $session['token'], JSON_UNESCAPED_SLASHES);
     $homeUrl = json_encode(ve_absolute_url('/'), JSON_UNESCAPED_SLASHES);
     $previewUrl = json_encode($previewVttUrl !== null ? ve_absolute_url($previewVttUrl) : '', JSON_UNESCAPED_SLASHES);
+    $qualifyViewUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/qualify'), JSON_UNESCAPED_SLASHES);
+    $minimumWatchSeconds = max(5, $minimumWatchSeconds);
 
     return <<<HTML
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
@@ -3823,10 +4145,19 @@ function ve_video_secure_player_script(array $session, ?string $previewVttUrl = 
         var token = {$token};
         var previewUrl = {$previewUrl};
         var fallbackUrl = {$homeUrl};
+        var qualifyViewUrl = {$qualifyViewUrl};
+        var minimumWatchSeconds = {$minimumWatchSeconds};
         var video = document.getElementById('ve-secure-player');
         var stage = document.querySelector('.ve-stage');
         var state = document.getElementById('ve-player-state');
         var player = null;
+        var watchedSeconds = 0;
+        var watchAuditTimer = null;
+        var lastWatchSampleAt = 0;
+        var lastWatchCurrentTime = 0;
+        var qualificationSent = false;
+        var qualificationInFlight = false;
+        var qualificationRetryTimer = null;
 
         function setState(message, isError) {
             if (!state) {
@@ -3861,6 +4192,214 @@ function ve_video_secure_player_script(array $session, ?string $previewVttUrl = 
             });
         }
 
+        function nowMs() {
+            if (window.performance && typeof window.performance.now === 'function') {
+                return window.performance.now();
+            }
+
+            return Date.now();
+        }
+
+        function resetWatchSample() {
+            lastWatchSampleAt = nowMs();
+            lastWatchCurrentTime = Number(video && video.currentTime ? video.currentTime : 0);
+        }
+
+        function isPlaybackTrackable() {
+            return Boolean(
+                video
+                && !document.hidden
+                && !video.paused
+                && !video.ended
+                && !video.seeking
+                && video.readyState >= 2
+            );
+        }
+
+        function clearQualificationRetry() {
+            if (qualificationRetryTimer !== null) {
+                window.clearTimeout(qualificationRetryTimer);
+                qualificationRetryTimer = null;
+            }
+        }
+
+        function scheduleQualificationRetry(seconds) {
+            if (qualificationSent) {
+                return;
+            }
+
+            clearQualificationRetry();
+            qualificationRetryTimer = window.setTimeout(function () {
+                qualificationRetryTimer = null;
+                maybeQualifyView();
+            }, Math.max(1, seconds) * 1000);
+        }
+
+        function buildQualificationBody() {
+            var params = new URLSearchParams();
+            params.set('playback_token', token);
+            params.set('watched_seconds', String(Math.max(0, Math.floor(watchedSeconds))));
+            return params.toString();
+        }
+
+        function submitQualifiedView() {
+            if (
+                qualificationSent
+                || qualificationInFlight
+                || qualificationRetryTimer !== null
+                || watchedSeconds < minimumWatchSeconds
+                || !qualifyViewUrl
+            ) {
+                return;
+            }
+
+            qualificationInFlight = true;
+
+            fetch(qualifyViewUrl, {
+                method: 'POST',
+                credentials: 'same-origin',
+                keepalive: true,
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'X-Playback-Session': token
+                },
+                body: buildQualificationBody()
+            }).then(function (response) {
+                return response.json().catch(function () {
+                    return {};
+                }).then(function (payload) {
+                    return {
+                        statusCode: response.status,
+                        payload: payload
+                    };
+                });
+            }).then(function (result) {
+                qualificationInFlight = false;
+
+                if (!result || !result.payload || typeof result.payload.status !== 'string') {
+                    return;
+                }
+
+                if (result.payload.status === 'ok') {
+                    qualificationSent = true;
+                    clearQualificationRetry();
+                    return;
+                }
+
+                if (result.payload.status === 'pending') {
+                    scheduleQualificationRetry(Number(result.payload.remaining_seconds || 1));
+                }
+            }).catch(function () {
+                qualificationInFlight = false;
+                scheduleQualificationRetry(3);
+            });
+        }
+
+        function maybeQualifyView() {
+            if (
+                qualificationSent
+                || qualificationInFlight
+                || qualificationRetryTimer !== null
+                || watchedSeconds < minimumWatchSeconds
+            ) {
+                return;
+            }
+
+            submitQualifiedView();
+        }
+
+        function auditWatchProgress() {
+            if (!video) {
+                return;
+            }
+
+            var sampleAt = nowMs();
+            var currentTime = Number(video.currentTime || 0);
+
+            if (!lastWatchSampleAt) {
+                lastWatchSampleAt = sampleAt;
+                lastWatchCurrentTime = currentTime;
+                return;
+            }
+
+            var elapsedSeconds = Math.max(0, (sampleAt - lastWatchSampleAt) / 1000);
+            var mediaAdvanced = Math.max(0, currentTime - lastWatchCurrentTime);
+
+            if (isPlaybackTrackable() && mediaAdvanced > 0.05) {
+                watchedSeconds += elapsedSeconds;
+                maybeQualifyView();
+            }
+
+            lastWatchSampleAt = sampleAt;
+            lastWatchCurrentTime = currentTime;
+        }
+
+        function startWatchAudit() {
+            if (!video) {
+                return;
+            }
+
+            if (watchAuditTimer !== null) {
+                return;
+            }
+
+            resetWatchSample();
+            watchAuditTimer = window.setInterval(auditWatchProgress, 1000);
+        }
+
+        function stopWatchAudit() {
+            if (!video) {
+                return;
+            }
+
+            if (watchAuditTimer !== null) {
+                auditWatchProgress();
+                window.clearInterval(watchAuditTimer);
+                watchAuditTimer = null;
+            }
+
+            resetWatchSample();
+        }
+
+        function bindWatchTracking() {
+            if (!video) {
+                return;
+            }
+
+            ['play', 'playing'].forEach(function (eventName) {
+                video.addEventListener(eventName, startWatchAudit);
+            });
+
+            ['pause', 'ended', 'waiting', 'stalled', 'seeking'].forEach(function (eventName) {
+                video.addEventListener(eventName, stopWatchAudit);
+            });
+
+            video.addEventListener('seeked', function () {
+                resetWatchSample();
+
+                if (isPlaybackTrackable()) {
+                    startWatchAudit();
+                }
+            });
+
+            document.addEventListener('visibilitychange', function () {
+                if (document.hidden) {
+                    stopWatchAudit();
+                    return;
+                }
+
+                if (isPlaybackTrackable()) {
+                    startWatchAudit();
+                }
+            });
+
+            window.addEventListener('pagehide', function () {
+                stopWatchAudit();
+                maybeQualifyView();
+            });
+        }
+
         function attachNative() {
             video.src = manifestUrl;
             video.addEventListener('loadedmetadata', function () {
@@ -3883,6 +4422,7 @@ function ve_video_secure_player_script(array $session, ?string $previewVttUrl = 
         }
 
         bootUi();
+        bindWatchTracking();
         setState('Securing playback session...');
 
         if (window.Hls && window.Hls.isSupported()) {
@@ -4205,6 +4745,14 @@ HTML;
         }
         .download_vd {
             min-width: 260px;
+            min-height: 48px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1.2;
+        }
+        .download_vd i {
+            line-height: 1;
         }
         .download_vd.disabled,
         .download_vd.loading {
@@ -4637,10 +5185,16 @@ HTML);
 
     $ownerSettings = ve_video_owner_settings($video);
     $session = ve_video_issue_playback_session($video);
+    $viewPolicy = ve_video_payable_view_policy();
     $previewVttUrl = is_file(ve_video_preview_vtt_path($video))
         ? '/stream/' . rawurlencode($publicId) . '/preview.vtt?token=' . rawurlencode((string) $session['token'])
         : null;
-    $script = ve_video_secure_player_script($session, $previewVttUrl);
+    $script = ve_video_secure_player_script(
+        $session,
+        $publicId,
+        (int) ($viewPolicy['minimum_watch_seconds'] ?? 30),
+        $previewVttUrl
+    );
     $playerColour = strtolower(trim((string) ($ownerSettings['player_colour'] ?? 'ff9900')));
 
     if (!preg_match('/^[a-f0-9]{6}$/', $playerColour)) {

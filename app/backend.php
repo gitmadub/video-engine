@@ -262,6 +262,88 @@ function ve_add_column_if_missing(PDO $pdo, string $table, string $column, strin
     $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
 }
 
+/**
+ * @return array<string, string>
+ */
+function ve_default_app_settings(): array
+{
+    return [
+        'video_payable_min_watch_seconds' => (string) max(5, (int) (getenv('VE_VIDEO_PAYABLE_MIN_WATCH_SECONDS') ?: 30)),
+        'video_payable_max_views_per_viewer_per_day' => (string) max(0, (int) (getenv('VE_VIDEO_PAYABLE_MAX_VIEWS_PER_VIEWER_PER_DAY') ?: 1)),
+    ];
+}
+
+function ve_seed_default_app_settings(PDO $pdo): void
+{
+    $defaults = ve_default_app_settings();
+
+    if ($defaults === []) {
+        return;
+    }
+
+    $stmt = $pdo->prepare(
+        'INSERT OR IGNORE INTO app_settings (setting_key, setting_value, updated_at)
+         VALUES (:setting_key, :setting_value, :updated_at)'
+    );
+    $updatedAt = ve_now();
+
+    foreach ($defaults as $settingKey => $settingValue) {
+        $stmt->execute([
+            ':setting_key' => $settingKey,
+            ':setting_value' => $settingValue,
+            ':updated_at' => $updatedAt,
+        ]);
+    }
+}
+
+function ve_get_app_setting(string $settingKey, ?string $defaultValue = null): ?string
+{
+    try {
+        $stmt = ve_db()->prepare(
+            'SELECT setting_value
+             FROM app_settings
+             WHERE setting_key = :setting_key
+             LIMIT 1'
+        );
+        $stmt->execute([':setting_key' => $settingKey]);
+        $value = $stmt->fetchColumn();
+    } catch (Throwable $exception) {
+        return $defaultValue;
+    }
+
+    if (!is_string($value)) {
+        return $defaultValue;
+    }
+
+    return $value;
+}
+
+function ve_get_app_setting_int(string $settingKey, int $defaultValue, int $minValue = 0, int $maxValue = PHP_INT_MAX): int
+{
+    $rawValue = ve_get_app_setting($settingKey, (string) $defaultValue);
+
+    if (!is_string($rawValue) || !preg_match('/^-?\d+$/', trim($rawValue))) {
+        return max($minValue, min($maxValue, $defaultValue));
+    }
+
+    return max($minValue, min($maxValue, (int) $rawValue));
+}
+
+function ve_set_app_setting(string $settingKey, string $settingValue): void
+{
+    ve_db()->prepare(
+        'INSERT INTO app_settings (setting_key, setting_value, updated_at)
+         VALUES (:setting_key, :setting_value, :updated_at)
+         ON CONFLICT(setting_key) DO UPDATE SET
+            setting_value = excluded.setting_value,
+            updated_at = excluded.updated_at'
+    )->execute([
+        ':setting_key' => $settingKey,
+        ':setting_value' => $settingValue,
+        ':updated_at' => ve_now(),
+    ]);
+}
+
 function ve_run_database_migrations(PDO $pdo): void
 {
     ve_add_column_if_missing($pdo, 'users', 'plan_code', "TEXT NOT NULL DEFAULT 'free'");
@@ -278,6 +360,14 @@ function ve_run_database_migrations(PDO $pdo): void
     ve_add_column_if_missing($pdo, 'user_settings', 'api_requests_per_day', 'INTEGER NOT NULL DEFAULT 5000');
     ve_add_column_if_missing($pdo, 'user_settings', 'api_uploads_per_day', 'INTEGER NOT NULL DEFAULT 25');
     ve_add_column_if_missing($pdo, 'user_settings', 'splash_image_path', "TEXT NOT NULL DEFAULT ''");
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS app_settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value TEXT NOT NULL DEFAULT "",
+            updated_at TEXT NOT NULL
+        )'
+    );
 
     $pdo->exec(
         'CREATE TABLE IF NOT EXISTS api_request_logs (
@@ -414,6 +504,32 @@ function ve_run_database_migrations(PDO $pdo): void
     );
 
     $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS video_view_qualifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            playback_session_id INTEGER NOT NULL UNIQUE,
+            video_id INTEGER NOT NULL,
+            owner_user_id INTEGER NOT NULL,
+            viewer_user_id INTEGER DEFAULT NULL,
+            viewer_ip_address TEXT NOT NULL DEFAULT "",
+            viewer_ip_hash TEXT NOT NULL,
+            viewer_user_agent_hash TEXT NOT NULL,
+            viewer_identity_type TEXT NOT NULL DEFAULT "ip",
+            viewer_identity_hash TEXT NOT NULL,
+            watched_seconds INTEGER NOT NULL DEFAULT 0,
+            minimum_watch_seconds INTEGER NOT NULL DEFAULT 30,
+            stat_date TEXT NOT NULL,
+            is_payable INTEGER NOT NULL DEFAULT 0,
+            payable_rank INTEGER NOT NULL DEFAULT 0,
+            qualified_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (playback_session_id) REFERENCES video_playback_sessions (id) ON DELETE CASCADE,
+            FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE,
+            FOREIGN KEY (owner_user_id) REFERENCES users (id) ON DELETE CASCADE,
+            FOREIGN KEY (viewer_user_id) REFERENCES users (id) ON DELETE SET NULL
+        )'
+    );
+
+    $pdo->exec(
         'CREATE TABLE IF NOT EXISTS video_download_grants (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             video_id INTEGER NOT NULL,
@@ -522,14 +638,19 @@ function ve_run_database_migrations(PDO $pdo): void
     }
 
     ve_remote_host_run_migrations($pdo);
+    ve_seed_default_app_settings($pdo);
 
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_app_settings_updated_at ON app_settings(updated_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_created ON api_request_logs(user_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_kind_created ON api_request_logs(user_id, request_kind, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_account_balance_ledger_user_created ON account_balance_ledger(user_id, created_at DESC)');
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_account_balance_ledger_source_entry ON account_balance_ledger(source_type, source_key, entry_type)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_premium_orders_user_created ON premium_orders(user_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_premium_orders_status_created ON premium_orders(status, created_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_view_qualifications_owner_date ON video_view_qualifications(owner_user_id, stat_date DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_view_qualifications_identity_date ON video_view_qualifications(owner_user_id, viewer_identity_hash, stat_date DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_view_qualifications_video_date ON video_view_qualifications(video_id, stat_date DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_download_grants_video_expiry ON video_download_grants(video_id, expires_at)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_download_grants_session_created ON video_download_grants(session_id_hash, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_video_folders_user_parent_name ON video_folders(user_id, parent_id, name)');
@@ -1237,6 +1358,11 @@ function ve_human_bytes(int $bytes): string
     $unit = 0;
 
     while ($size >= 1024 && $unit < count($units) - 1) {
+        $size /= 1024;
+        $unit++;
+    }
+
+    if ($unit < count($units) - 1 && $size >= 1000) {
         $size /= 1024;
         $unit++;
     }

@@ -204,6 +204,10 @@ function ve_dispatch_api_routes(string $path): bool
         ve_video_download_resolve_api($matches[1]);
     }
 
+    if (preg_match('#^/api/videos/([A-Za-z0-9_-]+)/playback/qualify$#', $path, $matches) === 1) {
+        ve_video_playback_qualify_api($matches[1]);
+    }
+
     if ($path === '/api/videos/upload-target') {
         if (!ve_is_method('GET')) {
             ve_method_not_allowed(['GET']);
