@@ -47,12 +47,16 @@ $(document).ready(function() {
     }
 
     $('.settings_menu li a').on('click', function(e) {
-        e.preventDefault();
-
         var $this = $(this),
             is_ajax = $this.data('ajax'),
             target = $this.attr('href'),
             link = $this.data('url');
+
+        if (!target || target.charAt(0) !== '#') {
+            return;
+        }
+
+        e.preventDefault();
 
         $('.settings_menu li a').not($this).removeClass('active');
         $this.addClass('active');

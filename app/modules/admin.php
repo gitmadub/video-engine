@@ -2651,30 +2651,144 @@ function ve_admin_dashboard_shell(
     ]);
     $baseStyles = <<<CSS
     <style>
-        .admin-shell .settings-panel { padding-right: 10px; }
-        .admin-shell .settings_menu a { border-radius: 0; }
+        .admin-shell { padding-bottom: 18px; }
+        .admin-shell .widget_area {
+            display: grid !important;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 14px;
+            align-items: stretch;
+            margin-bottom: 24px;
+        }
+        .admin-shell .widget_area:before,
+        .admin-shell .widget_area:after {
+            content: none !important;
+            display: none !important;
+        }
+        .admin-shell .widget_area .widget_box {
+            width: auto !important;
+            min-width: 0;
+            margin: 0 !important;
+            min-height: 112px;
+            padding: 20px 18px;
+            background: #151515;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            float: none !important;
+            clear: none !important;
+        }
+        .admin-shell .widget_area .widget_box:nth-of-type(4n),
+        .admin-shell .widget_area .widget_box:nth-of-type(4n + 1) {
+            width: auto !important;
+            margin-right: 0 !important;
+            float: none !important;
+            clear: none !important;
+        }
+        .admin-shell .widget_area .widget_box .info {
+            min-width: 0;
+            max-width: calc(100% - 64px);
+        }
+        .admin-shell .widget_area .widget_box .money {
+            font-size: 1.65rem;
+            line-height: 1;
+        }
+        .admin-shell .widget_area .widget_box .icon {
+            flex: 0 0 auto;
+        }
+        .admin-shell .widget_area .widget_box a {
+            display: inline-flex;
+            align-items: center;
+            margin-top: 10px;
+        }
+        .admin-shell .the_box {
+            align-items: flex-start;
+            gap: 18px;
+        }
+        .admin-shell .sidebar.settings-page {
+            flex: 0 0 285px;
+            width: 285px;
+            position: sticky;
+            top: 108px;
+        }
+        .admin-shell .details.settings_data {
+            flex: 1 1 calc(100% - 303px);
+            min-width: 0;
+        }
+        .admin-shell .settings-panel {
+            padding: 24px 26px;
+            background: #151515;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .admin-shell .settings_menu a {
+            border-radius: 0;
+            min-height: 54px;
+            padding: 0 18px;
+        }
         .admin-shell .settings_menu a.active { background: rgba(255, 153, 0, 0.13); color: #ffb347; }
         .admin-shell .settings_menu a.active span,
         .admin-shell .settings_menu a.active i { color: inherit; }
         .admin-shell .settings-panel-title { font-size: 1.2857142857rem; font-weight: 700; margin-bottom: 8px; }
         .admin-shell .settings-panel-subtitle { color: #7f7f7f; margin-bottom: 24px; }
-        .admin-shell .settings-table-wrap { padding: 0; background: #434645; border-radius: 3px; margin-bottom: 30px; overflow-x: auto; }
+        .admin-shell .settings-table-wrap {
+            padding: 0;
+            background: #171717;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 0;
+            margin-bottom: 30px;
+            overflow-x: auto;
+        }
         .admin-shell .settings-table-wrap .table { margin-bottom: 0; }
-        .admin-shell .settings-table-wrap .table > tbody > tr:first-child > td { border-top: 0; }
-        .admin-shell .settings-table-wrap .table td code { color: #f7f7f7; background: rgba(0, 0, 0, 0.24); padding: 2px 5px; }
+        .admin-shell .settings-table-wrap .table thead th {
+            padding: 14px 16px;
+            font-size: .76rem;
+            font-weight: 700;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: #9a9a9a;
+            background: rgba(255, 255, 255, 0.02);
+            border-top: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            white-space: nowrap;
+        }
+        .admin-shell .settings-table-wrap .table tbody td {
+            padding: 15px 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            background: transparent;
+            color: #e6e6e6;
+        }
+        .admin-shell .settings-table-wrap .table tbody tr:first-child td { border-top: 0; }
+        .admin-shell .settings-table-wrap .table tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.015); }
+        .admin-shell .settings-table-wrap .table tbody tr:hover { background: rgba(255, 153, 0, 0.04); }
+        .admin-shell .settings-table-wrap .table td code {
+            color: #f7f7f7;
+            background: rgba(0, 0, 0, 0.24);
+            padding: 2px 5px;
+        }
+        .admin-shell .settings-table-wrap .table td small {
+            display: block;
+            color: #8e8e8e;
+            margin-top: 4px;
+        }
         .admin-shell .admin-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-        .admin-shell .admin-toolbar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; align-items: flex-end; }
+        .admin-shell .admin-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 20px;
+            align-items: flex-end;
+            padding: 18px;
+            background: #181818;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
         .admin-shell .admin-toolbar .form-group { margin-bottom: 0; min-width: 180px; flex: 1 1 180px; }
         .admin-shell .admin-toolbar .form-group--action { flex: 0 0 auto; min-width: 0; }
-        .admin-shell .admin-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
-        .admin-shell .admin-kv__item { padding: 12px 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .admin-shell .admin-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px; }
+        .admin-shell .admin-kv__item { padding: 16px 18px; background: #191919; border: 1px solid rgba(255, 255, 255, 0.05); }
         .admin-shell .admin-kv__item span { color: #7f7f7f; display: block; font-size: .8rem; margin-bottom: 4px; }
         .admin-shell .admin-kv__item strong { color: #fff; display: block; }
         .admin-shell .admin-kv__item small { color: #9a9a9a; display: block; margin-top: 6px; }
         .admin-shell .admin-detail-panels,
         .admin-shell .admin-section-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
         .admin-shell .admin-detail-panel,
-        .admin-shell .admin-subsection { background: #1c1c1c; padding: 18px; margin-bottom: 18px; }
+        .admin-shell .admin-subsection { background: #171717; padding: 20px; margin-bottom: 18px; border: 1px solid rgba(255, 255, 255, 0.05); }
         .admin-shell .admin-subsection:last-child { margin-bottom: 0; }
         .admin-shell .admin-detail-panel h5,
         .admin-shell .admin-subsection h5 { margin-bottom: 14px; }
@@ -2688,7 +2802,7 @@ function ve_admin_dashboard_shell(
         .admin-shell .admin-form-grid .form-group { margin-bottom: 0; }
         .admin-shell .admin-stack > * + * { margin-top: 14px; }
         .admin-shell .admin-table-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-        .admin-shell .admin-form-card { background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); padding: 14px; }
+        .admin-shell .admin-form-card { background: #181818; border: 1px solid rgba(255, 255, 255, 0.05); padding: 18px; }
         .admin-shell .admin-form-card h6 { font-size: .95rem; font-weight: 700; margin-bottom: 12px; }
         .admin-shell .admin-meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; }
         .admin-shell .admin-meta-item span { color: #7f7f7f; display: block; font-size: .8rem; margin-bottom: 4px; }
@@ -2701,13 +2815,57 @@ function ve_admin_dashboard_shell(
         .admin-shell .admin-timeline li:last-child { border-bottom: 0; }
         .admin-shell .admin-timeline strong { display: block; }
         .admin-shell .admin-empty { color: #9a9a9a; margin: 0; }
-        .admin-shell .admin-selected-row { background: rgba(255, 153, 0, 0.08); }
+        .admin-shell .admin-selected-row { background: rgba(255, 153, 0, 0.08) !important; }
         .admin-shell .page-link { background: #2f3131; border-color: #434645; color: #fff; }
         .admin-shell .page-item.active .page-link { background: #ff9900; border-color: #ff9900; }
         .admin-shell .table td,
         .admin-shell .table th { vertical-align: middle; }
         .admin-shell .admin-impersonation { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
         .admin-shell textarea.form-control { min-height: 110px; }
+        .admin-shell .form-control,
+        .admin-shell .custom-file-label,
+        .admin-shell .custom-select {
+            background: #222;
+            border-color: #3b3b3b;
+            color: #fff;
+        }
+        .admin-shell select.form-control option { color: #111; }
+        .admin-shell .btn-secondary {
+            background: #2c2c2c;
+            border-color: #3b3b3b;
+        }
+        .admin-shell .status-block {
+            background: #171717;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 18px;
+            margin-bottom: 0 !important;
+        }
+        .admin-shell .status-block .text-muted {
+            color: #8a8a8a !important;
+        }
+        @media (max-width: 1399.98px) {
+            .admin-shell .widget_area { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+        @media (max-width: 991.98px) {
+            .admin-shell .widget_area { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .admin-shell .the_box { display: block !important; }
+            .admin-shell .sidebar.settings-page,
+            .admin-shell .details.settings_data {
+                position: static;
+                width: 100%;
+                flex: 1 1 100%;
+            }
+            .admin-shell .sidebar.settings-page { margin-bottom: 18px; }
+        }
+        @media (max-width: 575.98px) {
+            .admin-shell .widget_area { grid-template-columns: 1fr; }
+            .admin-shell .settings-panel,
+            .admin-shell .admin-subsection,
+            .admin-shell .admin-detail-panel,
+            .admin-shell .admin-form-card,
+            .admin-shell .admin-toolbar,
+            .admin-shell .status-block { padding: 18px; }
+        }
     </style>
 CSS;
 
@@ -3019,7 +3177,7 @@ function ve_admin_backend_widgets_html(array $snapshot): string
     $html = '';
 
     foreach ($cards as $card) {
-        $html .= '<div class="widget_box d-flex justify-content-between flex-wrap align-items-center">'
+        $html .= '<div class="widget_box admin-widget-card d-flex justify-content-between flex-wrap align-items-center">'
             . '<div class="info">'
             . '<span class="money d-block">' . ve_h((string) ($card['value'] ?? '0')) . '</span>'
             . '<span class="d-block">' . ve_h((string) ($card['label'] ?? '')) . '</span>'
@@ -3029,7 +3187,7 @@ function ve_admin_backend_widgets_html(array $snapshot): string
             . '</div>';
     }
 
-    return '<div class="d-flex widget_area justify-content-between flex-wrap">' . $html . '</div>';
+    return '<div class="d-flex widget_area admin-widget-area justify-content-between flex-wrap">' . $html . '</div>';
 }
 
 function ve_admin_empty_table_row_html(int $colspan, string $message): string
@@ -5344,10 +5502,9 @@ function ve_admin_backend_mobile_nav_html(array $actorUser, string $activeSectio
     unset($actorUser, $activeSection);
 
     return '<li class="nav-item"><a href="' . ve_h(ve_url('/dashboard')) . '" class="nav-link"><i class="fad fa-shapes"></i>Dashboard</a></li>'
-        . '<li class="nav-item"><a href="' . ve_h(ve_url('/videos')) . '" class="nav-link"><i class="fad fa-camera-movie"></i>Videos</a></li>'
-        . '<li class="nav-item"><a href="' . ve_h(ve_url('/reports')) . '" class="nav-link"><i class="fad fa-chart-line"></i>Reports</a></li>'
-        . '<li class="nav-item"><a href="' . ve_h(ve_url('/settings')) . '" class="nav-link"><i class="fad fa-cog"></i>Settings</a></li>'
-        . '<li class="nav-item"><a href="' . ve_h(ve_url('/logout')) . '" class="nav-link logout"><i class="fad fa-power-off text-danger"></i>Logout</a></li>';
+        . '<li class="nav-item"><a href="' . ve_h(ve_url('/')) . '" class="nav-link"><i class="fad fa-home"></i>Home</a></li>'
+        . '<li class="nav-item"><a href="' . ve_h(ve_url('/api-docs')) . '" class="nav-link"><i class="fad fa-brackets-curly"></i>API Docs</a></li>'
+        . '<li class="nav-item"><a href="' . ve_h(ve_url('/contact')) . '" class="nav-link"><i class="fad fa-life-ring"></i>Contact</a></li>';
 }
 
 function ve_admin_unimplemented_section_html(string $section): string
