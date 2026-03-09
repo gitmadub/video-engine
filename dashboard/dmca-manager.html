@@ -1,1 +1,359 @@
-<!doctype html><html lang="en"><head> <meta charset="utf-8"> <title>DMCA Manager - DoodStream</title> <link rel="preconnect" href="//cdnjs.cloudflare.com"> <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"> <link rel="stylesheet" href="/assets/css/bootstrap.min.css"> <meta name="description" content="DoodStream - Free file upload service"> <meta name="keywords" content="file upload,share files,free upload"> <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script> <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/css/iziToast.min.css"> <link rel="stylesheet" type="text/css" href="/assets/css/panel.min__q_e2207d238712.css" /> </head><body><div class="modal fade" id="notifications" tabindex="-1" role="dialog" aria-labelledby="notificationsLabel" aria-hidden="true"> <div class="modal-dialog" role="document"> <div class="modal-content"> </div> </div></div><nav class="navbar navbar-expand-lg main-menu"> <div class="container-fluid"> <a href="/" class="navbar-brand"> <img src="/assets/img/logo-s.png" height="30" alt="" class="d-inline-block align-top"> </a> <ul class="notifications-mobile d-block d-sm-none m-0 p-0 ml-auto"> <li class="nav-item dropdown notifications"> <a href="#" id="notifications" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle"> <i class="fad fa-bell"></i> </a> <div aria-labelledby="notifications" class="dropdown-menu dropdown-menu-right notifications-box"> <div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div> <ul class="notifications-list m-0 p-0"></ul> </div> </li> </ul> <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation"> <i class="fad fa-bars"></i> </button> <ul class="navbar-nav px-3 ml-auto d-none d-sm-flex"><!-- <div onclick="window.open('/earn-money', '_blank');" style="cursor:pointer;border-radius:7px;padding:10px;background:linear-gradient(312deg, rgb(234 109 2) 0%, rgba(249,150,1,1) 100%);color:white;font-weight:600;font-size:14px;text-shadow: 2px 1px 2px #e96e03;"> Double Rates until 00:00 UTC, 08 January 2024 </div> --> <li class="nav-item dropdown notifications"> <a href="#" id="notifications" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle"> <i class="fad fa-bell"></i> </a> <div aria-labelledby="notifications" class="dropdown-menu dropdown-menu-right notifications-box"> <div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div> <ul class="notifications-list m-0 p-0"></ul> </div> </li> <li class="nav-item dropdown"> <a href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle"> <i class="fad fa-user-circle"></i> videoengine <span class="far fa-chevron-down arrow"></span> </a> <div aria-labelledby="navbarDropdown" class="dropdown-menu dropdown-menu-right"> <a href="/dmca-manager" class="dropdown-item"><i class="fad fa-folder-times"></i>DMCA Manager</a> <a href="/api-docs" class="dropdown-item"><i class="fad fa-brackets-curly"></i>API</a> <a href="/referrals" class="dropdown-item"><i class="fad fa-solar-system"></i>Refferal</a> <a href="/settings" class="dropdown-item"><i class="fad fa-cog"></i>Settings</a> <div class="dropdown-divider"></div> <a href="/logout" class="dropdown-item logout"><i class="fad fa-power-off text-danger"></i>Logout</a> </div> </li> </ul> </div></nav><nav class="sidebar collapse" id="menu"> <button class="navbar-toggler d-block d-sm-none" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation"> <i class="fad fa-times"></i> </button> <div class="container-fluid"> <ul class="nav justify-content-center"> <li class="nav-item"> <a href="/dashboard" class="nav-link"><i class="fad fa-shapes"></i></i>Dashboard</a> </li> <li class="nav-item"> <a href="/remote-upload" class="nav-link"><i class="fad fa-globe"></i>Remote Upload</a> </li> <li class="nav-item"> <a href="/videos" class="nav-link"><i class="fad fa-camera-movie"></i>Videos</a> </li> <li class="nav-item"> <a href="/reports" class="nav-link"><i class="fad fa-chart-line"></i>Reports</a> </li> <li class="nav-item"> <a href="/premium-plans" class="nav-link"><i class="fad fa-gem"></i>Premium</a> </li> <li class="nav-item d-block d-sm-none"><a href="/dmca-manager" class="nav-link"><i class="fad fa-folder-times"></i>DMCA Manager</a></li> <li class="nav-item d-block d-sm-none"><a href="/api-docs" class="nav-link"><i class="fad fa-brackets-curly"></i>API</a></li> <li class="nav-item d-block d-sm-none"><a href="/referrals" class="nav-link"><i class="fad fa-solar-system"></i>Refferal</a></li> <li class="nav-item d-block d-sm-none"><a href="/settings" class="nav-link"><i class="fad fa-cog"></i>Settings</a></li> <li class="nav-item d-block d-sm-none"><a href="/logout" class="nav-link logout"><i class="fad fa-power-off text-danger"></i>Logout</a></li> </ul> </div></nav><div class="container-fluid pt-3 pt-sm-5 mt-sm-5"> <script type="text/javascript"> $(document).ready(function () { if(0 < 100){ $(".load-more").hide(); } $(document).on('click', '.load-more', function () { $(".load-more").html('Loading...'); var rowCount = $('#xfiles tr').length; rowCount = rowCount-1; $(".totalof").html(rowCount+rowCount); $.ajax({ type: 'GET', url: '/api/dmca?loadmore=1', data: 'start=' + rowCount, success: function (data) { if( data.indexOf('NOK') !== -1){ $(".load-more").hide(); }else{ $('#xfiles').append(data); $(".load-more").html('Load More'); } } }); }); }); </script> <style type="text/css">a {color: rgb(255, 153, 0);}</style><h2 class="title mb-3">DMCA Manager </h2> <div class="the_box file_manager mt-2 mb-2"> <div class="text-center"> <i data-feather="smile"></i> <p>No DMCA Complaints</p> </div> </div> <div class="row"> <div class="col-sm-10"> </div> </div> <!-- export links --> <div class="modal fade dmca-modal" id="modal-export" tabindex="-1" role="dialog" aria-labelledby="modal-export" aria-hidden="true"> <div class="modal-dialog modal-lg" role="document" style="max-width:1100px"> <div class="modal-content"> <div class="modal-header"> <h5 class="modal-title"></h5> <button type="button" class="close" data-dismiss="modal" aria-label="Close"> <span aria-hidden="true">&times;</span> </button> </div> <div class="data modal-body" style="padding:10px;"></div> </div> </div> </div> </div><footer class="footer mt-4"> <div class="container"> <div class="row"> <div class="col-md-2"> <img class="logo" src="/assets/img/logo-s.png"> </div> <div class="col-md-10 text-right"> <ul class="menu m-0 p-0 d-flex align-items-center justify-content-center justify-content-sm-end flex-wrap"> <li> <a href="/">Home</a> </li> <li> <a href="/copyright">Copyright policy</a> </li> <li> <a href="/terms-and-conditions">Terms & conditions</a> </li> <li> <a target="_blank" href="https://help.doodstream.com/">Help center</a> </li> <li> <a href="/contact">Contact Us</a> </li> </ul> </div> </div> </div></footer> <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.15.0/umd/popper.min.js" type="text/javascript"></script> <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js" type="text/javascript"></script> <script src="/assets/js/main__q_8bb33b25bfc8.js" type="text/javascript"></script> <script src="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js" type="text/javascript"></script> <script src="/assets/js/dood_load.js" type="module" defer></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>DMCA Manager - DoodStream</title>
+    <link rel="preconnect" href="//cdnjs.cloudflare.com">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="stylesheet" href="/assets/css/bootstrap.min.css">
+    <meta name="description" content="DoodStream - Free file upload service">
+    <meta name="keywords" content="file upload,share files,free upload">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/css/iziToast.min.css">
+    <link rel="stylesheet" type="text/css" href="/assets/css/panel.min__q_e2207d238712.css">
+    <style>
+        .dmca-meta {
+            color: #8f9397;
+            font-size: 12px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .dmca-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .dmca-summary-card {
+            background: #1c1c1c;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 18px;
+        }
+        .dmca-summary-card strong {
+            display: block;
+            color: #fff;
+            font-size: 28px;
+            margin-top: 8px;
+        }
+        .dmca-banner {
+            background: linear-gradient(135deg, rgba(255, 153, 0, 0.12), rgba(255, 153, 0, 0.03));
+            border: 1px solid rgba(255, 153, 0, 0.18);
+            border-radius: 8px;
+            padding: 18px 20px;
+            margin-bottom: 24px;
+        }
+        .dmca-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .dmca-filters .btn {
+            min-width: 92px;
+        }
+        .dmca-error {
+            display: none;
+        }
+        .dmca-error.is-visible {
+            display: block;
+        }
+        .dmca-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        .dmca-item {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 16px 0;
+        }
+        .dmca-item:last-child {
+            border-bottom: 0;
+        }
+        .dmca-item-title {
+            color: #fff;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .dmca-item-copy,
+        .dmca-policy-copy,
+        .dmca-empty-copy,
+        .dmca-item-meta {
+            color: #8f9397;
+        }
+        .dmca-status-pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .dmca-status-pill.tone-warning {
+            background: rgba(255, 170, 0, 0.14);
+            color: #ffb347;
+        }
+        .dmca-status-pill.tone-danger {
+            background: rgba(255, 92, 92, 0.14);
+            color: #ff8f8f;
+        }
+        .dmca-status-pill.tone-info {
+            background: rgba(71, 147, 255, 0.14);
+            color: #84b6ff;
+        }
+        .dmca-status-pill.tone-success {
+            background: rgba(66, 185, 131, 0.14);
+            color: #7ae0ad;
+        }
+        .dmca-status-pill.tone-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: #d1d5db;
+        }
+        .dmca-empty-state {
+            text-align: center;
+            padding: 48px 20px;
+        }
+        .dmca-empty-state i {
+            font-size: 42px;
+            color: #42b983;
+            margin-bottom: 14px;
+        }
+        .dmca-policy-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-top: 24px;
+        }
+        .dmca-policy-box {
+            background: #191919;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 18px;
+        }
+        .dmca-timeline {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .dmca-timeline li {
+            position: relative;
+            padding-left: 18px;
+            margin-bottom: 16px;
+        }
+        .dmca-timeline li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 6px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff9900;
+        }
+        .dmca-modal-copy {
+            color: #8f9397;
+        }
+        .dmca-modal-value {
+            color: #fff;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="modal fade" id="notifications" tabindex="-1" role="dialog" aria-labelledby="notificationsLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content"></div>
+        </div>
+    </div>
+
+    <nav class="navbar navbar-expand-lg main-menu">
+        <div class="container-fluid">
+            <a href="/" class="navbar-brand">
+                <img src="/assets/img/logo-s.png" height="30" alt="" class="d-inline-block align-top">
+            </a>
+            <ul class="notifications-mobile d-block d-sm-none m-0 p-0 ml-auto">
+                <li class="nav-item dropdown notifications">
+                    <a href="#" id="notificationsMobile" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+                        <i class="fad fa-bell"></i>
+                    </a>
+                    <div aria-labelledby="notificationsMobile" class="dropdown-menu dropdown-menu-right notifications-box">
+                        <div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div>
+                        <ul class="notifications-list m-0 p-0"></ul>
+                    </div>
+                </li>
+            </ul>
+            <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation">
+                <i class="fad fa-bars"></i>
+            </button>
+            <ul class="navbar-nav px-3 ml-auto d-none d-sm-flex">
+                <li class="nav-item dropdown notifications">
+                    <a href="#" id="notificationsDesktop" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+                        <i class="fad fa-bell"></i>
+                    </a>
+                    <div aria-labelledby="notificationsDesktop" class="dropdown-menu dropdown-menu-right notifications-box">
+                        <div class="title d-flex flex-wrap align-items-center justify-content-between"><span>Notifications</span></div>
+                        <ul class="notifications-list m-0 p-0"></ul>
+                    </div>
+                </li>
+                <li class="nav-item dropdown">
+                    <a href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
+                        <i class="fad fa-user-circle"></i> videoengine <span class="far fa-chevron-down arrow"></span>
+                    </a>
+                    <div aria-labelledby="navbarDropdown" class="dropdown-menu dropdown-menu-right">
+                        <a href="/dmca-manager" class="dropdown-item"><i class="fad fa-folder-times"></i>DMCA Manager</a>
+                        <a href="/api-docs" class="dropdown-item"><i class="fad fa-brackets-curly"></i>API</a>
+                        <a href="/referrals" class="dropdown-item"><i class="fad fa-solar-system"></i>Refferal</a>
+                        <a href="/settings" class="dropdown-item"><i class="fad fa-cog"></i>Settings</a>
+                        <div class="dropdown-divider"></div>
+                        <a href="/logout" class="dropdown-item logout"><i class="fad fa-power-off text-danger"></i>Logout</a>
+                    </div>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <nav class="sidebar collapse" id="menu">
+        <button class="navbar-toggler d-block d-sm-none" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation">
+            <i class="fad fa-times"></i>
+        </button>
+        <div class="container-fluid">
+            <ul class="nav justify-content-center">
+                <li class="nav-item"><a href="/dashboard" class="nav-link"><i class="fad fa-shapes"></i>Dashboard</a></li>
+                <li class="nav-item"><a href="/remote-upload" class="nav-link"><i class="fad fa-globe"></i>Remote Upload</a></li>
+                <li class="nav-item"><a href="/videos" class="nav-link"><i class="fad fa-camera-movie"></i>Videos</a></li>
+                <li class="nav-item"><a href="/reports" class="nav-link"><i class="fad fa-chart-line"></i>Reports</a></li>
+                <li class="nav-item"><a href="/premium-plans" class="nav-link"><i class="fad fa-gem"></i>Premium</a></li>
+                <li class="nav-item d-block d-sm-none"><a href="/dmca-manager" class="nav-link"><i class="fad fa-folder-times"></i>DMCA Manager</a></li>
+                <li class="nav-item d-block d-sm-none"><a href="/api-docs" class="nav-link"><i class="fad fa-brackets-curly"></i>API</a></li>
+                <li class="nav-item d-block d-sm-none"><a href="/referrals" class="nav-link"><i class="fad fa-solar-system"></i>Refferal</a></li>
+                <li class="nav-item d-block d-sm-none"><a href="/settings" class="nav-link"><i class="fad fa-cog"></i>Settings</a></li>
+                <li class="nav-item d-block d-sm-none"><a href="/logout" class="nav-link logout"><i class="fad fa-power-off text-danger"></i>Logout</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container-fluid pt-3 pt-sm-5 mt-sm-5">
+        <div class="the_box mb-5" data-dmca-manager data-endpoint="/api/dmca">
+            <div class="d-flex align-items-center justify-content-between flex-wrap mb-3">
+                <div>
+                    <h2 class="title mb-1">DMCA Manager</h2>
+                    <div class="dmca-meta">Case tracking, repeat-infringer visibility, and counter-notice handling</div>
+                </div>
+                <div class="dmca-meta" data-dmca-updated>Waiting for live data...</div>
+            </div>
+
+            <div class="alert alert-danger dmca-error mb-4" data-dmca-error role="alert"></div>
+
+            <div class="dmca-banner">
+                <div class="row align-items-center">
+                    <div class="col-lg-8">
+                        <h4 class="mb-2">What this manager does</h4>
+                        <p class="dmca-policy-copy mb-0">Every effective complaint is tracked here with its file, current enforcement state, timeline, and the standard counter-notice restoration window. Even when there are no active complaints, the dashboard keeps the policy visible so the screen does not collapse into a blank placeholder.</p>
+                    </div>
+                    <div class="col-lg-4 mt-3 mt-lg-0">
+                        <div class="dmca-meta mb-2">Compliance inbox</div>
+                        <div class="dmca-modal-value" data-dmca-email>dmca@doodstream.com</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dmca-summary-grid">
+                <div class="dmca-summary-card">
+                    <span class="dmca-meta">Open cases</span>
+                    <strong data-dmca-open>0</strong>
+                </div>
+                <div class="dmca-summary-card">
+                    <span class="dmca-meta">Content disabled</span>
+                    <strong data-dmca-disabled>0</strong>
+                </div>
+                <div class="dmca-summary-card">
+                    <span class="dmca-meta">Counter notices pending</span>
+                    <strong data-dmca-counter>0</strong>
+                </div>
+                <div class="dmca-summary-card">
+                    <span class="dmca-meta">Effective strikes / 6 months</span>
+                    <strong data-dmca-strikes>0</strong>
+                </div>
+            </div>
+
+            <form class="dmca-filters align-items-center" data-dmca-filters>
+                <div class="btn-group" role="group" aria-label="DMCA filters">
+                    <button type="button" class="btn btn-primary" data-filter-status="all">All</button>
+                    <button type="button" class="btn btn-white" data-filter-status="open">Open</button>
+                    <button type="button" class="btn btn-white" data-filter-status="resolved">Resolved</button>
+                </div>
+                <div class="ml-auto w-100 w-md-auto">
+                    <input type="search" class="form-control" placeholder="Search by case code, claimant, or file title" data-dmca-query>
+                </div>
+            </form>
+
+            <div data-dmca-list-shell>
+                <div class="dmca-empty-state d-none" data-dmca-empty>
+                    <i class="fad fa-shield-check"></i>
+                    <h4 class="mb-2">No active DMCA complaints</h4>
+                    <p class="dmca-empty-copy mb-0">Your account currently has no open copyright cases. If a valid notice arrives, it will appear here with the affected file, timeline, strike count, and counter-notice action.</p>
+                </div>
+                <ul class="dmca-list" data-dmca-list></ul>
+                <div class="text-center mt-4 d-none" data-dmca-load-more-wrap>
+                    <button type="button" class="btn btn-white" data-dmca-load-more>Load more</button>
+                </div>
+            </div>
+
+            <div class="dmca-policy-grid">
+                <div class="dmca-policy-box">
+                    <div class="dmca-meta mb-2">Repeat infringer policy</div>
+                    <div class="dmca-modal-value" data-dmca-threshold>3 effective complaints in 6 months</div>
+                </div>
+                <div class="dmca-policy-box">
+                    <div class="dmca-meta mb-2">Counter-notice window</div>
+                    <div class="dmca-modal-value" data-dmca-counter-window>10 to 14 business days</div>
+                </div>
+                <div class="dmca-policy-box">
+                    <div class="dmca-meta mb-2">Default action</div>
+                    <div class="dmca-modal-value">Disable public access, preserve the timeline, allow a formal response</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="dmca-case-modal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" data-dmca-modal-title>DMCA case</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body" data-dmca-modal-body></div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer mt-4">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-2">
+                    <img class="logo" src="/assets/img/logo-s.png" alt="Logo">
+                </div>
+                <div class="col-md-10 text-right">
+                    <ul class="menu m-0 p-0 d-flex align-items-center justify-content-center justify-content-sm-end flex-wrap">
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/copyright">Copyright policy</a></li>
+                        <li><a href="/terms-and-conditions">Terms &amp; conditions</a></li>
+                        <li><a target="_blank" href="https://help.doodstream.com/">Help center</a></li>
+                        <li><a href="/contact">Contact Us</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.15.0/umd/popper.min.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js" type="text/javascript"></script>
+    <script src="/assets/js/main__q_8bb33b25bfc8.js" type="text/javascript"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js" type="text/javascript"></script>
+    <script src="/assets/js/dashboard_dmca.js" type="text/javascript"></script>
+    <script src="/assets/js/dood_load.js" type="module" defer></script>
+</body>
+</html>

@@ -258,10 +258,7 @@ function ve_render_file(string $relativePath, int $status = 200): void
 
 function ve_not_found(): void
 {
-    ve_html(
-        '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not Found</title></head><body style="font-family:sans-serif;background:#111;color:#fff;padding:40px"><h1>404</h1><p>Route not found.</p></body></html>',
-        404
-    );
+    ve_render_file('pages/404.html', 404);
 }
 
 require __DIR__ . '/backend.php';
@@ -270,6 +267,7 @@ require __DIR__ . '/modules/reports.php';
 require __DIR__ . '/modules/public_api.php';
 require __DIR__ . '/referrals.php';
 require __DIR__ . '/video.php';
+require __DIR__ . '/modules/dmca.php';
 require __DIR__ . '/remote_upload.php';
 require __DIR__ . '/routes/api.php';
 require __DIR__ . '/routes/legacy.php';
@@ -1234,11 +1232,12 @@ function ve_dispatch(): void
     }
 
     if (str_starts_with($path, '/dashboard/')) {
-        ve_require_auth();
         $slug = trim(substr($path, strlen('/dashboard/')), '/');
         $slug = preg_replace('/\.html$/', '', $slug ?? '');
 
         if (is_string($slug) && array_key_exists($slug, VE_DASHBOARD_PAGES)) {
+            ve_require_auth();
+
             if ($slug === 'settings') {
                 ve_render_settings_page();
             }

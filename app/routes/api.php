@@ -287,14 +287,23 @@ function ve_dispatch_api_routes(string $path): bool
             ve_method_not_allowed(['GET']);
         }
 
-        if (isset($_GET['loadmore'])) {
-            ve_html('NOK');
+        ve_handle_dmca_index_api();
+    }
+
+    if (preg_match('#^/api/dmca/([A-Z0-9-]+)$#', $path, $matches) === 1) {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
         }
 
-        ve_json([
-            'status' => 'ok',
-            'items' => [],
-        ]);
+        ve_handle_dmca_detail_api($matches[1]);
+    }
+
+    if (preg_match('#^/api/dmca/([A-Z0-9-]+)/counter-notice$#', $path, $matches) === 1) {
+        if (!ve_is_method('POST')) {
+            ve_method_not_allowed(['POST']);
+        }
+
+        ve_handle_dmca_counter_notice_api($matches[1]);
     }
 
     if ($path === '/api/domains') {

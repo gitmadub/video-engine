@@ -93,6 +93,71 @@ CREATE TABLE IF NOT EXISTS notifications (
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS dmca_notices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_code TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL,
+    video_id INTEGER DEFAULT NULL,
+    source_type TEXT NOT NULL DEFAULT 'email',
+    status TEXT NOT NULL DEFAULT 'pending_review',
+    complainant_name TEXT NOT NULL,
+    complainant_company TEXT NOT NULL DEFAULT '',
+    complainant_email TEXT NOT NULL DEFAULT '',
+    complainant_phone TEXT NOT NULL DEFAULT '',
+    complainant_address TEXT NOT NULL DEFAULT '',
+    complainant_country TEXT NOT NULL DEFAULT '',
+    claimed_work TEXT NOT NULL,
+    work_reference_url TEXT NOT NULL DEFAULT '',
+    reported_url TEXT NOT NULL,
+    evidence_urls_json TEXT NOT NULL DEFAULT '[]',
+    notes TEXT NOT NULL DEFAULT '',
+    signature_name TEXT NOT NULL DEFAULT '',
+    effective_at TEXT DEFAULT NULL,
+    content_disabled_at TEXT DEFAULT NULL,
+    counter_notice_submitted_at TEXT DEFAULT NULL,
+    restoration_earliest_at TEXT DEFAULT NULL,
+    restoration_latest_at TEXT DEFAULT NULL,
+    resolved_at TEXT DEFAULT NULL,
+    video_is_public_before_action INTEGER DEFAULT NULL,
+    video_status_message_before_action TEXT NOT NULL DEFAULT '',
+    received_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS dmca_notice_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    notice_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (notice_id) REFERENCES dmca_notices (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS dmca_counter_notices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    notice_id INTEGER NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'submitted',
+    full_name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    address_line TEXT NOT NULL,
+    city TEXT NOT NULL,
+    country TEXT NOT NULL,
+    postal_code TEXT NOT NULL DEFAULT '',
+    removed_material_location TEXT NOT NULL,
+    mistake_statement TEXT NOT NULL,
+    jurisdiction_statement TEXT NOT NULL,
+    signature_name TEXT NOT NULL,
+    submitted_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (notice_id) REFERENCES dmca_notices (id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS custom_domains (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -223,6 +288,9 @@ CREATE TABLE IF NOT EXISTS videos (
     processed_size_bytes INTEGER NOT NULL DEFAULT 0,
     compression_ratio REAL DEFAULT NULL,
     processing_error TEXT NOT NULL DEFAULT '',
+    dmca_hold_count INTEGER NOT NULL DEFAULT 0,
+    dmca_original_is_public INTEGER DEFAULT NULL,
+    dmca_original_status_message TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     queued_at TEXT NOT NULL,
@@ -271,6 +339,11 @@ CREATE INDEX IF NOT EXISTS idx_remote_uploads_status_created ON remote_uploads(s
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code);
 CREATE INDEX IF NOT EXISTS idx_users_referred_by_created ON users(referred_by_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dmca_notices_user_received ON dmca_notices(user_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dmca_notices_user_status_received ON dmca_notices(user_id, status, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dmca_notices_video_status ON dmca_notices(video_id, status, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dmca_notices_effective_at ON dmca_notices(user_id, effective_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dmca_notice_events_notice_created ON dmca_notice_events(notice_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_created ON api_request_logs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_kind_created ON api_request_logs(user_id, request_kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_account_balance_ledger_user_created ON account_balance_ledger(user_id, created_at DESC);

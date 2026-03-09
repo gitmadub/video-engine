@@ -403,6 +403,77 @@ function ve_run_database_migrations(PDO $pdo): void
     );
 
     $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS dmca_notices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_code TEXT NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL,
+            video_id INTEGER DEFAULT NULL,
+            source_type TEXT NOT NULL DEFAULT "email",
+            status TEXT NOT NULL DEFAULT "pending_review",
+            complainant_name TEXT NOT NULL,
+            complainant_company TEXT NOT NULL DEFAULT "",
+            complainant_email TEXT NOT NULL DEFAULT "",
+            complainant_phone TEXT NOT NULL DEFAULT "",
+            complainant_address TEXT NOT NULL DEFAULT "",
+            complainant_country TEXT NOT NULL DEFAULT "",
+            claimed_work TEXT NOT NULL,
+            work_reference_url TEXT NOT NULL DEFAULT "",
+            reported_url TEXT NOT NULL,
+            evidence_urls_json TEXT NOT NULL DEFAULT "[]",
+            notes TEXT NOT NULL DEFAULT "",
+            signature_name TEXT NOT NULL DEFAULT "",
+            effective_at TEXT DEFAULT NULL,
+            content_disabled_at TEXT DEFAULT NULL,
+            counter_notice_submitted_at TEXT DEFAULT NULL,
+            restoration_earliest_at TEXT DEFAULT NULL,
+            restoration_latest_at TEXT DEFAULT NULL,
+            resolved_at TEXT DEFAULT NULL,
+            video_is_public_before_action INTEGER DEFAULT NULL,
+            video_status_message_before_action TEXT NOT NULL DEFAULT "",
+            received_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+            FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE SET NULL
+        )'
+    );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS dmca_notice_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            notice_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL DEFAULT "",
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (notice_id) REFERENCES dmca_notices (id) ON DELETE CASCADE
+        )'
+    );
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS dmca_counter_notices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            notice_id INTEGER NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT "submitted",
+            full_name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            address_line TEXT NOT NULL,
+            city TEXT NOT NULL,
+            country TEXT NOT NULL,
+            postal_code TEXT NOT NULL DEFAULT "",
+            removed_material_location TEXT NOT NULL,
+            mistake_statement TEXT NOT NULL,
+            jurisdiction_statement TEXT NOT NULL,
+            signature_name TEXT NOT NULL,
+            submitted_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (notice_id) REFERENCES dmca_notices (id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )'
+    );
+
+    $pdo->exec(
         'CREATE TABLE IF NOT EXISTS premium_orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             order_code TEXT NOT NULL UNIQUE,
@@ -553,6 +624,9 @@ function ve_run_database_migrations(PDO $pdo): void
 
     ve_add_column_if_missing($pdo, 'videos', 'folder_id', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'videos', 'is_public', 'INTEGER NOT NULL DEFAULT 1');
+    ve_add_column_if_missing($pdo, 'videos', 'dmca_hold_count', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'videos', 'dmca_original_is_public', 'INTEGER DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'videos', 'dmca_original_status_message', 'TEXT NOT NULL DEFAULT ""');
 
     ve_add_column_if_missing($pdo, 'remote_uploads', 'normalized_url', 'TEXT NOT NULL DEFAULT ""');
     ve_add_column_if_missing($pdo, 'remote_uploads', 'resolved_url', 'TEXT NOT NULL DEFAULT ""');
@@ -575,6 +649,24 @@ function ve_run_database_migrations(PDO $pdo): void
     ve_add_column_if_missing($pdo, 'remote_uploads', 'started_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'remote_uploads', 'completed_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'remote_uploads', 'deleted_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'complainant_company', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'complainant_email', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'complainant_phone', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'complainant_address', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'complainant_country', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'work_reference_url', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'evidence_urls_json', 'TEXT NOT NULL DEFAULT "[]"');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'notes', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'signature_name', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'effective_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'content_disabled_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'counter_notice_submitted_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'restoration_earliest_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'restoration_latest_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'resolved_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'video_is_public_before_action', 'INTEGER DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'video_status_message_before_action', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'dmca_notices', 'updated_at', 'TEXT NOT NULL DEFAULT ""');
     ve_add_column_if_missing($pdo, 'user_stats_daily', 'referral_earned_micro_usd', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'user_stats_daily', 'premium_bandwidth_bytes', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'video_stats_daily', 'premium_bandwidth_bytes', 'INTEGER NOT NULL DEFAULT 0');
@@ -652,6 +744,11 @@ function ve_run_database_migrations(PDO $pdo): void
 
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_api_key_hash ON users(api_key_hash)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_app_settings_updated_at ON app_settings(updated_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_dmca_notices_user_received ON dmca_notices(user_id, received_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_dmca_notices_user_status_received ON dmca_notices(user_id, status, received_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_dmca_notices_video_status ON dmca_notices(video_id, status, received_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_dmca_notices_effective_at ON dmca_notices(user_id, effective_at DESC)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_dmca_notice_events_notice_created ON dmca_notice_events(notice_id, created_at ASC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_created ON api_request_logs(user_id, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_request_logs_user_kind_created ON api_request_logs(user_id, request_kind, created_at DESC)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_account_balance_ledger_user_created ON account_balance_ledger(user_id, created_at DESC)');
