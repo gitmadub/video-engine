@@ -3237,10 +3237,305 @@ function ve_video_playback_cookie_name(string $publicId): string
     return 've_play_' . preg_replace('/[^A-Za-z0-9_]/', '_', $publicId);
 }
 
+function ve_video_playback_request_token_hash(string $value): string
+{
+    return ve_video_playback_signature('request-token:' . $value);
+}
+
+function ve_video_pulse_interval_seconds(int $minimumWatchSeconds): int
+{
+    $minimumWatchSeconds = max(5, $minimumWatchSeconds);
+
+    return max(5, min(10, (int) floor($minimumWatchSeconds / 3)));
+}
+
+function ve_video_required_pulse_count(int $minimumWatchSeconds): int
+{
+    $interval = ve_video_pulse_interval_seconds($minimumWatchSeconds);
+    $required = (int) floor(max(1, $minimumWatchSeconds - 1) / max(1, $interval));
+
+    return max(1, min(6, $required));
+}
+
+function ve_video_playback_request_path(): string
+{
+    $path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+
+    if (!is_string($path) || $path === '') {
+        return '/';
+    }
+
+    return $path;
+}
+
+function ve_video_build_playback_request_proof(
+    string $clientProofKey,
+    string $kind,
+    string $method,
+    string $path,
+    int $sequence,
+    string $clientToken,
+    string $serverToken,
+    string $playbackToken,
+    int $watchedSeconds
+): string {
+    $canonical = implode("\n", [
+        strtolower($kind),
+        strtoupper($method),
+        $path,
+        (string) max(0, $sequence),
+        $clientToken,
+        $serverToken,
+        $playbackToken,
+        (string) max(0, $watchedSeconds),
+    ]);
+
+    return bin2hex(hash_hmac('sha256', $canonical, $clientProofKey, true));
+}
+
+/**
+ * @return array{client_token:string,server_token:string,sequence:int}
+ */
+function ve_video_issue_playback_request_state(int $sequence = 0): array
+{
+    return [
+        'client_token' => ve_random_token(24),
+        'server_token' => ve_random_token(24),
+        'sequence' => max(0, $sequence),
+    ];
+}
+
+/**
+ * @return array{client_token:string,server_token:string,sequence:int}
+ */
+function ve_video_rotate_playback_request_state(array $session): array
+{
+    $sessionId = (int) ($session['id'] ?? 0);
+
+    if ($sessionId <= 0) {
+        throw new RuntimeException('Playback session is incomplete.');
+    }
+
+    $nextState = ve_video_issue_playback_request_state(((int) ($session['pulse_sequence'] ?? 0)) + 1);
+    $stmt = ve_db()->prepare(
+        'UPDATE video_playback_sessions
+         SET previous_pulse_client_token_hash = :previous_pulse_client_token_hash,
+             previous_pulse_server_token_hash = :previous_pulse_server_token_hash,
+             pulse_client_token_hash = :pulse_client_token_hash,
+             pulse_server_token_hash = :pulse_server_token_hash,
+             pulse_sequence = :pulse_sequence,
+             last_seen_at = :last_seen_at,
+             expires_at = :expires_at
+         WHERE id = :id'
+    );
+    $stmt->execute([
+        ':previous_pulse_client_token_hash' => (string) ($session['pulse_client_token_hash'] ?? ''),
+        ':previous_pulse_server_token_hash' => (string) ($session['pulse_server_token_hash'] ?? ''),
+        ':pulse_client_token_hash' => ve_video_playback_request_token_hash($nextState['client_token']),
+        ':pulse_server_token_hash' => ve_video_playback_request_token_hash($nextState['server_token']),
+        ':pulse_sequence' => $nextState['sequence'],
+        ':last_seen_at' => ve_now(),
+        ':expires_at' => gmdate('Y-m-d H:i:s', ve_timestamp() + (int) ve_video_config()['session_ttl']),
+        ':id' => $sessionId,
+    ]);
+
+    return $nextState;
+}
+
+/**
+ * @return array{client_token:string,server_token:string,sequence:int,pulse_interval_seconds:int,required_pulse_count:int}
+ */
+function ve_video_rotation_payload(array $video, array $session): array
+{
+    $policy = ve_video_payable_view_policy();
+    $nextState = ve_video_rotate_playback_request_state($session);
+
+    return [
+        'client_token' => $nextState['client_token'],
+        'server_token' => $nextState['server_token'],
+        'sequence' => $nextState['sequence'],
+        'pulse_interval_seconds' => ve_video_pulse_interval_seconds((int) ($policy['minimum_watch_seconds'] ?? 30)),
+        'required_pulse_count' => ve_video_required_pulse_count((int) ($policy['minimum_watch_seconds'] ?? 30)),
+    ];
+}
+
+/**
+ * @return array{client_token:string,server_token:string,sequence:int}
+ */
+function ve_video_validate_playback_request_state(array $session, string $kind, int $watchedSeconds, string $playbackToken): array
+{
+    $clientToken = trim((string) ($_SERVER['HTTP_X_PLAYBACK_CLIENT_TOKEN'] ?? ''));
+    $serverToken = trim((string) ($_SERVER['HTTP_X_PLAYBACK_SERVER_TOKEN'] ?? ''));
+    $proof = trim((string) ($_SERVER['HTTP_X_PLAYBACK_PROOF'] ?? ''));
+    $sequenceHeader = trim((string) ($_SERVER['HTTP_X_PLAYBACK_SEQUENCE'] ?? ''));
+
+    if ($clientToken === '' || $serverToken === '' || $proof === '' || $sequenceHeader === '' || !preg_match('/^\d+$/', $sequenceHeader)) {
+        throw new RuntimeException('Playback proof headers are missing.');
+    }
+
+    $sequence = (int) $sequenceHeader;
+    $clientTokenHash = ve_video_playback_request_token_hash($clientToken);
+    $serverTokenHash = ve_video_playback_request_token_hash($serverToken);
+    $currentSequence = max(0, (int) ($session['pulse_sequence'] ?? 0));
+    $currentMatches = $sequence === $currentSequence
+        && hash_equals((string) ($session['pulse_client_token_hash'] ?? ''), $clientTokenHash)
+        && hash_equals((string) ($session['pulse_server_token_hash'] ?? ''), $serverTokenHash);
+    $previousMatches = $sequence === max(0, $currentSequence - 1)
+        && hash_equals((string) ($session['previous_pulse_client_token_hash'] ?? ''), $clientTokenHash)
+        && hash_equals((string) ($session['previous_pulse_server_token_hash'] ?? ''), $serverTokenHash);
+
+    if (!$currentMatches && !$previousMatches) {
+        throw new RuntimeException('Playback request tokens are invalid or stale.');
+    }
+
+    $expectedProof = ve_video_build_playback_request_proof(
+        (string) ($session['client_proof_key'] ?? ''),
+        $kind,
+        (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'),
+        ve_video_playback_request_path(),
+        $sequence,
+        $clientToken,
+        $serverToken,
+        $playbackToken,
+        $watchedSeconds
+    );
+
+    if (!hash_equals($expectedProof, strtolower($proof))) {
+        throw new RuntimeException('Playback request proof is invalid.');
+    }
+
+    return [
+        'client_token' => $clientToken,
+        'server_token' => $serverToken,
+        'sequence' => $sequence,
+    ];
+}
+
+/**
+ * @return array{status:string,message:string,watched_seconds:int,accepted_watched_seconds:int,required_seconds:int,remaining_seconds:int,pulse_count:int,required_pulse_count:int,pulse_interval_seconds:int,ready_for_qualification:bool}
+ */
+function ve_video_record_playback_pulse(array $video, array $session, int $watchedSeconds): array
+{
+    $policy = ve_video_payable_view_policy();
+    $minimumWatchSeconds = max(1, (int) ($policy['minimum_watch_seconds'] ?? 30));
+    $pulseIntervalSeconds = ve_video_pulse_interval_seconds($minimumWatchSeconds);
+    $requiredPulseCount = ve_video_required_pulse_count($minimumWatchSeconds);
+    $sessionId = (int) ($session['id'] ?? 0);
+    $watchedSeconds = max(0, $watchedSeconds);
+
+    if ($sessionId <= 0) {
+        return [
+            'status' => 'fail',
+            'message' => 'The playback pulse session is incomplete.',
+            'watched_seconds' => $watchedSeconds,
+            'accepted_watched_seconds' => 0,
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => $minimumWatchSeconds,
+            'pulse_count' => 0,
+            'required_pulse_count' => $requiredPulseCount,
+            'pulse_interval_seconds' => $pulseIntervalSeconds,
+            'ready_for_qualification' => false,
+        ];
+    }
+
+    $playbackStartedAt = trim((string) ($session['playback_started_at'] ?? ''));
+    $playbackStartedTimestamp = $playbackStartedAt !== '' ? strtotime($playbackStartedAt) : false;
+
+    if ($playbackStartedTimestamp === false || $playbackStartedTimestamp <= 0) {
+        return [
+            'status' => 'pending',
+            'message' => 'Playback has not started yet.',
+            'watched_seconds' => $watchedSeconds,
+            'accepted_watched_seconds' => max(0, (int) ($session['last_pulse_watched_seconds'] ?? 0)),
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => $minimumWatchSeconds,
+            'pulse_count' => max(0, (int) ($session['pulse_count'] ?? 0)),
+            'required_pulse_count' => $requiredPulseCount,
+            'pulse_interval_seconds' => $pulseIntervalSeconds,
+            'ready_for_qualification' => false,
+        ];
+    }
+
+    $elapsedPlaybackSeconds = max(0, ve_timestamp() - $playbackStartedTimestamp);
+    $currentBandwidthBytes = max(0, (int) ($session['bandwidth_bytes_served'] ?? 0));
+    $lastPulseBandwidthBytes = max(0, (int) ($session['last_pulse_bandwidth_bytes'] ?? 0));
+    $lastPulseWatchedSeconds = max(0, (int) ($session['last_pulse_watched_seconds'] ?? 0));
+    $acceptedWatchedSeconds = min(max($watchedSeconds, $lastPulseWatchedSeconds), $elapsedPlaybackSeconds);
+
+    if ($currentBandwidthBytes <= $lastPulseBandwidthBytes) {
+        return [
+            'status' => 'pending',
+            'message' => 'Secure playback has not advanced since the last validation pulse.',
+            'watched_seconds' => $watchedSeconds,
+            'accepted_watched_seconds' => $lastPulseWatchedSeconds,
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => max(0, $minimumWatchSeconds - max($acceptedWatchedSeconds, $elapsedPlaybackSeconds)),
+            'pulse_count' => max(0, (int) ($session['pulse_count'] ?? 0)),
+            'required_pulse_count' => $requiredPulseCount,
+            'pulse_interval_seconds' => $pulseIntervalSeconds,
+            'ready_for_qualification' => false,
+        ];
+    }
+
+    if ($acceptedWatchedSeconds <= $lastPulseWatchedSeconds && (int) ($session['pulse_count'] ?? 0) > 0) {
+        return [
+            'status' => 'pending',
+            'message' => 'Playback has not progressed far enough for another validation pulse yet.',
+            'watched_seconds' => $watchedSeconds,
+            'accepted_watched_seconds' => $lastPulseWatchedSeconds,
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => max(0, $minimumWatchSeconds - max($acceptedWatchedSeconds, $elapsedPlaybackSeconds)),
+            'pulse_count' => max(0, (int) ($session['pulse_count'] ?? 0)),
+            'required_pulse_count' => $requiredPulseCount,
+            'pulse_interval_seconds' => $pulseIntervalSeconds,
+            'ready_for_qualification' => false,
+        ];
+    }
+
+    $pulseCount = max(0, (int) ($session['pulse_count'] ?? 0)) + 1;
+    $update = ve_db()->prepare(
+        'UPDATE video_playback_sessions
+         SET pulse_count = :pulse_count,
+             last_pulse_at = :last_pulse_at,
+             last_pulse_watched_seconds = :last_pulse_watched_seconds,
+             last_pulse_bandwidth_bytes = :last_pulse_bandwidth_bytes
+         WHERE id = :id'
+    );
+    $update->execute([
+        ':pulse_count' => $pulseCount,
+        ':last_pulse_at' => ve_now(),
+        ':last_pulse_watched_seconds' => $acceptedWatchedSeconds,
+        ':last_pulse_bandwidth_bytes' => $currentBandwidthBytes,
+        ':id' => $sessionId,
+    ]);
+
+    $readyForQualification = $acceptedWatchedSeconds >= $minimumWatchSeconds
+        && $elapsedPlaybackSeconds >= $minimumWatchSeconds
+        && $currentBandwidthBytes > 0
+        && $pulseCount >= $requiredPulseCount;
+
+    return [
+        'status' => $readyForQualification ? 'ok' : 'pending',
+        'message' => $readyForQualification
+            ? 'Playback pulse accepted. The session can now attempt qualification.'
+            : 'Playback pulse accepted. Keep watching to unlock the qualified view.',
+        'watched_seconds' => $watchedSeconds,
+        'accepted_watched_seconds' => $acceptedWatchedSeconds,
+        'required_seconds' => $minimumWatchSeconds,
+        'remaining_seconds' => max(0, $minimumWatchSeconds - max($acceptedWatchedSeconds, $elapsedPlaybackSeconds)),
+        'pulse_count' => $pulseCount,
+        'required_pulse_count' => $requiredPulseCount,
+        'pulse_interval_seconds' => $pulseIntervalSeconds,
+        'ready_for_qualification' => $readyForQualification,
+    ];
+}
+
 function ve_video_issue_playback_session(array $video): array
 {
     $token = ve_random_token(24);
     $tokenHash = ve_video_playback_signature($token);
+    $requestState = ve_video_issue_playback_request_state();
+    $clientProofKey = ve_random_token(32);
     $ip = ve_client_ip();
     $userAgent = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500);
     $expiresAt = gmdate('Y-m-d H:i:s', ve_timestamp() + (int) ve_video_config()['session_ttl']);
@@ -3253,9 +3548,15 @@ function ve_video_issue_playback_session(array $video): array
     $stmt = ve_db()->prepare(
         'INSERT INTO video_playback_sessions (
             video_id, session_token_hash, owner_user_id, ip_hash, user_agent_hash,
+            client_proof_key, pulse_client_token_hash, pulse_server_token_hash,
+            previous_pulse_client_token_hash, previous_pulse_server_token_hash, pulse_sequence,
+            pulse_count, last_pulse_at, last_pulse_watched_seconds, last_pulse_bandwidth_bytes,
             expires_at, created_at, last_seen_at, uses_premium_bandwidth, revoked_at
         ) VALUES (
             :video_id, :session_token_hash, :owner_user_id, :ip_hash, :user_agent_hash,
+            :client_proof_key, :pulse_client_token_hash, :pulse_server_token_hash,
+            :previous_pulse_client_token_hash, :previous_pulse_server_token_hash, :pulse_sequence,
+            0, NULL, 0, 0,
             :expires_at, :created_at, :last_seen_at, :uses_premium_bandwidth, NULL
         )'
     );
@@ -3265,6 +3566,12 @@ function ve_video_issue_playback_session(array $video): array
         ':owner_user_id' => is_array($user) ? (int) $user['id'] : null,
         ':ip_hash' => ve_video_playback_signature($ip),
         ':user_agent_hash' => ve_video_playback_signature($userAgent),
+        ':client_proof_key' => $clientProofKey,
+        ':pulse_client_token_hash' => ve_video_playback_request_token_hash($requestState['client_token']),
+        ':pulse_server_token_hash' => ve_video_playback_request_token_hash($requestState['server_token']),
+        ':previous_pulse_client_token_hash' => '',
+        ':previous_pulse_server_token_hash' => '',
+        ':pulse_sequence' => $requestState['sequence'],
         ':expires_at' => $expiresAt,
         ':created_at' => ve_now(),
         ':last_seen_at' => ve_now(),
@@ -3286,6 +3593,10 @@ function ve_video_issue_playback_session(array $video): array
     return [
         'token' => $token,
         'manifest_url' => ve_url('/stream/' . rawurlencode((string) $video['public_id']) . '/manifest.m3u8?token=' . rawurlencode($token)),
+        'client_proof_key' => $clientProofKey,
+        'pulse_client_token' => $requestState['client_token'],
+        'pulse_server_token' => $requestState['server_token'],
+        'pulse_sequence' => $requestState['sequence'],
         'uses_premium_bandwidth' => $usesPremiumBandwidth === 1,
     ];
 }
@@ -3394,6 +3705,7 @@ function ve_video_record_qualified_view(array $video, array $session, int $watch
     $policy = ve_video_payable_view_policy();
     $minimumWatchSeconds = max(1, (int) ($policy['minimum_watch_seconds'] ?? 30));
     $maxPayableViewsPerDay = max(0, (int) ($policy['max_payable_views_per_viewer_per_day'] ?? 1));
+    $requiredPulseCount = ve_video_required_pulse_count($minimumWatchSeconds);
     $watchedSeconds = max(0, $watchedSeconds);
     $sessionId = (int) ($session['id'] ?? 0);
     $videoId = (int) ($video['id'] ?? 0);
@@ -3430,6 +3742,39 @@ function ve_video_record_qualified_view(array $video, array $session, int $watch
             'remaining_seconds' => 0,
             'max_payable_views_per_day' => $maxPayableViewsPerDay,
             'payable_rank' => (int) ($existing['payable_rank'] ?? 0),
+        ];
+    }
+
+    $pulseCount = max(0, (int) ($session['pulse_count'] ?? 0));
+    $lastPulseWatchedSeconds = max(0, (int) ($session['last_pulse_watched_seconds'] ?? 0));
+
+    if ($pulseCount < $requiredPulseCount) {
+        return [
+            'status' => 'pending',
+            'message' => 'Secure playback verification has not completed enough validation steps yet.',
+            'counted' => false,
+            'payable' => false,
+            'already_recorded' => false,
+            'watched_seconds' => $watchedSeconds,
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => max(0, $minimumWatchSeconds - max($watchedSeconds, $lastPulseWatchedSeconds)),
+            'max_payable_views_per_day' => $maxPayableViewsPerDay,
+            'payable_rank' => 0,
+        ];
+    }
+
+    if ($lastPulseWatchedSeconds < $minimumWatchSeconds) {
+        return [
+            'status' => 'pending',
+            'message' => 'Secure playback verification has not reached the payable watch threshold yet.',
+            'counted' => false,
+            'payable' => false,
+            'already_recorded' => false,
+            'watched_seconds' => $watchedSeconds,
+            'required_seconds' => $minimumWatchSeconds,
+            'remaining_seconds' => max(0, $minimumWatchSeconds - $lastPulseWatchedSeconds),
+            'max_payable_views_per_day' => $maxPayableViewsPerDay,
+            'payable_rank' => 0,
         ];
     }
 
@@ -3664,7 +4009,69 @@ function ve_video_playback_qualify_api(string $publicId): void
     }
 
     $watchedSeconds = max(0, (int) round((float) ($_POST['watched_seconds'] ?? 0)));
+    try {
+        ve_video_validate_playback_request_state($session, 'qualify', $watchedSeconds, $token);
+    } catch (RuntimeException $exception) {
+        ve_json([
+            'status' => 'fail',
+            'message' => $exception->getMessage(),
+        ], 403);
+    }
+
     $result = ve_video_record_qualified_view($video, $session, $watchedSeconds);
+    $result['rotation'] = ve_video_rotation_payload($video, $session);
+    $statusCode = match ($result['status'] ?? 'ok') {
+        'pending' => 202,
+        'fail' => 422,
+        default => 200,
+    };
+
+    ve_json($result, $statusCode);
+}
+
+function ve_video_playback_pulse_api(string $publicId): void
+{
+    if (!ve_is_method('POST')) {
+        ve_method_not_allowed(['POST']);
+    }
+
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || !ve_video_is_request_visible($video) || (string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        ve_not_found();
+    }
+
+    $token = trim((string) ($_POST['playback_token'] ?? ''));
+
+    if ($token === '') {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'The playback session token is missing.',
+        ], 422);
+    }
+
+    $session = ve_video_validate_playback_session($video, $token);
+
+    if (!is_array($session)) {
+        ve_json([
+            'status' => 'fail',
+            'message' => 'The playback session is invalid or has expired.',
+        ], 403);
+    }
+
+    $watchedSeconds = max(0, (int) round((float) ($_POST['watched_seconds'] ?? 0)));
+
+    try {
+        ve_video_validate_playback_request_state($session, 'pulse', $watchedSeconds, $token);
+    } catch (RuntimeException $exception) {
+        ve_json([
+            'status' => 'fail',
+            'message' => $exception->getMessage(),
+        ], 403);
+    }
+
+    $result = ve_video_record_playback_pulse($video, $session, $watchedSeconds);
+    $result['rotation'] = ve_video_rotation_payload($video, $session);
     $statusCode = match ($result['status'] ?? 'ok') {
         'pending' => 202,
         'fail' => 422,
@@ -4192,8 +4599,15 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
     $token = json_encode((string) $session['token'], JSON_UNESCAPED_SLASHES);
     $homeUrl = json_encode(ve_absolute_url('/'), JSON_UNESCAPED_SLASHES);
     $previewUrl = json_encode($previewVttUrl !== null ? ve_absolute_url($previewVttUrl) : '', JSON_UNESCAPED_SLASHES);
+    $pulseViewUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/pulse'), JSON_UNESCAPED_SLASHES);
     $qualifyViewUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/qualify'), JSON_UNESCAPED_SLASHES);
     $minimumWatchSeconds = max(5, $minimumWatchSeconds);
+    $pulseIntervalSeconds = ve_video_pulse_interval_seconds($minimumWatchSeconds);
+    $requiredPulseCount = ve_video_required_pulse_count($minimumWatchSeconds);
+    $pulseClientToken = json_encode((string) ($session['pulse_client_token'] ?? ''), JSON_UNESCAPED_SLASHES);
+    $pulseServerToken = json_encode((string) ($session['pulse_server_token'] ?? ''), JSON_UNESCAPED_SLASHES);
+    $pulseSequence = max(0, (int) ($session['pulse_sequence'] ?? 0));
+    $clientProofKey = json_encode((string) ($session['client_proof_key'] ?? ''), JSON_UNESCAPED_SLASHES);
 
     return <<<HTML
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
@@ -4204,8 +4618,15 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         var token = {$token};
         var previewUrl = {$previewUrl};
         var fallbackUrl = {$homeUrl};
+        var pulseViewUrl = {$pulseViewUrl};
         var qualifyViewUrl = {$qualifyViewUrl};
         var minimumWatchSeconds = {$minimumWatchSeconds};
+        var pulseIntervalSeconds = {$pulseIntervalSeconds};
+        var requiredPulseCount = {$requiredPulseCount};
+        var playbackClientToken = {$pulseClientToken};
+        var playbackServerToken = {$pulseServerToken};
+        var playbackSequence = {$pulseSequence};
+        var clientProofKey = {$clientProofKey};
         var video = document.getElementById('ve-secure-player');
         var stage = document.querySelector('.ve-stage');
         var state = document.getElementById('ve-player-state');
@@ -4214,6 +4635,11 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         var watchAuditTimer = null;
         var lastWatchSampleAt = 0;
         var lastWatchCurrentTime = 0;
+        var pulseInFlight = false;
+        var pulseAcceptedCount = 0;
+        var pulseReadyForQualification = false;
+        var nextPulseTargetSeconds = Math.min(minimumWatchSeconds, pulseIntervalSeconds);
+        var proofKeyPromise = null;
         var qualificationSent = false;
         var qualificationInFlight = false;
         var qualificationRetryTimer = null;
@@ -4294,36 +4720,118 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             }, Math.max(1, seconds) * 1000);
         }
 
-        function buildQualificationBody() {
+        function bytesToHex(bytes) {
+            return Array.prototype.map.call(bytes, function (byte) {
+                return byte.toString(16).padStart(2, '0');
+            }).join('');
+        }
+
+        function canSignPlaybackRequests() {
+            return Boolean(
+                window.crypto
+                && window.crypto.subtle
+                && typeof window.TextEncoder === 'function'
+                && clientProofKey
+                && playbackClientToken
+                && playbackServerToken
+            );
+        }
+
+        function importProofKey() {
+            if (!canSignPlaybackRequests()) {
+                return Promise.reject(new Error('Playback proof signing is not available.'));
+            }
+
+            if (proofKeyPromise === null) {
+                proofKeyPromise = window.crypto.subtle.importKey(
+                    'raw',
+                    new TextEncoder().encode(clientProofKey),
+                    { name: 'HMAC', hash: 'SHA-256' },
+                    false,
+                    ['sign']
+                );
+            }
+
+            return proofKeyPromise;
+        }
+
+        function buildPlaybackProof(kind, watchedSeconds, requestUrl) {
+            var pathname = '/';
+
+            try {
+                pathname = new URL(requestUrl, window.location.href).pathname || '/';
+            } catch (error) {
+                pathname = '/';
+            }
+
+            var canonical = [
+                String(kind || '').toLowerCase(),
+                'POST',
+                pathname,
+                String(Math.max(0, playbackSequence)),
+                playbackClientToken,
+                playbackServerToken,
+                token,
+                String(Math.max(0, Math.floor(watchedSeconds)))
+            ].join('\\n');
+
+            return importProofKey().then(function (cryptoKey) {
+                return window.crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(canonical));
+            }).then(function (signature) {
+                return bytesToHex(new Uint8Array(signature));
+            });
+        }
+
+        function buildPlaybackBody() {
             var params = new URLSearchParams();
             params.set('playback_token', token);
             params.set('watched_seconds', String(Math.max(0, Math.floor(watchedSeconds))));
             return params.toString();
         }
 
-        function submitQualifiedView() {
-            if (
-                qualificationSent
-                || qualificationInFlight
-                || qualificationRetryTimer !== null
-                || watchedSeconds < minimumWatchSeconds
-                || !qualifyViewUrl
-            ) {
+        function applyRotationPayload(rotation) {
+            if (!rotation || typeof rotation !== 'object') {
                 return;
             }
 
-            qualificationInFlight = true;
+            if (typeof rotation.client_token === 'string' && rotation.client_token !== '') {
+                playbackClientToken = rotation.client_token;
+            }
 
-            fetch(qualifyViewUrl, {
-                method: 'POST',
-                credentials: 'same-origin',
-                keepalive: true,
-                headers: {
-                    Accept: 'application/json',
-                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                    'X-Playback-Session': token
-                },
-                body: buildQualificationBody()
+            if (typeof rotation.server_token === 'string' && rotation.server_token !== '') {
+                playbackServerToken = rotation.server_token;
+            }
+
+            if (Number.isFinite(Number(rotation.sequence))) {
+                playbackSequence = Number(rotation.sequence);
+            }
+
+            if (Number.isFinite(Number(rotation.pulse_interval_seconds)) && Number(rotation.pulse_interval_seconds) > 0) {
+                pulseIntervalSeconds = Number(rotation.pulse_interval_seconds);
+            }
+
+            if (Number.isFinite(Number(rotation.required_pulse_count)) && Number(rotation.required_pulse_count) > 0) {
+                requiredPulseCount = Number(rotation.required_pulse_count);
+            }
+        }
+
+        function postPlaybackRequest(url, kind) {
+            return buildPlaybackProof(kind, watchedSeconds, url).then(function (proof) {
+                return fetch(url, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    keepalive: true,
+                    headers: {
+                        Accept: 'application/json',
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Playback-Session': token,
+                        'X-Playback-Client-Token': playbackClientToken,
+                        'X-Playback-Server-Token': playbackServerToken,
+                        'X-Playback-Sequence': String(Math.max(0, playbackSequence)),
+                        'X-Playback-Proof': proof
+                    },
+                    body: buildPlaybackBody()
+                });
             }).then(function (response) {
                 return response.json().catch(function () {
                     return {};
@@ -4333,12 +4841,84 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                         payload: payload
                     };
                 });
-            }).then(function (result) {
+            });
+        }
+
+        function submitPlaybackPulse(force) {
+            if (
+                qualificationSent
+                || pulseInFlight
+                || !pulseViewUrl
+                || !canSignPlaybackRequests()
+                || watchedSeconds <= 0
+                || (!force && watchedSeconds + 0.05 < nextPulseTargetSeconds)
+            ) {
+                return Promise.resolve(false);
+            }
+
+            pulseInFlight = true;
+
+            return postPlaybackRequest(pulseViewUrl, 'pulse').then(function (result) {
+                pulseInFlight = false;
+
+                if (!result || !result.payload || typeof result.payload.status !== 'string') {
+                    return false;
+                }
+
+                applyRotationPayload(result.payload.rotation || null);
+
+                if (Number.isFinite(Number(result.payload.pulse_count))) {
+                    pulseAcceptedCount = Number(result.payload.pulse_count);
+                }
+
+                pulseReadyForQualification = Boolean(result.payload.ready_for_qualification);
+
+                if (Number.isFinite(Number(result.payload.accepted_watched_seconds))) {
+                    var acceptedSeconds = Number(result.payload.accepted_watched_seconds);
+                    nextPulseTargetSeconds = Math.min(
+                        minimumWatchSeconds,
+                        Math.max(
+                            pulseIntervalSeconds,
+                            acceptedSeconds + pulseIntervalSeconds
+                        )
+                    );
+                }
+
+                if (pulseReadyForQualification) {
+                    maybeQualifyView();
+                }
+
+                return result.payload.status === 'ok';
+            }).catch(function () {
+                pulseInFlight = false;
+                return false;
+            });
+        }
+
+        function submitQualifiedView() {
+            if (
+                qualificationSent
+                || qualificationInFlight
+                || qualificationRetryTimer !== null
+                || watchedSeconds < minimumWatchSeconds
+                || !pulseReadyForQualification
+                || !qualifyViewUrl
+                || !canSignPlaybackRequests()
+            ) {
+                return;
+            }
+
+            qualificationInFlight = true;
+
+            postPlaybackRequest(qualifyViewUrl, 'qualify').then(function (result) {
                 qualificationInFlight = false;
 
                 if (!result || !result.payload || typeof result.payload.status !== 'string') {
                     return;
                 }
+
+                applyRotationPayload(result.payload.rotation || null);
+                pulseReadyForQualification = Boolean(result.payload.ready_for_qualification || false);
 
                 if (result.payload.status === 'ok') {
                     qualificationSent = true;
@@ -4347,6 +4927,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 }
 
                 if (result.payload.status === 'pending') {
+                    pulseReadyForQualification = Boolean(result.payload.ready_for_qualification || false);
                     scheduleQualificationRetry(Number(result.payload.remaining_seconds || 1));
                 }
             }).catch(function () {
@@ -4362,6 +4943,11 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 || qualificationRetryTimer !== null
                 || watchedSeconds < minimumWatchSeconds
             ) {
+                return;
+            }
+
+            if (!pulseReadyForQualification) {
+                submitPlaybackPulse(true);
                 return;
             }
 
@@ -4387,6 +4973,9 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             if (isPlaybackTrackable() && mediaAdvanced > 0.05) {
                 watchedSeconds += elapsedSeconds;
+                if (watchedSeconds + 0.05 >= nextPulseTargetSeconds) {
+                    submitPlaybackPulse(false);
+                }
                 maybeQualifyView();
             }
 
@@ -4455,7 +5044,9 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             window.addEventListener('pagehide', function () {
                 stopWatchAudit();
-                maybeQualifyView();
+                submitPlaybackPulse(true).then(function () {
+                    maybeQualifyView();
+                });
             });
         }
 

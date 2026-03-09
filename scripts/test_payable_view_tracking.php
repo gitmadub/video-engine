@@ -132,6 +132,14 @@ $tooEarly = ve_video_record_qualified_view($video, $firstSession, 4);
 payable_view_assert(($tooEarly['status'] ?? '') === 'pending', 'Views below the minimum watch time should stay pending.');
 payable_view_assert((int) $pdo->query('SELECT COUNT(*) FROM video_view_qualifications')->fetchColumn() === 0, 'Pending views should not be persisted.');
 
+$missingPulse = ve_video_record_qualified_view($video, $firstSession, 5);
+payable_view_assert(($missingPulse['status'] ?? '') === 'pending', 'Qualified views without a validated playback pulse should stay pending.');
+
+$firstPulse = ve_video_record_playback_pulse($video, $firstSession, 5);
+payable_view_assert(($firstPulse['status'] ?? '') === 'ok', 'The first playback pulse should be accepted once playback has started.');
+payable_view_assert(($firstPulse['ready_for_qualification'] ?? false) === true, 'A 5-second threshold should be ready for qualification after one accepted pulse.');
+
+$firstSession = payable_view_load_session($pdo, $firstSessionId);
 $firstResult = ve_video_record_qualified_view($video, $firstSession, 5);
 payable_view_assert(($firstResult['status'] ?? '') === 'ok', 'A qualified playback should be processed successfully.');
 payable_view_assert(($firstResult['payable'] ?? false) === true, 'The first qualified playback should be payable.');
@@ -145,6 +153,9 @@ payable_view_assert((int) ($totalsAfterFirst['earned_micro_usd'] ?? 0) === $earn
 
 $secondSessionId = payable_view_insert_session($pdo, $videoId, null, $_SERVER['REMOTE_ADDR'], $_SERVER['HTTP_USER_AGENT']);
 $secondSession = payable_view_load_session($pdo, $secondSessionId);
+$secondPulse = ve_video_record_playback_pulse($video, $secondSession, 5);
+payable_view_assert(($secondPulse['status'] ?? '') === 'ok', 'Repeated viewers should still be able to complete playback pulse validation.');
+$secondSession = payable_view_load_session($pdo, $secondSessionId);
 $secondResult = ve_video_record_qualified_view($video, $secondSession, 5);
 payable_view_assert(($secondResult['status'] ?? '') === 'ok', 'A repeated viewer should still get a processed response.');
 payable_view_assert(($secondResult['payable'] ?? true) === false, 'The second qualified playback from the same anonymous viewer should not be payable.');
@@ -154,6 +165,9 @@ payable_view_assert((int) ($totalsAfterSecond['views'] ?? 0) === 1, 'The daily p
 
 ve_set_app_setting('video_payable_max_views_per_viewer_per_day', '2');
 $thirdSessionId = payable_view_insert_session($pdo, $videoId, null, $_SERVER['REMOTE_ADDR'], $_SERVER['HTTP_USER_AGENT']);
+$thirdSession = payable_view_load_session($pdo, $thirdSessionId);
+$thirdPulse = ve_video_record_playback_pulse($video, $thirdSession, 5);
+payable_view_assert(($thirdPulse['status'] ?? '') === 'ok', 'The raised cap should not break pulse acceptance.');
 $thirdSession = payable_view_load_session($pdo, $thirdSessionId);
 $thirdResult = ve_video_record_qualified_view($video, $thirdSession, 5);
 payable_view_assert(($thirdResult['payable'] ?? false) === true, 'Raising the daily payable cap should allow another payable view.');
@@ -165,6 +179,9 @@ payable_view_assert((int) ($totalsAfterThird['views'] ?? 0) === 2, 'The second p
 $_SERVER['REMOTE_ADDR'] = '203.0.113.55';
 $_SERVER['HTTP_USER_AGENT'] = 'qa-owner-self-view';
 $ownerSessionId = payable_view_insert_session($pdo, $videoId, $ownerId, $_SERVER['REMOTE_ADDR'], $_SERVER['HTTP_USER_AGENT']);
+$ownerSession = payable_view_load_session($pdo, $ownerSessionId);
+$ownerPulse = ve_video_record_playback_pulse($video, $ownerSession, 5);
+payable_view_assert(($ownerPulse['status'] ?? '') === 'ok', 'Owner sessions still need to pass playback pulse validation.');
 $ownerSession = payable_view_load_session($pdo, $ownerSessionId);
 $ownerResult = ve_video_record_qualified_view($video, $ownerSession, 5);
 payable_view_assert(($ownerResult['payable'] ?? true) === false, 'Owner playback sessions should not be payable.');

@@ -578,6 +578,16 @@ function ve_run_database_migrations(PDO $pdo): void
     ve_add_column_if_missing($pdo, 'user_stats_daily', 'referral_earned_micro_usd', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'user_stats_daily', 'premium_bandwidth_bytes', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'video_stats_daily', 'premium_bandwidth_bytes', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'client_proof_key', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'pulse_client_token_hash', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'pulse_server_token_hash', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'previous_pulse_client_token_hash', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'previous_pulse_server_token_hash', 'TEXT NOT NULL DEFAULT ""');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'pulse_sequence', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'pulse_count', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'last_pulse_at', 'TEXT DEFAULT NULL');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'last_pulse_watched_seconds', 'INTEGER NOT NULL DEFAULT 0');
+    ve_add_column_if_missing($pdo, 'video_playback_sessions', 'last_pulse_bandwidth_bytes', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'playback_started_at', 'TEXT DEFAULT NULL');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'bandwidth_bytes_served', 'INTEGER NOT NULL DEFAULT 0');
     ve_add_column_if_missing($pdo, 'video_playback_sessions', 'uses_premium_bandwidth', 'INTEGER NOT NULL DEFAULT 0');

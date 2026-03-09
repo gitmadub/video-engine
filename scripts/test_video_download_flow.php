@@ -123,6 +123,10 @@ try {
         'VIDEO_DOWNLOAD_BROWSER_MIN_WATCH_SECONDS' => '5',
     ];
 
+    if (($debugPlayback = getenv('VIDEO_DOWNLOAD_BROWSER_DEBUG')) !== false && $debugPlayback !== '') {
+        $browserEnv['VIDEO_DOWNLOAD_BROWSER_DEBUG'] = (string) $debugPlayback;
+    }
+
     foreach ($browserEnv as $key => $value) {
         video_download_assert($value !== '', 'Missing browser QA environment value for ' . $key . '.');
     }

@@ -199,6 +199,10 @@ async function elementDocumentBox(page, selector) {
   const waitPremium = optionalNumber('VIDEO_DOWNLOAD_BROWSER_WAIT_PREMIUM', 0);
   const minWatchSeconds = optionalNumber('VIDEO_DOWNLOAD_BROWSER_MIN_WATCH_SECONDS', 30);
   const skipPremium = process.env.VIDEO_DOWNLOAD_BROWSER_SKIP_PREMIUM === '1';
+  const debugPlayback = process.env.VIDEO_DOWNLOAD_BROWSER_DEBUG === '1';
+  if (debugPlayback) {
+    console.log('[qa-debug] playback diagnostics enabled');
+  }
   const browserPath = firstExistingPath([
     process.env.VIDEO_DOWNLOAD_BROWSER_EXECUTABLE || '',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -216,11 +220,45 @@ async function elementDocumentBox(page, selector) {
     executablePath: browserPath,
   });
 
+  const debugPage = (page, label) => {
+    if (!debugPlayback) {
+      return;
+    }
+
+    page.on('console', (message) => {
+      console.log(`[${label}] console ${message.type()}: ${message.text()}`);
+    });
+    page.on('pageerror', (error) => {
+      console.log(`[${label}] pageerror: ${error.message}`);
+    });
+    page.on('request', (request) => {
+      if (request.url().includes('/stream/') || request.url().includes('/playback/')) {
+        console.log(`[${label}] request ${request.method()} ${request.url()}`);
+      }
+    });
+    page.on('response', async (response) => {
+      if (!response.url().includes('/stream/') && !response.url().includes('/playback/')) {
+        return;
+      }
+
+      let body = '';
+
+      try {
+        body = await response.text();
+      } catch (error) {
+        body = '';
+      }
+
+      console.log(`[${label}] response ${response.status()} ${response.url()} ${body.slice(0, 300)}`);
+    });
+  };
+
   try {
     const anonymousContext = await browser.newContext({
       baseURL,
     });
     const freePage = await anonymousContext.newPage();
+    debugPage(freePage, 'watch');
     await freePage.goto(watchUrl, { waitUntil: 'networkidle' });
 
     await freePage.waitForSelector('#ve-download-button');
@@ -342,6 +380,7 @@ async function elementDocumentBox(page, selector) {
 
     const noSessionContext = await browser.newContext({ baseURL });
     const noSessionPage = await noSessionContext.newPage();
+    debugPage(noSessionPage, 'no-session');
     await noSessionPage.goto(watchUrl, { waitUntil: 'networkidle' });
     const noSessionCsrf = await extractInlineStringVariable(noSessionPage, 'downloadCsrfToken');
     const noSessionReplay = await fetchHtmlStatus(noSessionPage, freeResolveBody.download_action, {
@@ -370,6 +409,7 @@ async function elementDocumentBox(page, selector) {
     }
 
     const embedPage = await anonymousContext.newPage();
+    debugPage(embedPage, 'embed');
     await embedPage.goto(embedUrl, { waitUntil: 'networkidle' });
     await embedPage.waitForSelector('#ve-secure-player', { timeout: 15000 });
 
@@ -381,6 +421,30 @@ async function elementDocumentBox(page, selector) {
       const state = document.getElementById('ve-player-state');
       return Boolean(state && !state.classList.contains('is-visible'));
     }, null, { timeout: 15000 });
+
+    const rawPlaybackToken = await extractInlineStringVariable(embedPage, 'token');
+
+    if (!rawPlaybackToken) {
+      throw new Error('The secure embed page should expose the playback token only to the running player bootstrap.');
+    }
+
+    const forgedQualification = await fetchJsonStatus(embedPage, appPath(`/api/videos/${publicId}/playback/qualify`, pathPrefix), {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'X-Playback-Session': rawPlaybackToken,
+      },
+      body: new URLSearchParams({
+        playback_token: rawPlaybackToken,
+        watched_seconds: String(minWatchSeconds),
+      }).toString(),
+    });
+
+    if (forgedQualification.status !== 403) {
+      throw new Error(`Directly forging the qualify POST from the embed token should be rejected. Received: ${JSON.stringify(forgedQualification)}`);
+    }
 
     const firstQualifiedViewPromise = embedPage.waitForResponse((response) => {
       return response.url().includes(`/api/videos/${publicId}/playback/qualify`)
@@ -421,6 +485,7 @@ async function elementDocumentBox(page, selector) {
 
     const repeatContext = await browser.newContext({ baseURL });
     const repeatEmbedPage = await repeatContext.newPage();
+    debugPage(repeatEmbedPage, 'repeat');
     await repeatEmbedPage.goto(embedUrl, { waitUntil: 'networkidle' });
     await repeatEmbedPage.waitForSelector('#ve-secure-player', { timeout: 15000 });
     await repeatEmbedPage.waitForFunction(() => {
@@ -472,6 +537,7 @@ async function elementDocumentBox(page, selector) {
       await loginWithApi(premiumContext, baseURL, pathPrefix, username, password);
 
       const premiumPage = await premiumContext.newPage();
+      debugPage(premiumPage, 'premium');
       await premiumPage.goto(watchUrl, { waitUntil: 'networkidle' });
 
       if ((await premiumPage.locator('.own-file').count()) === 0) {
