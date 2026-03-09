@@ -769,6 +769,33 @@ try {
     assert_true(($premiumPlayerSave['player']['player_colour'] ?? null) === '00aa11', 'Premium player colour saves should persist the chosen colour.');
     echo "player settings ok\n";
 
+    $adsBlockedResponse = $client->request('POST', '/account/advertising', [
+        'form' => [
+            'token' => $csrf,
+            'vast_url' => 'https://ads.example.com/vast.xml',
+            'pop_type' => '2',
+            'pop_url' => 'https://ads.example.com/popup.js',
+            'pop_cap' => '45',
+        ],
+    ]);
+    assert_json_content_type($adsBlockedResponse, 'Blocked advert settings saves should still return JSON.');
+    assert_true($adsBlockedResponse['status'] === 403, 'Own adverts should require purchased premium bandwidth before saving.');
+    $adsBlocked = json_response($adsBlockedResponse);
+    assert_true(($adsBlocked['status'] ?? null) === 'fail', 'Saving advert settings without premium bandwidth should fail cleanly.');
+
+    $bandwidthCheckoutResponse = $client->request('POST', '/api/premium/checkout/balance', [
+        'form' => [
+            'token' => $csrf,
+            'purchase_type' => 'bandwidth',
+            'package_id' => '10tb',
+            'payment_method' => 'balance',
+        ],
+    ]);
+    assert_json_content_type($bandwidthCheckoutResponse, 'Premium bandwidth balance purchases should return JSON.');
+    $bandwidthCheckout = json_response($bandwidthCheckoutResponse);
+    assert_true(($bandwidthCheckout['status'] ?? null) === 'ok', 'Premium bandwidth balance purchases should succeed.');
+    assert_true((int) ($bandwidthCheckout['summary']['purchased_bw'] ?? 0) > 0, 'Completed premium bandwidth purchases should increase the purchased premium bandwidth total.');
+
     $adsSaveResponse = $client->request('POST', '/account/advertising', [
         'form' => [
             'token' => $csrf,
@@ -780,7 +807,7 @@ try {
     ]);
     assert_json_content_type($adsSaveResponse, 'Saving advert settings should return JSON.');
     $adsSave = json_response($adsSaveResponse);
-    assert_true(($adsSave['status'] ?? null) === 'ok', 'Saving advert settings should return success JSON.');
+    assert_true(($adsSave['status'] ?? null) === 'ok', 'Saving advert settings should return success JSON after premium bandwidth is purchased.');
     echo "ad settings ok\n";
 
     $passwordSaveResponse = $client->request('POST', '/account/password', [
