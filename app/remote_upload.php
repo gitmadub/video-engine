@@ -1776,8 +1776,13 @@ function ve_remote_resolve_source(array $job): array
 {
     $url = trim((string) ($job['source_url'] ?? ''));
     $hosts = ve_remote_hosts();
+    $directHost = ve_remote_find_host_resolver($hosts, 'direct');
 
     foreach ($hosts as $host) {
+        if (strtolower(trim((string) ($host['key'] ?? ''))) === 'direct') {
+            continue;
+        }
+
         $match = $host['match'] ?? null;
         $resolve = $host['resolve'] ?? null;
 
@@ -1873,6 +1878,32 @@ function ve_remote_resolve_source(array $job): array
 
             $resolved['host_key'] = (string) ($host['key'] ?? 'unknown');
             $resolved['normalized_url'] = trim((string) ($resolved['normalized_url'] ?? $detectedUrl));
+            $resolved['download_url'] = trim((string) $resolved['download_url']);
+            $resolved['filename'] = trim((string) ($resolved['filename'] ?? ''));
+            $resolved['referer'] = trim((string) ($resolved['referer'] ?? ''));
+            $resolved['headers'] = is_array($resolved['headers'] ?? null) ? $resolved['headers'] : [];
+
+            if ($resolved['download_url'] === '') {
+                throw new RuntimeException('The resolved download URL is empty.');
+            }
+
+            return $resolved;
+        }
+    }
+
+    if (is_array($directHost)) {
+        $match = $directHost['match'] ?? null;
+        $resolve = $directHost['resolve'] ?? null;
+
+        if (is_callable($match) && is_callable($resolve) && $match($url) === true) {
+            $resolved = $resolve($url, $job);
+
+            if (!is_array($resolved) || !isset($resolved['download_url'])) {
+                throw new RuntimeException('The remote host resolver did not return a download URL.');
+            }
+
+            $resolved['host_key'] = (string) ($directHost['key'] ?? 'unknown');
+            $resolved['normalized_url'] = trim((string) ($resolved['normalized_url'] ?? $url));
             $resolved['download_url'] = trim((string) $resolved['download_url']);
             $resolved['filename'] = trim((string) ($resolved['filename'] ?? ''));
             $resolved['referer'] = trim((string) ($resolved['referer'] ?? ''));
