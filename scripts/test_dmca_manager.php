@@ -259,6 +259,7 @@ $responseVideoId = dmca_insert_ready_video($pdo, $userId, 'dmcaresponse01', 'DMC
 $deleteVideoId = dmca_insert_ready_video($pdo, $userId, 'dmcadelete01', 'DMCA Delete Fixture');
 $overdueVideoId = dmca_insert_ready_video($pdo, $userId, 'dmcaoverdue01', 'DMCA Overdue Fixture');
 $restoredVideoId = dmca_insert_ready_video($pdo, $userId, 'dmcarestored01', 'DMCA Restored Fixture');
+$reviewVideoId = dmca_insert_ready_video($pdo, $userId, 'dmcareview01', 'DMCA Review Fixture');
 
 $responseNotice = ve_dmca_create_notice([
     'user_id' => $userId,
@@ -325,8 +326,18 @@ dmca_update_notice_fields((int) ($restoredNotice['id'] ?? 0), [
     'resolved_at' => gmdate('Y-m-d H:i:s', strtotime('-18 days')),
 ]);
 
+$reviewNotice = ve_dmca_create_notice([
+    'user_id' => $userId,
+    'video_id' => $reviewVideoId,
+    'case_code' => 'DMCA-QA-REVIEW',
+    'complainant_name' => 'Review Rights',
+    'claimed_work' => 'Review Fixture Clip',
+    'reported_url' => ve_absolute_url('/d/dmcareview01'),
+]);
+
 dmca_assert((int) ((ve_video_get_by_id($responseVideoId) ?: [])['is_public'] ?? 1) === 0, 'Response fixture should be hidden after DMCA.');
 dmca_assert((int) ((ve_video_get_by_id($deleteVideoId) ?: [])['is_public'] ?? 1) === 0, 'Delete fixture should be hidden after DMCA.');
+dmca_assert((int) ((ve_video_get_by_id($reviewVideoId) ?: [])['is_public'] ?? 0) === 1, 'Review-stage fixture should stay public while the report is reviewed.');
 
 try {
     $envPrefix = '';
@@ -364,13 +375,19 @@ try {
 
     $snapshot = dmca_json($client->request('GET', '/api/dmca'));
     dmca_assert(($snapshot['status'] ?? null) === 'ok', 'DMCA snapshot should return status ok.');
-    dmca_assert((int) (($snapshot['summary']['open_cases'] ?? 0)) === 2, 'Snapshot should count open uploader cases after auto-delete processing.');
-    dmca_assert((int) (($snapshot['summary']['pending_delete'] ?? 0)) === 2, 'Snapshot should count active 24-hour cases.');
+    dmca_assert((int) (($snapshot['summary']['open_cases'] ?? 0)) === 3, 'Snapshot should count review, removal-window, and response-eligible cases after auto-delete processing.');
+    dmca_assert((int) (($snapshot['summary']['pending_delete'] ?? 0)) === 3, 'Snapshot should count active 24-hour review windows.');
     dmca_assert((int) (($snapshot['summary']['responses_received'] ?? 0)) === 0, 'Snapshot should start with zero uploader responses.');
     dmca_assert((int) (($snapshot['summary']['deleted_videos'] ?? 0)) === 1, 'Snapshot should count the overdue auto-deleted case.');
 
     $resolvedOnly = dmca_json($client->request('GET', '/api/dmca?status=resolved'));
     dmca_assert(count((array) ($resolvedOnly['items'] ?? [])) === 2, 'Resolved filter should include restored and auto-deleted cases.');
+
+    $reviewDetail = dmca_json($client->request('GET', '/api/dmca/DMCA-QA-REVIEW'));
+    dmca_assert(($reviewDetail['notice']['status'] ?? null) === VE_DMCA_NOTICE_STATUS_PENDING_REVIEW, 'Review case should remain pending review.');
+    dmca_assert((bool) ($reviewDetail['notice']['can_submit_response'] ?? false) === true, 'Review case should allow optional uploader information.');
+    dmca_assert((bool) ($reviewDetail['notice']['can_delete_video'] ?? false) === true, 'Review case should allow direct video deletion.');
+    dmca_assert((bool) ($reviewDetail['notice']['content_disabled'] ?? true) === false, 'Review case should keep the reported file online.');
 
     $detail = dmca_json($client->request('GET', '/api/dmca/DMCA-QA-RESP'));
     dmca_assert(($detail['notice']['status'] ?? null) === VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED, 'Response case should still wait for uploader action.');
@@ -389,6 +406,7 @@ try {
     dmca_assert(($responsePayload['status'] ?? null) === 'ok', 'Optional uploader response should succeed with blank fields.');
     dmca_assert(($responsePayload['notice']['status'] ?? null) === VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED, 'Uploader response should move the case into response_submitted.');
     dmca_assert((bool) ($responsePayload['notice']['can_submit_response'] ?? true) === false, 'Uploader response should disable resubmission.');
+    dmca_assert((int) ((ve_video_get_by_id($responseVideoId) ?: [])['is_public'] ?? 0) === 1, 'Uploader response should leave the file online while the case is reviewed.');
 
     $postResponse = dmca_json($client->request('GET', '/api/dmca/DMCA-QA-RESP'));
     dmca_assert(($postResponse['notice']['uploader_response']['notes'] ?? null) === '', 'Blank uploader notes should be stored as empty text.');
@@ -404,8 +422,8 @@ try {
     dmca_assert(ve_video_get_by_id($deleteVideoId) === null, 'Deleted DMCA video should be removed from the database.');
 
     $finalSnapshot = dmca_json($client->request('GET', '/api/dmca'));
-    dmca_assert((int) (($finalSnapshot['summary']['open_cases'] ?? 0)) === 1, 'Final summary should keep only the response-submitted case open.');
-    dmca_assert((int) (($finalSnapshot['summary']['pending_delete'] ?? 0)) === 0, 'Final summary should have no remaining 24-hour delete timers.');
+    dmca_assert((int) (($finalSnapshot['summary']['open_cases'] ?? 0)) === 2, 'Final summary should keep the response-submitted and review cases open.');
+    dmca_assert((int) (($finalSnapshot['summary']['pending_delete'] ?? 0)) === 1, 'Final summary should keep only the review case on an auto-delete timer.');
     dmca_assert((int) (($finalSnapshot['summary']['responses_received'] ?? 0)) === 1, 'Final summary should count the uploader response.');
     dmca_assert((int) (($finalSnapshot['summary']['deleted_videos'] ?? 0)) === 2, 'Final summary should count uploader-deleted and auto-deleted videos.');
 

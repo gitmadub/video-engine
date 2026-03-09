@@ -33,14 +33,14 @@ function ve_dmca_notice_status_catalog(): array
 
     $catalog = [
         VE_DMCA_NOTICE_STATUS_PENDING_REVIEW => [
-            'label' => 'Reviewing complaint',
+            'label' => 'Under review',
             'tone' => 'secondary',
             'open' => true,
             'keeps_disabled' => false,
             'deletes_video' => false,
         ],
         VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED => [
-            'label' => 'Waiting 24 hours',
+            'label' => 'Removal window open',
             'tone' => 'warning',
             'open' => true,
             'keeps_disabled' => true,
@@ -50,14 +50,14 @@ function ve_dmca_notice_status_catalog(): array
             'label' => 'Info sent',
             'tone' => 'info',
             'open' => true,
-            'keeps_disabled' => true,
+            'keeps_disabled' => false,
             'deletes_video' => false,
         ],
         VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED => [
             'label' => 'Info sent',
             'tone' => 'info',
             'open' => true,
-            'keeps_disabled' => true,
+            'keeps_disabled' => false,
             'deletes_video' => false,
         ],
         VE_DMCA_NOTICE_STATUS_RESTORED => [
@@ -372,11 +372,13 @@ function ve_dmca_notice_payload(array $notice): array
     $meta = ve_dmca_notice_status_meta($status);
     $video = ve_dmca_notice_video_payload($notice);
     $autoDeleteAt = trim((string) ($notice['auto_delete_at'] ?? ''));
-    $remainingSeconds = $status === VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED
-        ? ve_dmca_seconds_until($autoDeleteAt)
-        : null;
+    $remainingSeconds = $autoDeleteAt !== '' ? ve_dmca_seconds_until($autoDeleteAt) : null;
     $response = ve_dmca_decode_response($notice['uploader_response_json'] ?? '');
-    $canRespond = $status === VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED;
+    $canRespond = in_array($status, [
+        VE_DMCA_NOTICE_STATUS_PENDING_REVIEW,
+        VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
+    ], true);
+    $canDeleteVideo = ve_dmca_notice_is_open($status) && (bool) ($video['exists'] ?? false);
 
     return [
         'case_code' => (string) ($notice['case_code'] ?? ''),
@@ -386,7 +388,7 @@ function ve_dmca_notice_payload(array $notice): array
         'is_open' => (bool) ($meta['open'] ?? false),
         'content_disabled' => ve_dmca_notice_keeps_disabled($status),
         'can_submit_response' => $canRespond,
-        'can_delete_video' => $canRespond && (bool) ($video['exists'] ?? false),
+        'can_delete_video' => $canDeleteVideo,
         'received_at' => (string) ($notice['received_at'] ?? ''),
         'received_label' => ve_format_datetime_label((string) ($notice['received_at'] ?? '')),
         'updated_at' => (string) ($notice['updated_at'] ?? ''),
@@ -680,14 +682,15 @@ function ve_dmca_process_due_removals(): void
     $stmt = ve_db()->prepare(
         'SELECT *
          FROM dmca_notices
-         WHERE status = :status
+         WHERE status IN (:pending_review, :content_disabled)
            AND auto_delete_at IS NOT NULL
            AND auto_delete_at != ""
            AND auto_delete_at <= :now
          ORDER BY auto_delete_at ASC, id ASC'
     );
     $stmt->execute([
-        ':status' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
+        ':pending_review' => VE_DMCA_NOTICE_STATUS_PENDING_REVIEW,
+        ':content_disabled' => VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
         ':now' => ve_now(),
     ]);
 
@@ -750,14 +753,21 @@ function ve_dmca_create_notice(array $payload): array
     $caseCode = trim((string) ($payload['case_code'] ?? ''));
     $caseCode = $caseCode !== '' ? strtoupper($caseCode) : ve_dmca_generate_case_code();
     $requestedStatus = trim((string) ($payload['status'] ?? ''));
-    $status = $requestedStatus !== '' ? $requestedStatus : ($videoId > 0 ? VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED : VE_DMCA_NOTICE_STATUS_PENDING_REVIEW);
+    $status = $requestedStatus !== '' ? $requestedStatus : VE_DMCA_NOTICE_STATUS_PENDING_REVIEW;
 
     if (!array_key_exists($status, ve_dmca_notice_status_catalog())) {
-        $status = $videoId > 0 ? VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED : VE_DMCA_NOTICE_STATUS_PENDING_REVIEW;
+        $status = VE_DMCA_NOTICE_STATUS_PENDING_REVIEW;
     }
 
     $videoTitleSnapshot = is_array($video) ? (string) ($video['title'] ?? '') : trim((string) ($payload['video_title_snapshot'] ?? ''));
     $videoPublicSnapshot = is_array($video) ? (string) ($video['public_id'] ?? '') : trim((string) ($payload['video_public_id_snapshot'] ?? ''));
+
+    $initialAutoDeleteAt = in_array($status, [
+        VE_DMCA_NOTICE_STATUS_PENDING_REVIEW,
+        VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
+    ], true)
+        ? ve_dmca_add_hours($receivedAt, (int) ve_dmca_policy_snapshot()['response_window_hours'])
+        : null;
 
     ve_db()->prepare(
         'INSERT INTO dmca_notices (
@@ -775,7 +785,7 @@ function ve_dmca_create_notice(array $payload): array
             :signature_name, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL,
             "", :received_at, :updated_at, NULL,
-            "", NULL, NULL, :video_title_snapshot, :video_public_id_snapshot
+            "", :auto_delete_at, NULL, :video_title_snapshot, :video_public_id_snapshot
         )'
     )->execute([
         ':case_code' => $caseCode,
@@ -797,6 +807,7 @@ function ve_dmca_create_notice(array $payload): array
         ':signature_name' => trim((string) ($payload['signature_name'] ?? '')),
         ':received_at' => $receivedAt,
         ':updated_at' => $receivedAt,
+        ':auto_delete_at' => $initialAutoDeleteAt,
         ':video_title_snapshot' => $videoTitleSnapshot,
         ':video_public_id_snapshot' => $videoPublicSnapshot,
     ]);
@@ -808,13 +819,19 @@ function ve_dmca_create_notice(array $payload): array
         throw new RuntimeException('Unable to reload DMCA notice.');
     }
 
-    ve_dmca_log_event($noticeId, 'received', 'Complaint received', 'The complaint was logged and is now visible in the uploader DMCA manager.', $receivedAt);
+    ve_dmca_log_event(
+        $noticeId,
+        'received',
+        'Complaint received',
+        'The complaint was logged, the file stays online during review, and the uploader can add optional information or delete the file directly.',
+        $receivedAt
+    );
     ve_add_notification($userId, 'DMCA complaint received', 'Case ' . $caseCode . ' has been added to your DMCA manager.');
 
     if ($status !== VE_DMCA_NOTICE_STATUS_PENDING_REVIEW) {
         $transitionBody = match ($status) {
-            VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED => 'The reported file was removed from public access and will be deleted after 24 hours if you do not respond.',
-            VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED => 'The uploader sent optional information for manual review.',
+            VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED => 'After review, the reported file was removed from public access and will be deleted after 24 hours if no uploader action is taken.',
+            VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED => 'The uploader sent optional information while the case remains under review.',
             VE_DMCA_NOTICE_STATUS_UPLOADER_DELETED => 'The uploader deleted the reported file.',
             VE_DMCA_NOTICE_STATUS_AUTO_DELETED => 'The reported file was auto deleted after the response window expired.',
             VE_DMCA_NOTICE_STATUS_RESTORED => 'The reported file was restored.',
@@ -854,8 +871,11 @@ function ve_dmca_submit_uploader_response(int $userId, string $caseCode): array
         throw new RuntimeException('DMCA case not found.');
     }
 
-    if ((string) ($notice['status'] ?? '') !== VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED) {
-        throw new InvalidArgumentException('This case is no longer waiting for uploader action.');
+    if (!in_array((string) ($notice['status'] ?? ''), [
+        VE_DMCA_NOTICE_STATUS_PENDING_REVIEW,
+        VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED,
+    ], true)) {
+        throw new InvalidArgumentException('This case is no longer accepting uploader information.');
     }
 
     $fields = ve_dmca_validate_uploader_response_input();
@@ -999,7 +1019,7 @@ function ve_dmca_list_notices(int $userId, string $statusFilter = '', string $qu
 function ve_dmca_summary(int $userId): array
 {
     $stmt = ve_db()->prepare(
-        'SELECT status
+        'SELECT status, auto_delete_at
          FROM dmca_notices
          WHERE user_id = :user_id'
     );
@@ -1021,7 +1041,7 @@ function ve_dmca_summary(int $userId): array
             $openCount++;
         }
 
-        if ($status === VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED) {
+        if (ve_dmca_notice_is_open($status) && trim((string) ($item['auto_delete_at'] ?? '')) !== '') {
             $pendingDeleteCount++;
         }
 

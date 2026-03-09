@@ -56,12 +56,6 @@
             display: block;
         }
 
-        .dmca-quick-note {
-            color: #7f7f7f;
-            font-size: 0.8571428571rem;
-            line-height: 1.7;
-        }
-
         .dmca-filter-buttons .btn {
             min-width: 88px;
         }
@@ -141,6 +135,30 @@
             font-size: 2rem;
             color: #7f7f7f;
             margin-bottom: 12px;
+        }
+
+        .dmca-widget-note {
+            display: block;
+            color: #7f7f7f;
+            font-size: 0.8571428571rem;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+
+        .dmca-card {
+            background: rgba(28, 28, 28, 0.82);
+            border: 1px solid rgba(67, 70, 69, 0.95);
+            border-radius: 5px;
+            padding: 24px 26px;
+        }
+
+        .dmca-card h4 {
+            font-size: 1.0714285714rem;
+            margin-bottom: 14px;
+        }
+
+        .dmca-card p:last-child {
+            margin-bottom: 0;
         }
     </style>
 </head>
@@ -232,7 +250,7 @@
                     <div class="info">
                         <span class="money d-block" data-dmca-open>0</span>
                         <span class="d-block">Open cases</span>
-                        <a href="#dmca_cases" data-dmca-nav>Review cases <i class="fad fa-arrow-to-right"></i></a>
+                        <span class="dmca-widget-note">Cases in progress</span>
                     </div>
                     <div class="icon">
                         <i class="fad fa-folder-open"></i>
@@ -242,8 +260,8 @@
                 <div class="widget_box d-flex justify-content-between flex-wrap align-items-center">
                     <div class="info">
                         <span class="money d-block" data-dmca-pending-delete>0</span>
-                        <span class="d-block">Waiting 24 hours</span>
-                        <a href="#dmca_cases" data-dmca-nav>Pending auto delete <i class="fad fa-arrow-to-right"></i></a>
+                        <span class="d-block">24-hour windows</span>
+                        <span class="dmca-widget-note">Still on timer</span>
                     </div>
                     <div class="icon">
                         <i class="fad fa-clock"></i>
@@ -254,7 +272,7 @@
                     <div class="info">
                         <span class="money d-block" data-dmca-response>0</span>
                         <span class="d-block">Responses sent</span>
-                        <a href="#dmca_overview" data-dmca-nav>Optional uploader info <i class="fad fa-arrow-to-right"></i></a>
+                        <span class="dmca-widget-note">Manual review continues</span>
                     </div>
                     <div class="icon">
                         <i class="fad fa-comment-alt-lines"></i>
@@ -265,7 +283,7 @@
                     <div class="info">
                         <span class="money d-block" data-dmca-deleted>0</span>
                         <span class="d-block">Videos deleted</span>
-                        <a href="#dmca_policy" data-dmca-nav>Review process <i class="fad fa-arrow-to-right"></i></a>
+                        <span class="dmca-widget-note">Closed outcomes</span>
                     </div>
                     <div class="icon">
                         <i class="fad fa-trash-alt"></i>
@@ -288,13 +306,7 @@
                     <div class="menu settings_menu">
                         <ul class="p-0 m-0 mb-4">
                             <li>
-                                <a href="#dmca_overview" class="d-flex flex-wrap align-items-center active">
-                                    <i class="fad fa-info-circle"></i>
-                                    <span>Overview</span>
-                                </a>
-                            </li>
-                            <li>
-                                <a href="#dmca_cases" class="d-flex flex-wrap align-items-center">
+                                <a href="#dmca_cases" class="d-flex flex-wrap align-items-center active">
                                     <i class="fad fa-list"></i>
                                     <span>Cases</span>
                                 </a>
@@ -309,47 +321,17 @@
                     </div>
 
                     <hr>
-
-                    <div class="dmca-quick-note">
-                        <strong class="d-block mb-2 text-white">Compliance inbox</strong>
-                        <span class="d-block mb-3" data-dmca-email>dmca@doodstream.com</span>
-                        Reported files stay hidden while the uploader has up to <span data-dmca-window>24</span> hours to reply or delete them directly.
-                    </div>
                 </div>
 
-                <div class="content_box settings_data">
-                    <div class="data settings-panel active" id="dmca_overview">
+                <div class="details settings_data">
+                    <div class="data settings-panel active" id="dmca_cases">
                         <span class="settings-note" data-dmca-updated>Waiting for live data...</span>
-                        <div class="settings-panel-title">Uploader DMCA overview</div>
-                        <p class="settings-panel-subtitle">This manager is only for uploaders. Sending information is optional. If nothing is submitted within 24 hours, the reported file is deleted automatically.</p>
+                        <div class="settings-panel-title">DMCA cases</div>
+                        <p class="settings-panel-subtitle">View complaints, add optional uploader information, or delete the reported file directly.</p>
 
                         <div class="alert alert-danger dmca-inline-feedback" data-dmca-error role="alert"></div>
 
-                        <div class="row">
-                            <div class="col-md-6 mb-4">
-                                <div class="the_box h-100">
-                                    <h4 class="mb-3">What uploaders can do</h4>
-                                    <p class="mb-2">Open the case, review the complaint details, and send optional information if they want manual review.</p>
-                                    <p class="mb-2">Leave the form blank if there is nothing to add. The system still records that the uploader responded.</p>
-                                    <p class="mb-0">Delete the reported video immediately from the manager if removal is the correct outcome.</p>
-                                </div>
-                            </div>
-                            <div class="col-md-6 mb-4">
-                                <div class="the_box h-100">
-                                    <h4 class="mb-3">What happens automatically</h4>
-                                    <p class="mb-2">When a complaint is received, the video is hidden from public access and the case appears here.</p>
-                                    <p class="mb-2">If the uploader does not respond and does not delete the video, the file is removed after <span data-dmca-window-copy>24</span> hours.</p>
-                                    <p class="mb-0">Resolved cases remain visible in the history so the uploader can see what happened.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="data settings-panel" id="dmca_cases">
-                        <div class="settings-panel-title">DMCA cases</div>
-                        <p class="settings-panel-subtitle">View complaints, send optional uploader information, or delete the reported file directly.</p>
-
-                        <div class="the_box mb-4">
+                        <div class="the_box dmca-card mb-4">
                             <div class="row align-items-end">
                                 <div class="col-md-4 mb-3">
                                     <label class="d-block">Filter</label>
@@ -364,20 +346,20 @@
                                     <input type="search" class="form-control" placeholder="Case code, title, or claimed work" data-dmca-query>
                                 </div>
                                 <div class="col-md-3 mb-3 text-md-right">
-                                    <small class="text-muted d-block">Response window</small>
+                                    <small class="text-muted d-block">Auto remove</small>
                                     <strong><span data-dmca-window-inline>24</span> hours</strong>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="settings-table-wrap">
+                        <div class="settings-table-wrap dmca-card">
                             <table class="table table-hover">
                                 <thead>
                                     <tr>
                                         <th>Case</th>
                                         <th>File</th>
                                         <th>Status</th>
-                                        <th>Deadline</th>
+                                        <th>Next step</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
@@ -401,23 +383,35 @@
 
                     <div class="data settings-panel" id="dmca_policy">
                         <div class="settings-panel-title">How this works</div>
-                        <p class="settings-panel-subtitle">The uploader workflow is intentionally simple and does not require a full legal counter-notice form inside the dashboard.</p>
+                        <p class="settings-panel-subtitle">The uploader workflow stays simple and uses the same dashboard shell as the rest of the account area. These cards explain the full review flow that used to sit in the overview tab.</p>
 
                         <div class="row">
                             <div class="col-md-6 mb-4">
-                                <div class="the_box h-100">
-                                    <h4 class="mb-3">Dashboard behavior</h4>
-                                    <p class="mb-2">The case appears for the uploader after the file is hidden. Most uploaders will never add extra information, so the form is optional.</p>
-                                    <p class="mb-2">If the uploader does nothing, the file is deleted after the response window ends.</p>
-                                    <p class="mb-0">If the uploader deletes the file themselves, the case closes immediately as uploader deleted.</p>
+                                <div class="the_box dmca-card h-100">
+                                    <h4>Review flow</h4>
+                                    <p class="mb-2">A new complaint opens a case and starts a <span data-dmca-window-policy>24</span>-hour review window.</p>
+                                    <p class="mb-0">During that review window, the reported file stays online unless the uploader deletes it directly.</p>
                                 </div>
                             </div>
                             <div class="col-md-6 mb-4">
-                                <div class="the_box h-100">
-                                    <h4 class="mb-3">Stored information</h4>
-                                    <p class="mb-2">Each case keeps a snapshot of the file title, file ID, complaint timestamps, and the case timeline.</p>
-                                    <p class="mb-2">Optional uploader information can include contact email, contact phone, or free-form notes.</p>
-                                    <p class="mb-0">The dashboard shows the complaint source, reference links, and any attached evidence URLs when available.</p>
+                                <div class="the_box dmca-card h-100">
+                                    <h4>Uploader actions</h4>
+                                    <p class="mb-2">Open the case to review claimant details, evidence links, and the timeline.</p>
+                                    <p class="mb-0">Send optional contact details or notes, or delete the reported video immediately from the case view.</p>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-4">
+                                <div class="the_box dmca-card h-100">
+                                    <h4>Automatic handling</h4>
+                                    <p class="mb-2">If no information is submitted and the video is not deleted, the file is removed automatically when the review window expires.</p>
+                                    <p class="mb-0">If optional information is submitted, the case stays open for manual review and remains visible in the manager.</p>
+                                </div>
+                            </div>
+                            <div class="col-md-6 mb-4">
+                                <div class="the_box dmca-card h-100">
+                                    <h4>Dashboard history</h4>
+                                    <p class="mb-2">Open cases show every complaint still in progress, and the 24-hour card counts cases that still have an automatic removal timer running.</p>
+                                    <p class="mb-0">Resolved cases remain visible so the uploader can see whether the video was deleted automatically, deleted manually, restored, or closed for another reason.</p>
                                 </div>
                             </div>
                         </div>
@@ -464,7 +458,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js" type="text/javascript"></script>
     <script src="/assets/js/main__q_8bb33b25bfc8.js" type="text/javascript"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js" type="text/javascript"></script>
-    <script src="/assets/js/dashboard_dmca.js?v=20260310" type="text/javascript"></script>
+    <script src="/assets/js/dashboard_dmca.js?v=20260311" type="text/javascript"></script>
     <script src="/assets/js/dood_load.js" type="module" defer></script>
 </body>
 </html>

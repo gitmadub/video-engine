@@ -142,9 +142,24 @@ async function loginAndOpenDmcaPage(browser, baseURL, pathPrefix, username, pass
 
     await page.waitForFunction(() => {
       const shell = document.querySelector('.sidebar.settings-page');
-      const content = document.querySelector('.content_box.settings_data');
+      const content = document.querySelector('.settings_data');
       return Boolean(shell && content);
     });
+
+    await page.waitForFunction(() => {
+      const panel = document.querySelector('#dmca_cases');
+      return Boolean(panel && panel.classList.contains('active'));
+    });
+
+    const policyCopy = await page.locator('#dmca_policy').textContent();
+
+    if (String(policyCopy || '').includes('Compliance inbox')) {
+      throw new Error('DMCA help page should not mention a compliance inbox.');
+    }
+
+    if (!String(policyCopy || '').includes('stays online unless the uploader deletes it directly')) {
+      throw new Error(`DMCA help page should explain that files stay online during review. Received: ${policyCopy || '(empty)'}`);
+    }
 
     await page.waitForFunction(() => {
       const openCases = document.querySelector('[data-dmca-open]');

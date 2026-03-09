@@ -237,11 +237,11 @@ try {
         $_ENV[$key] = $value;
     }
 
-    $browserCommand = "powershell -NoProfile -Command \"Set-Location -LiteralPath ''"
+    $browserCommand = "powershell -NoProfile -Command \"Set-Location -LiteralPath '"
         . str_replace("'", "''", $root)
-        . "''; & ''"
+        . "'; & '"
         . str_replace("'", "''", $node)
-        . "'' ''scripts\\test_dmca_manager_browser.js''\"";
+        . "' 'scripts\\test_dmca_manager_browser.js'\"";
     passthru($browserCommand, $exitCode);
     dmca_browser_assert($exitCode === 0, 'DMCA browser smoke test failed.');
 } finally {

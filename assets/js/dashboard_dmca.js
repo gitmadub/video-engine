@@ -22,10 +22,10 @@
         pendingDelete: root.querySelector('[data-dmca-pending-delete]'),
         response: root.querySelector('[data-dmca-response]'),
         deleted: root.querySelector('[data-dmca-deleted]'),
-        email: root.querySelector('[data-dmca-email]'),
         window: root.querySelector('[data-dmca-window]'),
         windowCopy: root.querySelector('[data-dmca-window-copy]'),
         windowInline: root.querySelector('[data-dmca-window-inline]'),
+        windowPolicy: root.querySelector('[data-dmca-window-policy]'),
         list: root.querySelector('[data-dmca-list]'),
         empty: root.querySelector('[data-dmca-empty]'),
         query: root.querySelector('[data-dmca-query]'),
@@ -109,13 +109,13 @@
 
     function activatePanel(hash, shouldUpdateLocation) {
         if (!hash || hash.charAt(0) !== '#') {
-            hash = '#dmca_overview';
+            hash = '#dmca_cases';
         }
 
         var panel = root.querySelector(hash);
 
         if (!panel) {
-            hash = '#dmca_overview';
+            hash = '#dmca_cases';
             panel = root.querySelector(hash);
         }
 
@@ -140,10 +140,10 @@
         policy = policy || {};
         var hours = String(policy.response_window_hours || 24);
 
-        setText(els.email, policy.dmca_email || 'dmca@doodstream.com');
         setText(els.window, hours);
         setText(els.windowCopy, hours);
         setText(els.windowInline, hours);
+        setText(els.windowPolicy, hours);
     }
 
     function renderSummary(summary) {
@@ -188,6 +188,10 @@
 
         if (item.status === 'content_disabled') {
             return escapeHtml(item.auto_delete_remaining_label || item.auto_delete_label || '24h');
+        }
+
+        if (item.status === 'pending_review') {
+            return 'Review open - ' + escapeHtml(item.auto_delete_remaining_label || item.auto_delete_label || '24h');
         }
 
         if (item.status === 'response_submitted' || item.status === 'counter_submitted') {
@@ -323,7 +327,7 @@
             return [
                 '<div class="the_box mt-4">',
                 '<h5 class="mb-3">Optional uploader response</h5>',
-                '<p class="text-muted mb-3">These fields are optional. If you do not submit anything, the file will be deleted automatically after the response window ends.</p>',
+                '<p class="text-muted mb-3">These fields are optional. The file stays online while the case is reviewed, and it is deleted automatically only if the review window expires without uploader action.</p>',
                 '<form data-dmca-response-form data-case-code="' + escapeHtml(notice.case_code || '') + '">',
                 '<div class="form-row">',
                 '<div class="form-group col-md-6">',
@@ -377,13 +381,15 @@
         var complainantContact = [notice.complainant_email || '', notice.complainant_phone || '', notice.complainant_country || '']
             .filter(Boolean)
             .join(' | ');
-        var deadline = notice.status === 'content_disabled'
-            ? escapeHtml(notice.auto_delete_remaining_label || notice.auto_delete_label || '')
-            : deadlineLabel(notice);
+        var deadline = deadlineLabel(notice);
+        var reviewNote = notice.status === 'pending_review'
+            ? '<div class="alert alert-info mb-4">The reported file stays online while this complaint is under review. The uploader can add optional information or delete the file directly.</div>'
+            : '';
 
         state.selectedCaseCode = notice.case_code || '';
         els.modalTitle.textContent = (notice.case_code || 'DMCA case') + ' - ' + videoTitle;
         els.modalBody.innerHTML = [
+            reviewNote,
             '<div class="row">',
             '<div class="col-md-6 mb-4">',
             '<div class="the_box h-100">',
@@ -393,7 +399,7 @@
             '<dt>File</dt><dd>' + escapeHtml(videoTitle) + '</dd>',
             '<dt>Claimed work</dt><dd>' + escapeHtml(notice.claimed_work || 'Not provided') + '</dd>',
             '<dt>Received</dt><dd>' + escapeHtml(notice.received_label || '') + '</dd>',
-            '<dt>Deadline</dt><dd>' + deadline + '</dd>',
+            '<dt>Next step</dt><dd>' + deadline + '</dd>',
             '<dt>Reported URL</dt><dd>' + (notice.reported_url ? '<a href="' + escapeHtml(notice.reported_url) + '" target="_blank" rel="noopener">' + escapeHtml(notice.reported_url) + '</a>' : 'Not provided') + '</dd>',
             '<dt>Reference URL</dt><dd>' + (notice.work_reference_url ? '<a href="' + escapeHtml(notice.work_reference_url) + '" target="_blank" rel="noopener">' + escapeHtml(notice.work_reference_url) + '</a>' : 'Not provided') + '</dd>',
             '<dt>Claimant</dt><dd>' + complainant + '</dd>',
@@ -511,7 +517,7 @@
 
         if (navLink) {
             event.preventDefault();
-            activatePanel(navLink.getAttribute('href') || '#dmca_overview', true);
+            activatePanel(navLink.getAttribute('href') || '#dmca_cases', true);
             return;
         }
 
@@ -596,6 +602,6 @@
         activatePanel(window.location.hash, false);
     });
 
-    activatePanel(window.location.hash || '#dmca_overview', false);
+    activatePanel(window.location.hash || '#dmca_cases', false);
     loadCases(false);
 }());
