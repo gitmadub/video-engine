@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 function ve_dispatch_api_routes(string $path): bool
 {
+    if (ve_dispatch_public_api_routes($path)) {
+        return true;
+    }
+
     if ($path === '/api/auth/login' || $path === '/login') {
         if (!ve_is_method('POST')) {
             ve_method_not_allowed(['POST']);

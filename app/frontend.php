@@ -267,6 +267,7 @@ function ve_not_found(): void
 require __DIR__ . '/backend.php';
 require __DIR__ . '/modules/auth.php';
 require __DIR__ . '/modules/reports.php';
+require __DIR__ . '/modules/public_api.php';
 require __DIR__ . '/referrals.php';
 require __DIR__ . '/video.php';
 require __DIR__ . '/remote_upload.php';
