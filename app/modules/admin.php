@@ -2597,19 +2597,60 @@ function ve_admin_impersonation_banner_html(): string
         return '';
     }
 
-    $token = ve_h(ve_csrf_token());
-    $returnUrl = ve_h(ve_admin_url(['action' => null], false));
-
     return <<<HTML
-<div class="alert alert-warning admin-impersonation mb-4">
-    Viewing the site as <strong>{$currentUser['username']}</strong>. Backend actions still run as <strong>{$actor['username']}</strong>.
-    <form method="POST" action="{$returnUrl}" class="d-inline-block ml-3">
-        <input type="hidden" name="token" value="{$token}">
-        <input type="hidden" name="action" value="stop_impersonation">
-        <button type="submit" class="btn btn-sm btn-dark">Stop impersonation</button>
-    </form>
+<div class="admin-impersonation-note">
+    Viewing the product as <strong>{$currentUser['username']}</strong>. Backend actions still execute as <strong>{$actor['username']}</strong>.
 </div>
 HTML;
+}
+
+function ve_admin_impersonation_stop_control_html(string $className = 'btn btn-sm btn-secondary admin-stop-button', bool $wrapNavItem = false): string
+{
+    if (!ve_admin_is_impersonating()) {
+        return '';
+    }
+
+    $currentUser = ve_current_user();
+
+    if (!is_array($currentUser)) {
+        return '';
+    }
+
+    $targetUserId = (int) ($currentUser['id'] ?? 0);
+
+    if ($targetUserId <= 0) {
+        return '';
+    }
+
+    $actionUrl = ve_h(ve_admin_url([
+        'section' => 'users',
+        'resource' => (string) $targetUserId,
+        'page' => null,
+    ], false));
+    $token = ve_h(ve_csrf_token());
+    $control = '<form method="POST" action="' . $actionUrl . '" class="admin-stop-form">'
+        . '<input type="hidden" name="token" value="' . $token . '">'
+        . '<input type="hidden" name="action" value="stop_impersonation">'
+        . '<input type="hidden" name="return_to" value="' . $actionUrl . '">'
+        . '<button type="submit" class="' . ve_h($className) . '"><i class="fad fa-user-secret"></i><span>Stop impersonation</span></button>'
+        . '</form>';
+
+    return $wrapNavItem ? '<li class="nav-item admin-header-stop">' . $control . '</li>' : $control;
+}
+
+function ve_admin_backend_header_nav_html(array $actorUser, string $activeSection): string
+{
+    $items = [];
+
+    foreach (ve_admin_allowed_sections_for_user($actorUser) as $code => $section) {
+        $activeClass = $code === $activeSection ? ' active' : '';
+        $icon = ve_h((string) ($section['icon'] ?? 'fa-circle'));
+        $label = ve_h((string) ($section['label'] ?? ucfirst($code)));
+        $url = ve_h(ve_admin_url(['section' => $code, 'resource' => null, 'page' => null], false));
+        $items[] = '<li class="nav-item"><a href="' . $url . '" class="nav-link' . $activeClass . '"><i class="fad ' . $icon . '"></i><span>' . $label . '</span></a></li>';
+    }
+
+    return implode('', $items);
 }
 
 function ve_admin_user_dropdown_html(array $user): string
@@ -2642,6 +2683,11 @@ function ve_admin_dashboard_shell(
     $runtimeScript = ve_runtime_script_tag();
     $impersonationBanner = ve_admin_impersonation_banner_html();
     $flashHtml = ve_admin_flash_html();
+    $headerNavHtml = trim((string) ($currentUser['header_nav_html'] ?? ''));
+    $headerNavStrip = $headerNavHtml !== ''
+        ? '<div class="admin-header-strip d-none d-lg-block"><div class="container-fluid"><ul class="nav justify-content-center admin-header-nav">' . $headerNavHtml . '</ul></div></div>'
+        : '';
+    $headerActionHtml = (string) ($currentUser['header_action_html'] ?? '');
     $dropdown = ve_admin_user_dropdown_html([
         'dmca_url' => ve_h(ve_url('/dmca-manager')),
         'api_docs_url' => ve_h(ve_url('/api-docs')),
@@ -2652,6 +2698,50 @@ function ve_admin_dashboard_shell(
     $baseStyles = <<<CSS
     <style>
         .admin-shell { padding-bottom: 18px; }
+        .admin-header-strip {
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            background: #131313;
+        }
+        .admin-header-nav {
+            gap: 4px;
+            padding: 0;
+            margin: 0;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+        }
+        .admin-header-nav .nav-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 54px;
+            padding: 0 16px;
+            color: #a9a9a9;
+            border-bottom: 2px solid transparent;
+            white-space: nowrap;
+        }
+        .admin-header-nav .nav-link:hover,
+        .admin-header-nav .nav-link:focus {
+            color: #fff;
+        }
+        .admin-header-nav .nav-link.active {
+            color: #fff;
+            border-bottom-color: #ff9900;
+        }
+        .admin-header-stop {
+            display: inline-flex;
+            align-items: center;
+            margin-right: 8px;
+        }
+        .admin-stop-form { margin: 0; }
+        .admin-stop-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 40px;
+            padding: 0 14px;
+            white-space: nowrap;
+        }
         .admin-shell .widget_area {
             display: grid !important;
             grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -2708,13 +2798,26 @@ function ve_admin_dashboard_shell(
             width: 285px;
             margin-right: 0 !important;
             position: sticky;
-            top: 108px;
+            top: 132px;
         }
         .admin-shell .details.settings_data {
             min-width: 0;
         }
         .admin-shell .settings_data > .data {
             display: block !important;
+        }
+        .admin-shell .admin-sidebar-eyebrow {
+            display: inline-block;
+            color: #ff9900;
+            font-size: .76rem;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        .admin-shell .admin-sidebar-subtitle {
+            color: #8c8c8c;
+            margin-top: 10px;
+            margin-bottom: 0;
         }
         .admin-shell .settings-panel {
             padding: 24px 26px;
@@ -2824,7 +2927,135 @@ function ve_admin_dashboard_shell(
         .admin-shell .page-item.active .page-link { background: #ff9900; border-color: #ff9900; }
         .admin-shell .table td,
         .admin-shell .table th { vertical-align: middle; }
-        .admin-shell .admin-impersonation { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+        .admin-shell .admin-impersonation-note {
+            margin-bottom: 18px;
+            padding: 14px 18px;
+            background: rgba(255, 153, 0, 0.08);
+            border: 1px solid rgba(255, 153, 0, 0.18);
+            color: #f1d2a2;
+        }
+        .admin-shell .admin-chart-card,
+        .admin-shell .admin-profile-card {
+            background: #171717;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 22px;
+            margin-bottom: 18px;
+        }
+        .admin-shell .admin-chart-copy {
+            color: #8f8f8f;
+            margin-bottom: 18px;
+        }
+        .admin-shell .admin-chart-svg {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .admin-shell .admin-chart-grid line {
+            stroke: rgba(255, 255, 255, 0.08);
+            stroke-width: 1;
+        }
+        .admin-shell .admin-chart-labels text {
+            fill: #7d7d7d;
+            font-size: 12px;
+        }
+        .admin-shell .admin-chart-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 18px;
+        }
+        .admin-shell .admin-chart-legend-item {
+            min-width: 150px;
+        }
+        .admin-shell .admin-chart-legend-item span {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #8c8c8c;
+            font-size: .82rem;
+            margin-bottom: 4px;
+        }
+        .admin-shell .admin-chart-legend-item strong {
+            display: block;
+            color: #fff;
+            font-size: 1rem;
+        }
+        .admin-shell .admin-chart-swatch {
+            width: 10px;
+            height: 10px;
+            display: inline-block;
+            background: #ff9900;
+        }
+        .admin-shell .admin-overview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        .admin-shell .admin-overview-stat {
+            padding: 18px;
+            background: #171717;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .admin-shell .admin-overview-stat span {
+            display: block;
+            color: #8a8a8a;
+            font-size: .8rem;
+            margin-bottom: 8px;
+        }
+        .admin-shell .admin-overview-stat strong {
+            display: block;
+            color: #fff;
+            font-size: 1.5rem;
+            line-height: 1.1;
+        }
+        .admin-shell .admin-overview-stat small {
+            display: block;
+            color: #8f8f8f;
+            margin-top: 8px;
+        }
+        .admin-shell .admin-profile-head {
+            display: grid;
+            grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+        .admin-shell .admin-profile-identity h3 {
+            margin-bottom: 8px;
+        }
+        .admin-shell .admin-profile-identity p {
+            color: #8d8d8d;
+            margin-bottom: 16px;
+        }
+        .admin-shell .admin-pill-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .admin-shell .admin-pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 32px;
+            padding: 0 12px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            color: #e1e1e1;
+            font-size: .82rem;
+        }
+        .admin-shell .admin-profile-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 18px;
+        }
+        .admin-shell .admin-list-tight li {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .admin-shell .admin-list-tight li:last-child {
+            border-bottom: 0;
+        }
         .admin-shell textarea.form-control { min-height: 110px; }
         .admin-shell .form-control,
         .admin-shell .custom-file-label,
@@ -2859,6 +3090,7 @@ function ve_admin_dashboard_shell(
                 width: 100%;
             }
             .admin-shell .sidebar.settings-page { margin-bottom: 18px; }
+            .admin-shell .admin-profile-head { grid-template-columns: 1fr; }
         }
         @media (max-width: 575.98px) {
             .admin-shell .widget_area { grid-template-columns: 1fr; }
@@ -2918,6 +3150,7 @@ CSS;
             </button>
 
             <ul class="navbar-nav px-3 ml-auto d-none d-sm-flex">
+                {$headerActionHtml}
                 <li class="nav-item dropdown notifications">
                     <a href="#" id="notifications-desktop-toggle" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="nav-link dropdown-toggle">
                         <i class="fad fa-bell"></i>
@@ -2936,6 +3169,7 @@ CSS;
             </ul>
         </div>
     </nav>
+    {$headerNavStrip}
 
     <nav class="sidebar collapse" id="menu">
         <button class="navbar-toggler d-block d-sm-none" type="button" data-toggle="collapse" data-target="#menu" aria-controls="menu" aria-expanded="false" aria-label="Toggle navigation">
@@ -2997,6 +3231,8 @@ function ve_admin_dashboard_shell_context(array $currentUser): array
         'terms_url' => ve_h(ve_url('/terms-and-conditions')),
         'contact_url' => ve_h(ve_url('/contact')),
         'settings_url' => ve_h(ve_url('/settings')),
+        'header_nav_html' => '',
+        'header_action_html' => '',
         'mobile_nav_html' => '',
         'username' => (string) ($currentUser['username'] ?? 'videoengine'),
     ];
@@ -3006,6 +3242,7 @@ function ve_render_payout_request_page(): void
 {
     $user = ve_require_auth();
     $context = ve_admin_dashboard_shell_context($user);
+    $context['header_action_html'] = ve_admin_impersonation_stop_control_html('btn btn-sm btn-secondary admin-stop-button', true);
     $context['mobile_nav_html'] = '<li class="nav-item"><a href="' . ve_h(ve_url('/dashboard')) . '" class="nav-link"><i class="fad fa-shapes"></i>Dashboard</a></li>'
         . '<li class="nav-item"><a href="' . ve_h(ve_url('/videos')) . '" class="nav-link"><i class="fad fa-camera-movie"></i>Videos</a></li>'
         . '<li class="nav-item"><a href="' . ve_h(ve_url('/reports')) . '" class="nav-link"><i class="fad fa-chart-line"></i>Reports</a></li>'
@@ -3122,16 +3359,102 @@ function ve_admin_return_to_input_html(): string
     return '<input type="hidden" name="return_to" value="' . ve_h(ve_admin_url([], true)) . '">';
 }
 
+function ve_admin_backend_sidebar_intro_html(array $actorUser, string $activeSection): string
+{
+    $sectionMeta = ve_admin_backend_section_meta($activeSection);
+    $sectionLabel = ve_h((string) ((ve_admin_sections()[$activeSection]['label'] ?? 'Backend')));
+    $roleLabel = ve_h(ve_admin_role_label(ve_admin_primary_role_code_for_user_id((int) ($actorUser['id'] ?? 0))));
+    $eyebrow = ve_h((string) ($sectionMeta['eyebrow'] ?? 'Backend'));
+    $description = ve_h((string) ($sectionMeta['description'] ?? ''));
+
+    return '<div class="status-block">'
+        . '<span class="admin-sidebar-eyebrow">' . $eyebrow . '</span>'
+        . '<h4 class="m-0">' . $sectionLabel . '</h4>'
+        . '<p class="admin-sidebar-subtitle">' . $description . '</p>'
+        . '<div class="admin-actions mt-3"><a href="' . ve_h(ve_url('/dashboard')) . '" class="btn btn-secondary btn-sm">Return to dashboard</a></div>'
+        . '<div class="text-muted mt-3">' . $roleLabel . '</div>'
+        . '</div>';
+}
+
 function ve_admin_backend_sidebar_menu_html(array $actorUser, string $activeSection): string
 {
-    $items = [];
+    unset($actorUser);
 
-    foreach (ve_admin_allowed_sections_for_user($actorUser) as $code => $section) {
-        $activeClass = $code === $activeSection ? ' active' : '';
-        $icon = ve_h((string) ($section['icon'] ?? 'fa-circle'));
-        $label = ve_h((string) ($section['label'] ?? $code));
-        $url = ve_h(ve_admin_url(['section' => $code, 'page' => null], false));
-        $items[] = '<li><a href="' . $url . '" class="d-flex flex-wrap align-items-center' . $activeClass . '"><i class="fad ' . $icon . '"></i><span>' . $label . '</span></a></li>';
+    $resourceId = ve_admin_current_resource_id();
+    $items = [];
+    $selectedVideo = $activeSection === 'videos' && $resourceId > 0 ? ve_admin_video_detail($resourceId) : null;
+    $selectedRemote = $activeSection === 'remote-uploads' && $resourceId > 0 ? ve_admin_remote_upload_detail($resourceId) : null;
+    $selectedDomain = $activeSection === 'domains' && $resourceId > 0 ? ve_admin_custom_domain_detail($resourceId) : null;
+    $selectedAudit = $activeSection === 'audit' && $resourceId > 0 ? ve_admin_audit_log_detail($resourceId) : null;
+
+    $definitions = match ($activeSection) {
+        'overview' => [
+            ['label' => 'Service totals', 'icon' => 'fa-chart-network', 'url' => '#overview-service', 'active' => true],
+            ['label' => 'User trends', 'icon' => 'fa-users', 'url' => '#overview-users'],
+            ['label' => 'Usage trends', 'icon' => 'fa-waveform-path', 'url' => '#overview-usage'],
+            ['label' => 'Traffic trends', 'icon' => 'fa-signal-stream', 'url' => '#overview-traffic'],
+        ],
+        'users' => [
+            ['label' => 'Directory', 'icon' => 'fa-list', 'url' => '#users-directory', 'active' => true],
+            ['label' => 'Profile', 'icon' => 'fa-id-card', 'url' => $resourceId > 0 ? '#users-profile' : '#users-directory'],
+            ['label' => 'Charts', 'icon' => 'fa-chart-line', 'url' => $resourceId > 0 ? '#users-charts' : '#users-directory'],
+            ['label' => 'Sessions', 'icon' => 'fa-user-clock', 'url' => $resourceId > 0 ? '#users-sessions' : '#users-directory'],
+            ['label' => 'Billing', 'icon' => 'fa-wallet', 'url' => $resourceId > 0 ? '#users-billing' : '#users-directory'],
+            ['label' => 'Related records', 'icon' => 'fa-diagram-project', 'url' => $resourceId > 0 ? '#users-related' : '#users-directory'],
+        ],
+        'videos' => [
+            ['label' => 'Library', 'icon' => 'fa-photo-video', 'url' => '#videos-library', 'active' => true],
+            ['label' => 'Selected file', 'icon' => 'fa-file-video', 'url' => $resourceId > 0 ? '#videos-detail' : '#videos-library'],
+            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedVideo) ? ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($selectedVideo['user_id'] ?? 0)], false) : '#videos-library'],
+        ],
+        'remote-uploads' => [
+            ['label' => 'Queue', 'icon' => 'fa-list-check', 'url' => '#remote-uploads-queue', 'active' => true],
+            ['label' => 'Selected job', 'icon' => 'fa-cloud-arrow-down', 'url' => $resourceId > 0 ? '#remote-uploads-detail' : '#remote-uploads-queue'],
+            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedRemote) ? ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($selectedRemote['user_id'] ?? 0)], false) : '#remote-uploads-queue'],
+        ],
+        'dmca' => [
+            ['label' => 'Case queue', 'icon' => 'fa-folder-times', 'url' => '#dmca-queue', 'active' => true],
+            ['label' => 'Case detail', 'icon' => 'fa-scale-balanced', 'url' => $resourceId > 0 ? '#dmca-detail' : '#dmca-queue'],
+            ['label' => 'Event log', 'icon' => 'fa-timeline', 'url' => $resourceId > 0 ? '#dmca-events' : '#dmca-queue'],
+        ],
+        'payouts' => [
+            ['label' => 'Queue', 'icon' => 'fa-wallet', 'url' => '#payouts-queue', 'active' => true],
+            ['label' => 'Request detail', 'icon' => 'fa-file-invoice-dollar', 'url' => $resourceId > 0 ? '#payouts-detail' : '#payouts-queue'],
+            ['label' => 'Transfer record', 'icon' => 'fa-money-check-dollar', 'url' => $resourceId > 0 ? '#payouts-transfer' : '#payouts-queue'],
+        ],
+        'domains' => [
+            ['label' => 'Directory', 'icon' => 'fa-globe', 'url' => '#domains-directory', 'active' => true],
+            ['label' => 'Domain detail', 'icon' => 'fa-magnifying-glass', 'url' => $resourceId > 0 ? '#domains-detail' : '#domains-directory'],
+            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedDomain) ? ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($selectedDomain['user_id'] ?? 0)], false) : '#domains-directory'],
+        ],
+        'app' => [
+            ['label' => 'General', 'icon' => 'fa-sliders-h', 'url' => '#app-general', 'active' => true],
+            ['label' => 'Roles', 'icon' => 'fa-user-shield', 'url' => '#app-roles'],
+            ['label' => 'Permissions', 'icon' => 'fa-key-skeleton-left-right', 'url' => '#app-permissions'],
+        ],
+        'infrastructure' => [
+            ['label' => 'Nodes', 'icon' => 'fa-server', 'url' => '#infra-nodes', 'active' => true],
+            ['label' => 'Volumes', 'icon' => 'fa-hard-drive', 'url' => '#infra-volumes'],
+            ['label' => 'Upload endpoints', 'icon' => 'fa-arrow-up-from-bracket', 'url' => '#infra-endpoints'],
+            ['label' => 'Delivery domains', 'icon' => 'fa-globe-pointer', 'url' => '#infra-delivery'],
+            ['label' => 'Maintenance', 'icon' => 'fa-screwdriver-wrench', 'url' => '#infra-maintenance'],
+        ],
+        'audit' => [
+            ['label' => 'Log feed', 'icon' => 'fa-clipboard-list', 'url' => '#audit-feed', 'active' => true],
+            ['label' => 'Selected event', 'icon' => 'fa-magnifying-glass-chart', 'url' => $resourceId > 0 ? '#audit-detail' : '#audit-feed'],
+            ['label' => 'Target record', 'icon' => 'fa-arrow-up-right-from-square', 'url' => is_array($selectedAudit) ? ve_admin_audit_target_url($selectedAudit) : '#audit-feed'],
+        ],
+        default => [
+            ['label' => 'Section', 'icon' => 'fa-circle', 'url' => '#', 'active' => true],
+        ],
+    };
+
+    foreach ($definitions as $index => $definition) {
+        $url = trim((string) ($definition['url'] ?? '#'));
+        $activeClass = !empty($definition['active']) || ($index === 0 && !array_key_exists('active', $definition)) ? ' active' : '';
+        $icon = ve_h((string) ($definition['icon'] ?? 'fa-circle'));
+        $label = ve_h((string) ($definition['label'] ?? 'Link'));
+        $items[] = '<li><a href="' . ve_h($url) . '" class="d-flex flex-wrap align-items-center' . $activeClass . '"><i class="fad ' . $icon . '"></i><span>' . $label . '</span></a></li>';
     }
 
     return implode('', $items);
@@ -3600,6 +3923,467 @@ function ve_admin_metric_items_html(array $items): string
     return '<div class="admin-kv">' . $html . '</div>';
 }
 
+function ve_admin_backend_section_meta(string $section): array
+{
+    $meta = [
+        'overview' => [
+            'eyebrow' => 'Service pulse',
+            'description' => 'Service-wide totals, traffic movement, and daily platform trends.',
+        ],
+        'users' => [
+            'eyebrow' => 'Accounts',
+            'description' => 'Search accounts, review account health, and inspect complete user profiles.',
+        ],
+        'videos' => [
+            'eyebrow' => 'Library',
+            'description' => 'Moderate uploaded files, inspect ownership, and resolve storage-heavy content issues.',
+        ],
+        'remote-uploads' => [
+            'eyebrow' => 'Ingest queue',
+            'description' => 'Track remote import throughput, failures, and source reliability.',
+        ],
+        'dmca' => [
+            'eyebrow' => 'Compliance',
+            'description' => 'Manage takedown cases, evidence, and restoration workflow.',
+        ],
+        'payouts' => [
+            'eyebrow' => 'Billing',
+            'description' => 'Review payout requests, approve transfers, and inspect payout readiness.',
+        ],
+        'domains' => [
+            'eyebrow' => 'Routing',
+            'description' => 'Inspect custom domain health, ownership, and DNS readiness.',
+        ],
+        'app' => [
+            'eyebrow' => 'Configuration',
+            'description' => 'Control operational defaults, payout policy, and backend behavior.',
+        ],
+        'infrastructure' => [
+            'eyebrow' => 'Delivery plane',
+            'description' => 'Manage nodes, volumes, upload endpoints, delivery domains, and maintenance windows.',
+        ],
+        'audit' => [
+            'eyebrow' => 'Traceability',
+            'description' => 'Inspect backend actions with actor, target, and before/after payload context.',
+        ],
+    ];
+
+    return $meta[$section] ?? [
+        'eyebrow' => 'Backend',
+        'description' => 'Operational controls for the uploader service.',
+    ];
+}
+
+function ve_admin_number_label(float $value, int $decimals = 0): string
+{
+    return number_format($value, $decimals, '.', ',');
+}
+
+function ve_admin_series_total(array $points, string $key): int
+{
+    $total = 0;
+
+    foreach ($points as $point) {
+        if (!is_array($point)) {
+            continue;
+        }
+
+        $total += (int) ($point[$key] ?? 0);
+    }
+
+    return $total;
+}
+
+function ve_admin_series_peak(array $points, string $key): int
+{
+    $peak = 0;
+
+    foreach ($points as $point) {
+        if (!is_array($point)) {
+            continue;
+        }
+
+        $peak = max($peak, (int) ($point[$key] ?? 0));
+    }
+
+    return $peak;
+}
+
+function ve_admin_series_average(array $points, string $key): float
+{
+    if ($points === []) {
+        return 0.0;
+    }
+
+    return ve_admin_series_total($points, $key) / max(1, count($points));
+}
+
+function ve_admin_service_trend_snapshot(int $lookbackDays = 14): array
+{
+    $pdo = ve_db();
+    $range = ve_dashboard_normalize_date_range(null, null, $lookbackDays);
+    $points = [];
+
+    foreach (ve_dashboard_date_series($range['from'], $range['to']) as $date) {
+        $points[$date] = [
+            'date' => $date,
+            'new_users' => 0,
+            'active_users' => 0,
+            'views' => 0,
+            'bandwidth_bytes' => 0,
+            'premium_bandwidth_bytes' => 0,
+            'earned_micro_usd' => 0,
+            'uploads' => 0,
+            'uploaded_bytes' => 0,
+            'remote_jobs' => 0,
+            'remote_failed' => 0,
+            'dmca_notices' => 0,
+            'payout_requests' => 0,
+            'payout_amount_micro_usd' => 0,
+        ];
+    }
+
+    $statements = [
+        'users' => $pdo->prepare(
+            'SELECT substr(created_at, 1, 10) AS stat_date, COUNT(*) AS new_users
+             FROM users
+             WHERE deleted_at IS NULL
+               AND substr(created_at, 1, 10) BETWEEN :from_date AND :to_date
+             GROUP BY stat_date'
+        ),
+        'activity' => $pdo->prepare(
+            'SELECT
+                stat_date,
+                COUNT(DISTINCT CASE
+                    WHEN views > 0
+                      OR earned_micro_usd > 0
+                      OR referral_earned_micro_usd > 0
+                      OR bandwidth_bytes > 0
+                      OR premium_bandwidth_bytes > 0
+                    THEN user_id
+                END) AS active_users,
+                COALESCE(SUM(views), 0) AS views,
+                COALESCE(SUM(bandwidth_bytes), 0) AS bandwidth_bytes,
+                COALESCE(SUM(premium_bandwidth_bytes), 0) AS premium_bandwidth_bytes,
+                COALESCE(SUM(earned_micro_usd + referral_earned_micro_usd), 0) AS earned_micro_usd
+             FROM user_stats_daily
+             WHERE stat_date BETWEEN :from_date AND :to_date
+             GROUP BY stat_date'
+        ),
+        'uploads' => $pdo->prepare(
+            'SELECT
+                substr(created_at, 1, 10) AS stat_date,
+                COUNT(*) AS uploads,
+                COALESCE(SUM(CASE
+                    WHEN processed_size_bytes > 0 THEN processed_size_bytes
+                    ELSE original_size_bytes
+                END), 0) AS uploaded_bytes
+             FROM videos
+             WHERE deleted_at IS NULL
+               AND substr(created_at, 1, 10) BETWEEN :from_date AND :to_date
+             GROUP BY stat_date'
+        ),
+        'remote' => $pdo->prepare(
+            'SELECT
+                substr(created_at, 1, 10) AS stat_date,
+                COUNT(*) AS remote_jobs,
+                COALESCE(SUM(CASE WHEN status = "error" THEN 1 ELSE 0 END), 0) AS remote_failed
+             FROM remote_uploads
+             WHERE deleted_at IS NULL
+               AND substr(created_at, 1, 10) BETWEEN :from_date AND :to_date
+             GROUP BY stat_date'
+        ),
+        'dmca' => $pdo->prepare(
+            'SELECT substr(received_at, 1, 10) AS stat_date, COUNT(*) AS dmca_notices
+             FROM dmca_notices
+             WHERE substr(received_at, 1, 10) BETWEEN :from_date AND :to_date
+             GROUP BY stat_date'
+        ),
+        'payouts' => $pdo->prepare(
+            'SELECT
+                substr(created_at, 1, 10) AS stat_date,
+                COUNT(*) AS payout_requests,
+                COALESCE(SUM(amount_micro_usd), 0) AS payout_amount_micro_usd
+             FROM payout_requests
+             WHERE substr(created_at, 1, 10) BETWEEN :from_date AND :to_date
+             GROUP BY stat_date'
+        ),
+    ];
+
+    foreach ($statements as $statement) {
+        $statement->execute([
+            ':from_date' => $range['from'],
+            ':to_date' => $range['to'],
+        ]);
+
+        foreach ($statement->fetchAll() ?: [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $date = (string) ($row['stat_date'] ?? '');
+
+            if ($date === '' || !isset($points[$date])) {
+                continue;
+            }
+
+            foreach ($row as $key => $value) {
+                if ($key === 'stat_date' || is_int($key)) {
+                    continue;
+                }
+
+                $points[$date][$key] = (int) $value;
+            }
+        }
+    }
+
+    $now = ve_now();
+    $liveWatchersStmt = $pdo->prepare(
+        'SELECT COUNT(*)
+         FROM video_playback_sessions
+         WHERE revoked_at IS NULL
+           AND expires_at >= :now
+           AND last_seen_at >= :active_since'
+    );
+    $liveWatchersStmt->execute([
+        ':now' => $now,
+        ':active_since' => gmdate('Y-m-d H:i:s', ve_timestamp() - 600),
+    ]);
+
+    $activeSessionsStmt = $pdo->prepare(
+        'SELECT COUNT(*)
+         FROM user_sessions
+         WHERE revoked_at IS NULL
+           AND expires_at >= :now
+           AND last_seen_at >= :active_since'
+    );
+    $activeSessionsStmt->execute([
+        ':now' => $now,
+        ':active_since' => gmdate('Y-m-d H:i:s', ve_timestamp() - 1800),
+    ]);
+
+    $series = array_values($points);
+
+    return [
+        'range' => $range,
+        'points' => $series,
+        'traffic_total_bytes' => ve_admin_series_total($series, 'bandwidth_bytes'),
+        'premium_traffic_total_bytes' => ve_admin_series_total($series, 'premium_bandwidth_bytes'),
+        'views_total' => ve_admin_series_total($series, 'views'),
+        'uploads_total' => ve_admin_series_total($series, 'uploads'),
+        'new_users_total' => ve_admin_series_total($series, 'new_users'),
+        'active_users_peak' => ve_admin_series_peak($series, 'active_users'),
+        'traffic_peak_bytes' => ve_admin_series_peak($series, 'bandwidth_bytes'),
+        'views_peak' => ve_admin_series_peak($series, 'views'),
+        'uploaded_bytes_total' => ve_admin_series_total($series, 'uploaded_bytes'),
+        'payout_amount_total_micro_usd' => ve_admin_series_total($series, 'payout_amount_micro_usd'),
+        'earned_total_micro_usd' => ve_admin_series_total($series, 'earned_micro_usd'),
+        'live_watchers' => (int) $liveWatchersStmt->fetchColumn(),
+        'active_sessions' => (int) $activeSessionsStmt->fetchColumn(),
+    ];
+}
+
+function ve_admin_chart_svg_html(array $points, array $seriesDefinitions): string
+{
+    $width = 720.0;
+    $height = 230.0;
+    $paddingLeft = 18.0;
+    $paddingRight = 18.0;
+    $paddingTop = 16.0;
+    $paddingBottom = 30.0;
+    $plotWidth = $width - $paddingLeft - $paddingRight;
+    $plotHeight = $height - $paddingTop - $paddingBottom;
+    $maxValue = 0;
+
+    foreach ($seriesDefinitions as $series) {
+        $key = (string) ($series['key'] ?? '');
+
+        if ($key === '') {
+            continue;
+        }
+
+        foreach ($points as $point) {
+            if (!is_array($point)) {
+                continue;
+            }
+
+            $maxValue = max($maxValue, (int) ($point[$key] ?? 0));
+        }
+    }
+
+    $maxValue = max(1, $maxValue);
+    $count = max(1, count($points));
+    $stepX = $count > 1 ? $plotWidth / ($count - 1) : 0.0;
+    $gridHtml = '';
+
+    for ($i = 0; $i <= 4; $i++) {
+        $y = $paddingTop + (($plotHeight / 4) * $i);
+        $gridHtml .= '<line x1="' . $paddingLeft . '" y1="' . ve_h((string) $y) . '" x2="' . ($width - $paddingRight) . '" y2="' . ve_h((string) $y) . '" />';
+    }
+
+    $seriesHtml = '';
+
+    foreach ($seriesDefinitions as $series) {
+        $key = (string) ($series['key'] ?? '');
+
+        if ($key === '') {
+            continue;
+        }
+
+        $stroke = (string) ($series['stroke'] ?? '#ff9900');
+        $fill = (string) ($series['fill'] ?? 'none');
+        $strokeWidth = (float) ($series['stroke_width'] ?? 2);
+        $pointRadius = (float) ($series['point_radius'] ?? 2.5);
+        $polylinePoints = [];
+
+        foreach (array_values($points) as $index => $point) {
+            $value = is_array($point) ? (int) ($point[$key] ?? 0) : 0;
+            $x = $paddingLeft + ($stepX * $index);
+            $y = $paddingTop + $plotHeight - (($value / $maxValue) * $plotHeight);
+            $polylinePoints[] = number_format($x, 2, '.', '') . ',' . number_format($y, 2, '.', '');
+        }
+
+        if ($polylinePoints === []) {
+            continue;
+        }
+
+        if ($fill !== 'none') {
+            $fillPoints = $polylinePoints;
+            $fillPoints[] = number_format($paddingLeft + ($stepX * (count($polylinePoints) - 1)), 2, '.', '') . ',' . number_format($paddingTop + $plotHeight, 2, '.', '');
+            $fillPoints[] = number_format($paddingLeft, 2, '.', '') . ',' . number_format($paddingTop + $plotHeight, 2, '.', '');
+            $seriesHtml .= '<polygon points="' . ve_h(implode(' ', $fillPoints)) . '" fill="' . ve_h($fill) . '"></polygon>';
+        }
+
+        $seriesHtml .= '<polyline points="' . ve_h(implode(' ', $polylinePoints)) . '" stroke="' . ve_h($stroke) . '" stroke-width="' . ve_h((string) $strokeWidth) . '" fill="none"></polyline>';
+
+        foreach (array_values($points) as $index => $point) {
+            $value = is_array($point) ? (int) ($point[$key] ?? 0) : 0;
+            $x = $paddingLeft + ($stepX * $index);
+            $y = $paddingTop + $plotHeight - (($value / $maxValue) * $plotHeight);
+            $seriesHtml .= '<circle cx="' . ve_h((string) $x) . '" cy="' . ve_h((string) $y) . '" r="' . ve_h((string) $pointRadius) . '" fill="' . ve_h($stroke) . '"></circle>';
+        }
+    }
+
+    $labels = '';
+    $labelIndexes = array_values(array_unique([0, (int) floor(($count - 1) / 2), max(0, $count - 1)]));
+
+    foreach ($labelIndexes as $index) {
+        if (!isset($points[$index]) || !is_array($points[$index])) {
+            continue;
+        }
+
+        $date = (string) ($points[$index]['date'] ?? '');
+        $label = $date !== '' ? gmdate('M j', strtotime($date . ' 00:00:00 UTC')) : '';
+        $x = $paddingLeft + ($stepX * $index);
+        $labels .= '<text x="' . ve_h((string) $x) . '" y="' . ($height - 8) . '" text-anchor="middle">' . ve_h($label) . '</text>';
+    }
+
+    return <<<HTML
+<svg class="admin-chart-svg" viewBox="0 0 720 230" role="img" aria-hidden="true">
+    <g class="admin-chart-grid">{$gridHtml}</g>
+    <g class="admin-chart-series">{$seriesHtml}</g>
+    <g class="admin-chart-labels">{$labels}</g>
+</svg>
+HTML;
+}
+
+function ve_admin_recent_user_sessions(int $userId, int $limit = 8): array
+{
+    $stmt = ve_db()->prepare(
+        'SELECT *
+         FROM user_sessions
+         WHERE user_id = :user_id
+         ORDER BY last_seen_at DESC, created_at DESC
+         LIMIT ' . max(1, $limit)
+    );
+    $stmt->execute([':user_id' => $userId]);
+
+    return $stmt->fetchAll() ?: [];
+}
+
+function ve_admin_recent_balance_ledger_entries(int $userId, int $limit = 8): array
+{
+    $stmt = ve_db()->prepare(
+        'SELECT *
+         FROM account_balance_ledger
+         WHERE user_id = :user_id
+         ORDER BY created_at DESC, id DESC
+         LIMIT ' . max(1, $limit)
+    );
+    $stmt->execute([':user_id' => $userId]);
+
+    return $stmt->fetchAll() ?: [];
+}
+
+function ve_admin_recent_user_audit_events(int $userId, int $limit = 8): array
+{
+    $stmt = ve_db()->prepare(
+        'SELECT audit_logs.*, users.username AS actor_username
+         FROM audit_logs
+         LEFT JOIN users ON users.id = audit_logs.actor_user_id
+         WHERE audit_logs.actor_user_id = :user_id
+            OR (audit_logs.target_type = "user" AND audit_logs.target_id = :user_id)
+         ORDER BY audit_logs.created_at DESC, audit_logs.id DESC
+         LIMIT ' . max(1, $limit)
+    );
+    $stmt->execute([':user_id' => $userId]);
+
+    return $stmt->fetchAll() ?: [];
+}
+
+function ve_admin_user_profile_snapshot(int $userId, int $lookbackDays = 14): ?array
+{
+    $detail = ve_admin_user_detail($userId);
+
+    if (!is_array($detail)) {
+        return null;
+    }
+
+    $reports = ve_dashboard_reports_snapshot($userId, null, null);
+    $chart = (array) ($reports['chart'] ?? []);
+    $settings = (array) ($detail['settings'] ?? []);
+    $premiumBandwidth = ve_premium_bandwidth_totals($userId);
+    $premiumState = ve_premium_bandwidth_feature_state($userId, $settings, $premiumBandwidth);
+    $apiUsage = ve_api_usage_snapshot($userId);
+    $topFiles = ve_dashboard_top_files(
+        $userId,
+        (string) (($reports['range']['from'] ?? gmdate('Y-m-d'))),
+        (string) (($reports['range']['to'] ?? gmdate('Y-m-d'))),
+        5
+    );
+
+    $countsStmt = ve_db()->prepare(
+        'SELECT
+            (SELECT COUNT(*) FROM videos WHERE user_id = :user_id AND deleted_at IS NULL) AS videos_total,
+            (SELECT COUNT(*) FROM remote_uploads WHERE user_id = :user_id AND deleted_at IS NULL) AS remote_total,
+            (SELECT COUNT(*) FROM payout_requests WHERE user_id = :user_id) AS payout_total,
+            (SELECT COUNT(*) FROM payout_requests WHERE user_id = :user_id AND status IN ("pending", "approved")) AS payout_open_total,
+            (SELECT COUNT(*) FROM dmca_notices WHERE user_id = :user_id) AS dmca_total,
+            (SELECT COUNT(*) FROM custom_domains WHERE user_id = :user_id) AS domain_total,
+            (SELECT COUNT(*) FROM custom_domains WHERE user_id = :user_id AND status = "active") AS active_domain_total'
+    );
+    $countsStmt->execute([':user_id' => $userId]);
+    $counts = (array) ($countsStmt->fetch() ?: []);
+
+    return [
+        'detail' => $detail,
+        'reports' => $reports,
+        'chart' => $chart,
+        'settings' => $settings,
+        'premium_bandwidth' => $premiumBandwidth,
+        'premium_state' => $premiumState,
+        'api_usage' => $apiUsage,
+        'top_files' => $topFiles,
+        'storage_bytes' => ve_dashboard_storage_bytes($userId),
+        'online_watchers' => ve_dashboard_online_watchers($userId),
+        'recent_sessions' => ve_admin_recent_user_sessions($userId),
+        'ledger_entries' => ve_admin_recent_balance_ledger_entries($userId),
+        'audit_events' => ve_admin_recent_user_audit_events($userId),
+        'counts' => $counts,
+        'lookback_days' => $lookbackDays,
+    ];
+}
+
 function ve_admin_custom_domain_detail(int $domainId): ?array
 {
     $stmt = ve_db()->prepare(
@@ -3666,219 +4450,84 @@ function ve_admin_audit_target_url(array $row): string
 function ve_admin_render_overview_section_deep(): string
 {
     $snapshot = ve_admin_overview_snapshot();
-    $recentRemote = ve_admin_list_remote_uploads('', '', 0, 1, 6);
-    $recentDmca = ve_admin_list_dmca_notices('', '', 1, 6);
-    $recentPayouts = ve_admin_list_payouts('', 0, 1, 6);
-    $audit = (array) ($snapshot['recent_audit'] ?? []);
-    $metricHtml = ve_admin_metric_items_html([
-        [
-            'label' => 'Active users',
-            'value' => (string) (int) ($snapshot['users']['active_users'] ?? 0),
-            'meta' => (string) (int) ($snapshot['users']['users_today'] ?? 0) . ' registered today',
-        ],
-        [
-            'label' => 'Stored media',
-            'value' => ve_human_bytes((int) ($snapshot['videos']['storage_bytes'] ?? 0)),
-            'meta' => (string) (int) ($snapshot['videos']['ready_videos'] ?? 0) . ' ready files',
-        ],
-        [
-            'label' => 'Remote queue',
-            'value' => (string) (int) ($snapshot['remote']['queued_jobs'] ?? 0),
-            'meta' => (string) (int) ($snapshot['remote']['error_jobs'] ?? 0) . ' failed jobs',
-        ],
-        [
-            'label' => 'Open DMCA',
-            'value' => (string) (int) ($snapshot['dmca']['open_notices'] ?? 0),
-            'meta' => (string) (int) ($snapshot['dmca']['total_notices'] ?? 0) . ' total cases',
-        ],
-        [
-            'label' => 'Open payouts',
-            'value' => (string) (int) ($snapshot['payouts']['open_payouts'] ?? 0),
-            'meta' => ve_dashboard_format_currency_micro_usd((int) ($snapshot['payouts']['paid_micro_usd'] ?? 0)) . ' paid',
-        ],
-        [
-            'label' => 'Delivery footprint',
-            'value' => (string) (int) ($snapshot['infrastructure']['active_delivery_domains'] ?? 0),
-            'meta' => (string) (int) ($snapshot['infrastructure']['storage_nodes'] ?? 0) . ' nodes / '
-                . (string) (int) ($snapshot['infrastructure']['active_upload_endpoints'] ?? 0) . ' upload endpoints',
-        ],
+    $trend = ve_admin_service_trend_snapshot(14);
+    $points = (array) ($trend['points'] ?? []);
+    $range = (array) ($trend['range'] ?? []);
+    $rangeLabel = ve_h(
+        gmdate('M j', strtotime(((string) ($range['from'] ?? gmdate('Y-m-d'))) . ' 00:00:00 UTC'))
+        . ' to '
+        . gmdate('M j', strtotime(((string) ($range['to'] ?? gmdate('Y-m-d'))) . ' 00:00:00 UTC'))
+    );
+    $storageLabel = ve_h(ve_human_bytes((int) ($snapshot['videos']['storage_bytes'] ?? 0)));
+    $trafficLabel = ve_h(ve_human_bytes((int) ($trend['traffic_total_bytes'] ?? 0)));
+    $premiumTrafficLabel = ve_h(ve_human_bytes((int) ($trend['premium_traffic_total_bytes'] ?? 0)));
+    $revenueLabel = ve_h(ve_dashboard_format_currency_micro_usd((int) ($trend['earned_total_micro_usd'] ?? 0)));
+    $payoutDemandLabel = ve_h(ve_dashboard_format_currency_micro_usd((int) ($trend['payout_amount_total_micro_usd'] ?? 0)));
+    $userChart = ve_admin_chart_svg_html($points, [
+        ['key' => 'new_users', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
+        ['key' => 'active_users', 'stroke' => '#d6d6d6'],
     ]);
-
-    $remoteRows = '';
-
-    foreach ((array) ($recentRemote['rows'] ?? []) as $row) {
-        if (!is_array($row)) {
-            continue;
-        }
-
-        $detailUrl = ve_h(ve_admin_url(['section' => 'remote-uploads', 'resource' => (string) (int) ($row['id'] ?? 0)], false));
-        $userUrl = ve_h(ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($row['user_id'] ?? 0)], false));
-        $remoteRows .= '<tr>'
-            . '<td><a href="' . $detailUrl . '">#' . (int) ($row['id'] ?? 0) . '</a></td>'
-            . '<td><a href="' . $userUrl . '">' . ve_h((string) ($row['username'] ?? '')) . '</a></td>'
-            . '<td><span class="d-block">' . ve_h((string) ($row['source_url'] ?? '')) . '</span><small>' . ve_h((string) ($row['status_message'] ?? '')) . '</small></td>'
-            . '<td>' . ve_admin_status_badge_html((string) ($row['status'] ?? 'pending')) . '</td>'
-            . '<td>' . ve_h(number_format((float) ($row['progress_percent'] ?? 0), 1) . '%') . '</td>'
-            . '</tr>';
-    }
-
-    if ($remoteRows === '') {
-        $remoteRows = ve_admin_empty_table_row_html(5, 'No remote jobs found.');
-    }
-
-    $dmcaRows = '';
-
-    foreach ((array) ($recentDmca['rows'] ?? []) as $row) {
-        if (!is_array($row)) {
-            continue;
-        }
-
-        $detailUrl = ve_h(ve_admin_url(['section' => 'dmca', 'resource' => (string) (int) ($row['id'] ?? 0)], false));
-        $userUrl = ve_h(ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($row['user_id'] ?? 0)], false));
-        $videoTitle = trim((string) ($row['video_title_snapshot'] ?? '')) !== ''
-            ? (string) ($row['video_title_snapshot'] ?? '')
-            : (string) ($row['video_title'] ?? 'Removed video');
-        $dmcaRows .= '<tr>'
-            . '<td><a href="' . $detailUrl . '">' . ve_h((string) ($row['case_code'] ?? '')) . '</a></td>'
-            . '<td><a href="' . $userUrl . '">' . ve_h((string) ($row['username'] ?? '')) . '</a></td>'
-            . '<td>' . ve_h($videoTitle) . '</td>'
-            . '<td>' . ve_admin_status_badge_html((string) ($row['status'] ?? VE_DMCA_NOTICE_STATUS_PENDING_REVIEW)) . '</td>'
-            . '<td>' . ve_h(ve_format_datetime_label((string) ($row['received_at'] ?? ''))) . '</td>'
-            . '</tr>';
-    }
-
-    if ($dmcaRows === '') {
-        $dmcaRows = ve_admin_empty_table_row_html(5, 'No DMCA cases found.');
-    }
-
-    $payoutRows = '';
-
-    foreach ((array) ($recentPayouts['rows'] ?? []) as $row) {
-        if (!is_array($row)) {
-            continue;
-        }
-
-        $detailUrl = ve_h(ve_admin_url(['section' => 'payouts', 'resource' => (string) (int) ($row['id'] ?? 0)], false));
-        $userUrl = ve_h(ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($row['user_id'] ?? 0)], false));
-        $payoutRows .= '<tr>'
-            . '<td><a href="' . $detailUrl . '">' . ve_h((string) ($row['public_id'] ?? '')) . '</a></td>'
-            . '<td><a href="' . $userUrl . '">' . ve_h((string) ($row['username'] ?? '')) . '</a></td>'
-            . '<td>' . ve_h(ve_dashboard_format_currency_micro_usd((int) ($row['amount_micro_usd'] ?? 0))) . '</td>'
-            . '<td>' . ve_admin_status_badge_html((string) ($row['status'] ?? 'pending')) . '</td>'
-            . '<td>' . ve_h(ve_format_datetime_label((string) ($row['created_at'] ?? ''))) . '</td>'
-            . '</tr>';
-    }
-
-    if ($payoutRows === '') {
-        $payoutRows = ve_admin_empty_table_row_html(5, 'No payout requests found.');
-    }
-
-    $auditRows = '';
-
-    foreach ((array) ($audit['rows'] ?? []) as $row) {
-        if (!is_array($row)) {
-            continue;
-        }
-
-        $detailUrl = ve_h(ve_admin_url(['section' => 'audit', 'resource' => (string) (int) ($row['id'] ?? 0)], false));
-        $targetUrl = ve_admin_audit_target_url($row);
-        $targetHtml = $targetUrl !== ''
-            ? '<a href="' . ve_h($targetUrl) . '">' . ve_h((string) ($row['target_type'] ?? '')) . ' #' . (int) ($row['target_id'] ?? 0) . '</a>'
-            : ve_h((string) ($row['target_type'] ?? '')) . ' #' . (int) ($row['target_id'] ?? 0);
-        $auditRows .= '<tr>'
-            . '<td><a href="' . $detailUrl . '">' . ve_h(ve_format_datetime_label((string) ($row['created_at'] ?? ''))) . '</a></td>'
-            . '<td>' . ve_h((string) ($row['actor_username'] ?? 'System')) . '</td>'
-            . '<td>' . ve_h((string) ($row['event_code'] ?? '')) . '</td>'
-            . '<td>' . $targetHtml . '</td>'
-            . '<td>' . ve_h((string) ($row['ip_address'] ?? '')) . '</td>'
-            . '</tr>';
-    }
-
-    if ($auditRows === '') {
-        $auditRows = ve_admin_empty_table_row_html(5, 'No backend activity recorded yet.');
-    }
-
-    $quickLinks = implode('', [
-        '<li><a href="' . ve_h(ve_admin_url(['section' => 'users'], false)) . '">Moderate users</a></li>',
-        '<li><a href="' . ve_h(ve_admin_url(['section' => 'videos'], false)) . '">Review large files</a></li>',
-        '<li><a href="' . ve_h(ve_admin_url(['section' => 'remote-uploads'], false)) . '">Clear remote queue</a></li>',
-        '<li><a href="' . ve_h(ve_admin_url(['section' => 'payouts'], false)) . '">Approve payouts</a></li>',
-        '<li><a href="' . ve_h(ve_admin_url(['section' => 'infrastructure'], false)) . '">Check node health</a></li>',
+    $usageChart = ve_admin_chart_svg_html($points, [
+        ['key' => 'views', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
+        ['key' => 'uploads', 'stroke' => '#8f8f8f'],
     ]);
-
-    $paidLabel = ve_h(ve_dashboard_format_currency_micro_usd((int) ($snapshot['payouts']['paid_micro_usd'] ?? 0)));
-    $suspendedUsers = ve_h((string) (int) ($snapshot['users']['suspended_users'] ?? 0));
-    $totalVideos = ve_h((string) (int) ($snapshot['videos']['total_videos'] ?? 0));
-    $customDomains = ve_h((string) (int) ($snapshot['domains']['custom_domains'] ?? 0));
-    $activeDomains = ve_h((string) (int) ($snapshot['domains']['active_domains'] ?? 0));
-    $storageNodes = ve_h((string) (int) ($snapshot['infrastructure']['storage_nodes'] ?? 0));
-    $uploadEndpoints = ve_h((string) (int) ($snapshot['infrastructure']['active_upload_endpoints'] ?? 0));
-    $deliveryDomains = ve_h((string) (int) ($snapshot['infrastructure']['active_delivery_domains'] ?? 0));
+    $trafficChart = ve_admin_chart_svg_html($points, [
+        ['key' => 'bandwidth_bytes', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
+        ['key' => 'premium_bandwidth_bytes', 'stroke' => '#8ad0ff'],
+    ]);
+    $avgNewUsers = ve_h(ve_admin_number_label(ve_admin_series_average($points, 'new_users'), 1));
+    $peakActiveUsers = ve_h((string) ve_admin_series_peak($points, 'active_users'));
+    $avgViews = ve_h(ve_admin_number_label(ve_admin_series_average($points, 'views'), 0));
+    $uploadsTotal = ve_h((string) ve_admin_series_total($points, 'uploads'));
+    $trafficPeakLabel = ve_h(ve_human_bytes((int) ($trend['traffic_peak_bytes'] ?? 0)));
 
     return <<<HTML
 <div class="data settings-panel active" id="overview">
-    <div class="settings-panel-title">Operational overview</div>
-    <p class="settings-panel-subtitle">Run moderation, billing, and delivery operations from the same dashboard shell used across the uploader product.</p>
-    {$metricHtml}
-    <div class="admin-detail-panels mb-4">
-        <div class="admin-detail-panel">
-            <h5>Operator focus</h5>
-            <p class="admin-muted">These are the queues that most directly affect user trust, payout latency, and ingest stability.</p>
-            <ul class="admin-mini-list">{$quickLinks}</ul>
-        </div>
-        <div class="admin-detail-panel">
-            <h5>Account pressure</h5>
-            <div class="admin-meta-grid">
-                <div class="admin-meta-item"><span>Suspended users</span><strong>{$suspendedUsers}</strong></div>
-                <div class="admin-meta-item"><span>Total files</span><strong>{$totalVideos}</strong></div>
-                <div class="admin-meta-item"><span>Custom domains</span><strong>{$customDomains}</strong></div>
-                <div class="admin-meta-item"><span>Active domains</span><strong>{$activeDomains}</strong></div>
+    <div class="settings-panel-title">Service overview</div>
+    <p class="settings-panel-subtitle">A backend summary focused only on platform-wide numbers, traffic movement, and daily operating trends.</p>
+
+    <div class="admin-overview-grid" id="overview-service">
+        <div class="admin-overview-stat"><span>Active accounts</span><strong>{$snapshot['users']['active_users']}</strong><small>{$snapshot['users']['users_today']} new today</small></div>
+        <div class="admin-overview-stat"><span>Total accounts</span><strong>{$snapshot['users']['total_users']}</strong><small>{$snapshot['users']['suspended_users']} suspended</small></div>
+        <div class="admin-overview-stat"><span>Stored files</span><strong>{$snapshot['videos']['total_videos']}</strong><small>{$snapshot['videos']['ready_videos']} ready</small></div>
+        <div class="admin-overview-stat"><span>Stored media</span><strong>{$storageLabel}</strong><small>{$trend['uploads_total']} uploads in last 14 days</small></div>
+        <div class="admin-overview-stat"><span>Live viewers</span><strong>{$trend['live_watchers']}</strong><small>{$trend['active_sessions']} active signed-in sessions</small></div>
+        <div class="admin-overview-stat"><span>14-day views</span><strong>{$trend['views_total']}</strong><small>Peak {$trend['views_peak']} in one day</small></div>
+        <div class="admin-overview-stat"><span>14-day traffic</span><strong>{$trafficLabel}</strong><small>Peak {$trafficPeakLabel}</small></div>
+        <div class="admin-overview-stat"><span>Premium traffic</span><strong>{$premiumTrafficLabel}</strong><small>Tracked over {$rangeLabel}</small></div>
+        <div class="admin-overview-stat"><span>Open remote jobs</span><strong>{$snapshot['remote']['queued_jobs']}</strong><small>{$snapshot['remote']['error_jobs']} failed jobs</small></div>
+        <div class="admin-overview-stat"><span>Compliance and payouts</span><strong>{$snapshot['dmca']['open_notices']}</strong><small>{$snapshot['payouts']['open_payouts']} payout requests open</small></div>
+        <div class="admin-overview-stat"><span>Revenue generated</span><strong>{$revenueLabel}</strong><small>{$payoutDemandLabel} requested for payout</small></div>
+        <div class="admin-overview-stat"><span>Delivery footprint</span><strong>{$snapshot['infrastructure']['active_delivery_domains']}</strong><small>{$snapshot['infrastructure']['storage_nodes']} nodes / {$snapshot['infrastructure']['active_upload_endpoints']} upload endpoints</small></div>
+    </div>
+
+    <div class="admin-section-grid">
+        <div class="admin-chart-card" id="overview-users">
+            <h5 class="mb-2">Daily users</h5>
+            <p class="admin-chart-copy">Account creation and active earning or upload activity across {$rangeLabel}.</p>
+            {$userChart}
+            <div class="admin-chart-legend">
+                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch"></i>New users</span><strong>{$avgNewUsers} avg/day</strong></div>
+                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch" style="background:#d6d6d6;"></i>Active users</span><strong>{$peakActiveUsers} peak/day</strong></div>
             </div>
         </div>
-        <div class="admin-detail-panel">
-            <h5>Billing and delivery</h5>
-            <div class="admin-meta-grid">
-                <div class="admin-meta-item"><span>Paid out</span><strong>{$paidLabel}</strong></div>
-                <div class="admin-meta-item"><span>Storage nodes</span><strong>{$storageNodes}</strong></div>
-                <div class="admin-meta-item"><span>Upload endpoints</span><strong>{$uploadEndpoints}</strong></div>
-                <div class="admin-meta-item"><span>Delivery domains</span><strong>{$deliveryDomains}</strong></div>
+        <div class="admin-chart-card" id="overview-usage">
+            <h5 class="mb-2">Daily usage</h5>
+            <p class="admin-chart-copy">Views served and files added to the library during the same window.</p>
+            {$usageChart}
+            <div class="admin-chart-legend">
+                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch"></i>Views</span><strong>{$avgViews} avg/day</strong></div>
+                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch" style="background:#8f8f8f;"></i>Uploads</span><strong>{$uploadsTotal} total</strong></div>
             </div>
         </div>
-    </div>
-    <div class="admin-subsection">
-        <h5>Recent remote activity</h5>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Job</th><th>User</th><th>Source</th><th>Status</th><th>Progress</th></tr></thead>
-                <tbody>{$remoteRows}</tbody>
-            </table>
-        </div>
-    </div>
-    <div class="admin-subsection">
-        <h5>Recent DMCA cases</h5>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Case</th><th>User</th><th>Video</th><th>Status</th><th>Received</th></tr></thead>
-                <tbody>{$dmcaRows}</tbody>
-            </table>
-        </div>
-    </div>
-    <div class="admin-subsection">
-        <h5>Recent payout requests</h5>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Request</th><th>User</th><th>Amount</th><th>Status</th><th>Created</th></tr></thead>
-                <tbody>{$payoutRows}</tbody>
-            </table>
-        </div>
-    </div>
-    <div class="admin-subsection">
-        <h5>Recent backend activity</h5>
-        <div class="settings-table-wrap">
-            <table class="table">
-                <thead><tr><th>Time</th><th>Actor</th><th>Event</th><th>Target</th><th>IP</th></tr></thead>
-                <tbody>{$auditRows}</tbody>
-            </table>
+        <div class="admin-chart-card" id="overview-traffic">
+            <h5 class="mb-2">Daily traffic</h5>
+            <p class="admin-chart-copy">Delivered traffic, including premium-served bandwidth, over {$rangeLabel}.</p>
+            {$trafficChart}
+            <div class="admin-chart-legend">
+                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch"></i>Total traffic</span><strong>{$trafficLabel}</strong></div>
+                <div class="admin-chart-legend-item"><span><i class="admin-chart-swatch" style="background:#8ad0ff;"></i>Premium traffic</span><strong>{$premiumTrafficLabel}</strong></div>
+            </div>
         </div>
     </div>
 </div>
@@ -3893,7 +4542,8 @@ function ve_admin_render_users_section_deep(): string
     $page = ve_admin_request_page();
     $selectedUserId = ve_admin_current_resource_id();
     $list = ve_admin_list_users($query, $status, $roleCode, $page);
-    $detail = $selectedUserId > 0 ? ve_admin_user_detail($selectedUserId) : null;
+    $profile = $selectedUserId > 0 ? ve_admin_user_profile_snapshot($selectedUserId) : null;
+    $detail = is_array($profile) ? (array) ($profile['detail'] ?? []) : null;
     $sectionUrl = ve_h(ve_admin_url(['section' => 'users', 'resource' => null, 'page' => null], false));
     $statusOptions = ve_admin_select_options_html([
         'active' => 'Active',
@@ -3969,6 +4619,25 @@ function ve_admin_render_users_section_deep(): string
         $premiumUntilValue = ve_h((string) ($detail['premium_until'] ?? ''));
         $paymentDestinationValue = ve_h((string) ($detail['settings']['payment_id'] ?? ''));
         $planCodeValue = ve_h((string) ($detail['plan_code'] ?? 'free'));
+        $reports = is_array($profile) ? (array) ($profile['reports'] ?? []) : [];
+        $chart = is_array($profile) ? (array) ($profile['chart'] ?? []) : [];
+        $apiUsage = is_array($profile) ? (array) ($profile['api_usage'] ?? []) : [];
+        $counts = is_array($profile) ? (array) ($profile['counts'] ?? []) : [];
+        $premiumState = is_array($profile) ? (array) ($profile['premium_state'] ?? []) : [];
+        $premiumBandwidth = is_array($profile) ? (array) ($profile['premium_bandwidth'] ?? []) : [];
+        $viewsChart = ve_admin_chart_svg_html($chart, [
+            ['key' => 'views', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
+        ]);
+        $trafficChart = ve_admin_chart_svg_html($chart, [
+            ['key' => 'bandwidth_bytes', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
+        ]);
+        $revenueChart = ve_admin_chart_svg_html($chart, [
+            ['key' => 'total_profit_micro_usd', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)'],
+        ]);
+        $sessionRows = '';
+        $ledgerRows = '';
+        $auditList = '';
+        $topFilesList = '';
         $videoList = '';
         $remoteList = '';
         $dmcaList = '';
@@ -4025,6 +4694,52 @@ function ve_admin_render_users_section_deep(): string
                 . ve_h((string) ($domain['status'] ?? 'pending_dns')) . '</small></li>';
         }
 
+        foreach ((array) ($profile['recent_sessions'] ?? []) as $session) {
+            if (!is_array($session)) {
+                continue;
+            }
+
+            $sessionRows .= '<tr>'
+                . '<td>' . ve_h(ve_format_datetime_label((string) ($session['last_seen_at'] ?? ''))) . '</td>'
+                . '<td>' . ve_h((string) ($session['ip_address'] ?? '')) . '</td>'
+                . '<td>' . ve_h((string) ($session['user_agent'] ?? 'Unknown device')) . '</td>'
+                . '<td>' . ve_h(ve_format_datetime_label((string) ($session['created_at'] ?? ''))) . '</td>'
+                . '</tr>';
+        }
+
+        foreach ((array) ($profile['ledger_entries'] ?? []) as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            $ledgerRows .= '<tr>'
+                . '<td>' . ve_h(ve_format_datetime_label((string) ($entry['created_at'] ?? ''))) . '</td>'
+                . '<td>' . ve_h((string) ($entry['entry_type'] ?? '')) . '</td>'
+                . '<td>' . ve_h((string) ($entry['source_type'] ?? '')) . '</td>'
+                . '<td>' . ve_h(ve_dashboard_format_currency_micro_usd((int) ($entry['amount_micro_usd'] ?? 0))) . '</td>'
+                . '<td>' . ve_h((string) ($entry['description'] ?? '')) . '</td>'
+                . '</tr>';
+        }
+
+        foreach ((array) ($profile['audit_events'] ?? []) as $audit) {
+            if (!is_array($audit)) {
+                continue;
+            }
+
+            $auditUrl = ve_h(ve_admin_url(['section' => 'audit', 'resource' => (string) (int) ($audit['id'] ?? 0)], false));
+            $auditList .= '<li><a href="' . $auditUrl . '">' . ve_h((string) ($audit['event_code'] ?? '')) . '</a><small>'
+                . ve_h(ve_format_datetime_label((string) ($audit['created_at'] ?? ''))) . ' / ' . ve_h((string) ($audit['actor_username'] ?? 'System')) . '</small></li>';
+        }
+
+        foreach ((array) ($profile['top_files'] ?? []) as $file) {
+            if (!is_array($file)) {
+                continue;
+            }
+
+            $topFilesList .= '<li><strong>' . ve_h((string) ($file['title'] ?? 'Untitled')) . '</strong><small>'
+                . ve_h((string) ($file['views'] ?? 0)) . ' views / ' . ve_h((string) ($file['bandwidth'] ?? '0 B')) . '</small></li>';
+        }
+
         if ($videoList === '') {
             $videoList = '<li class="text-muted">No recent files.</li>';
         }
@@ -4045,87 +4760,197 @@ function ve_admin_render_users_section_deep(): string
             $domainList = '<li class="text-muted">No custom domains.</li>';
         }
 
-        $searchSimilarUrl = ve_h(ve_admin_url(['section' => 'users', 'resource' => null, 'q' => (string) ($detail['username'] ?? '')], false));
+        if ($sessionRows === '') {
+            $sessionRows = ve_admin_empty_table_row_html(4, 'No tracked sessions for this account yet.');
+        }
 
+        if ($ledgerRows === '') {
+            $ledgerRows = ve_admin_empty_table_row_html(5, 'No balance ledger entries found.');
+        }
+
+        if ($auditList === '') {
+            $auditList = '<li class="text-muted">No audit events found.</li>';
+        }
+
+        if ($topFilesList === '') {
+            $topFilesList = '<li class="text-muted">No top files yet.</li>';
+        }
+
+        $searchSimilarUrl = ve_h(ve_admin_url(['section' => 'users', 'resource' => null, 'q' => (string) ($detail['username'] ?? '')], false));
+        $dashboardUrl = ve_h(ve_url('/dashboard'));
+        $paymentMethodLabel = ve_h((string) ($detail['settings']['payment_method'] ?? 'Not configured'));
+        $maskedDestinationLabel = ve_h(ve_admin_mask_payout_destination((string) ($detail['settings']['payment_id'] ?? '')) ?: 'Not configured');
+        $apiLastUsedLabel = ve_h((string) (($apiUsage['usage']['last_used_at'] ?? 'Never used')));
+        $apiRequestsTodayLabel = ve_h((string) (($apiUsage['usage']['requests_today'] ?? 0)));
+        $apiRequestsHourLabel = ve_h((string) (($apiUsage['usage']['requests_last_hour'] ?? 0)));
+        $premiumStatusLabel = ve_h((string) ($premiumState['status_label'] ?? 'Inactive'));
+        $premiumBandwidthLabel = ve_h(ve_human_bytes((int) ($premiumBandwidth['available_bytes'] ?? 0)));
+        $storageLabel = ve_h(ve_human_bytes((int) ($profile['storage_bytes'] ?? 0)));
+        $viewsTotalLabel = ve_h((string) ($reports['totals']['views'] ?? 0));
+        $trafficTotalLabel = ve_h((string) ($reports['totals']['traffic'] ?? '0 B'));
+        $revenueTotalLabel = ve_h((string) ($reports['totals']['total'] ?? '$0.00000'));
+        $directRevenueLabel = ve_h((string) ($reports['totals']['profit'] ?? '$0.00000'));
+        $referralRevenueLabel = ve_h((string) ($reports['totals']['referral_share'] ?? '$0.00000'));
+        $detailEmail = ve_h((string) ($detail['email'] ?? ''));
+        $statusLabel = ve_h((string) ($detail['status'] ?? 'active'));
+        $apiStatusLabel = ve_h((int) ($detail['settings']['api_enabled'] ?? 1) === 1 ? 'enabled' : 'disabled');
+        $premiumUntilLabel = ve_h(ve_format_datetime_label((string) ($detail['premium_until'] ?? ''), 'No expiry set'));
+        $videosTotalLabel = ve_h((string) ($counts['videos_total'] ?? 0));
+        $remoteTotalLabel = ve_h((string) ($counts['remote_total'] ?? 0));
+        $dmcaTotalLabel = ve_h((string) ($counts['dmca_total'] ?? 0));
+        $activeDomainTotalLabel = ve_h((string) ($counts['active_domain_total'] ?? 0));
+        $domainTotalLabel = ve_h((string) ($counts['domain_total'] ?? 0));
+        $payoutOpenTotalLabel = ve_h((string) ($counts['payout_open_total'] ?? 0));
+        $payoutTotalLabel = ve_h((string) ($counts['payout_total'] ?? 0));
+        $liveViewersLabel = ve_h((string) ($profile['online_watchers'] ?? 0));
+        $sessionCountLabel = ve_h((string) count((array) ($profile['recent_sessions'] ?? [])));
         $detailHtml = <<<HTML
-<div class="admin-subsection">
-    <h5>User detail: {$detailUsername}</h5>
-    <div class="admin-meta-grid mb-4">
-        <div class="admin-meta-item"><span>User ID</span><strong>#{$detailId}</strong></div>
-        <div class="admin-meta-item"><span>Balance</span><strong>{$detailBalance}</strong></div>
-        <div class="admin-meta-item"><span>Plan</span><strong>{$detailPlan}</strong></div>
-        <div class="admin-meta-item"><span>Last login</span><strong>{$detailLastLogin}</strong></div>
-        <div class="admin-meta-item"><span>Created</span><strong>{$detailCreated}</strong></div>
-        <div class="admin-meta-item"><span>Primary role</span><strong>{$detailRole}</strong></div>
-    </div>
-    <form method="POST" action="{$detailActionUrl}" class="admin-stack mb-4">
-        <input type="hidden" name="token" value="{$token}">
-        <input type="hidden" name="action" value="save_user">
-        <input type="hidden" name="user_id" value="{$detailId}">
-        {$saveReturn}
-        <div class="admin-form-grid">
-            <div class="form-group">
-                <label>Status</label>
-                <select name="status" class="form-control">
-                    <option value="active"{$statusActiveSelected}>Active</option>
-                    <option value="suspended"{$statusSuspendedSelected}>Suspended</option>
-                </select>
+<div class="admin-subsection" id="users-profile">
+    <div class="admin-profile-head">
+        <div class="admin-profile-card admin-profile-identity">
+            <h3>{$detailUsername}</h3>
+            <p>{$detailEmail}</p>
+            <div class="admin-pill-row">
+                <div class="admin-pill">{$statusLabel}</div>
+                <div class="admin-pill">{$detailRole}</div>
+                <div class="admin-pill">Plan {$detailPlan}</div>
+                <div class="admin-pill">Premium {$premiumStatusLabel}</div>
+                <div class="admin-pill">API {$apiStatusLabel}</div>
             </div>
-            <div class="form-group">
-                <label>Role</label>
-                <select name="role_code" class="form-control">{$roleSelectOptions}</select>
+            <div class="admin-meta-grid mb-4">
+                <div class="admin-meta-item"><span>User ID</span><strong>#{$detailId}</strong></div>
+                <div class="admin-meta-item"><span>Created</span><strong>{$detailCreated}</strong></div>
+                <div class="admin-meta-item"><span>Last login</span><strong>{$detailLastLogin}</strong></div>
+                <div class="admin-meta-item"><span>Balance</span><strong>{$detailBalance}</strong></div>
+                <div class="admin-meta-item"><span>Payout method</span><strong>{$paymentMethodLabel}</strong></div>
+                <div class="admin-meta-item"><span>Payout destination</span><strong>{$maskedDestinationLabel}</strong></div>
+                <div class="admin-meta-item"><span>Premium until</span><strong>{$premiumUntilLabel}</strong></div>
+                <div class="admin-meta-item"><span>API last used</span><strong>{$apiLastUsedLabel}</strong></div>
+                <div class="admin-meta-item"><span>Premium bandwidth</span><strong>{$premiumBandwidthLabel}</strong></div>
             </div>
-            <div class="form-group">
-                <label>Plan code</label>
-                <input type="text" name="plan_code" value="{$planCodeValue}" class="form-control">
+            <div class="admin-profile-actions">
+                <form method="POST" action="{$detailActionUrl}">
+                    <input type="hidden" name="token" value="{$token}">
+                    <input type="hidden" name="action" value="impersonate_user">
+                    <input type="hidden" name="user_id" value="{$detailId}">
+                    {$saveReturn}
+                    <button type="submit" class="btn btn-secondary">Impersonate account</button>
+                </form>
+                <form method="POST" action="{$sectionUrl}" onsubmit="return confirm('Delete this user and all owned data permanently?');">
+                    <input type="hidden" name="token" value="{$token}">
+                    <input type="hidden" name="action" value="delete_user">
+                    <input type="hidden" name="user_id" value="{$detailId}">
+                    {$listReturn}
+                    <button type="submit" class="btn btn-danger">Delete user</button>
+                </form>
+                <a href="{$searchSimilarUrl}" class="btn btn-secondary">Find similar users</a>
+                <a href="{$dashboardUrl}" class="btn btn-secondary">Open dashboard shell</a>
             </div>
-            <div class="form-group">
-                <label>Premium until</label>
-                <input type="text" name="premium_until" value="{$premiumUntilValue}" class="form-control" placeholder="YYYY-MM-DD HH:MM:SS">
-            </div>
-            <div class="form-group">
-                <label>Payout method</label>
-                <select name="payment_method" class="form-control">{$paymentMethodOptions}</select>
-            </div>
-            <div class="form-group">
-                <label>Payout destination</label>
-                <input type="text" name="payment_id" value="{$paymentDestinationValue}" class="form-control">
-            </div>
-            <div class="form-group d-flex align-items-end">
-                <div class="custom-control custom-checkbox">
-                    <input type="checkbox" class="custom-control-input" id="admin_user_api_enabled_{$detailId}" name="api_enabled" value="1"{$apiEnabledChecked}>
-                    <label class="custom-control-label" for="admin_user_api_enabled_{$detailId}">API access enabled</label>
+        </div>
+        <div class="admin-profile-card">
+            <h5 class="mb-3">Account controls</h5>
+            <form method="POST" action="{$detailActionUrl}" class="admin-stack">
+                <input type="hidden" name="token" value="{$token}">
+                <input type="hidden" name="action" value="save_user">
+                <input type="hidden" name="user_id" value="{$detailId}">
+                {$saveReturn}
+                <div class="admin-form-grid">
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select name="status" class="form-control">
+                            <option value="active"{$statusActiveSelected}>Active</option>
+                            <option value="suspended"{$statusSuspendedSelected}>Suspended</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Role</label>
+                        <select name="role_code" class="form-control">{$roleSelectOptions}</select>
+                    </div>
+                    <div class="form-group">
+                        <label>Plan code</label>
+                        <input type="text" name="plan_code" value="{$planCodeValue}" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>Premium until</label>
+                        <input type="text" name="premium_until" value="{$premiumUntilValue}" class="form-control" placeholder="YYYY-MM-DD HH:MM:SS">
+                    </div>
+                    <div class="form-group">
+                        <label>Payout method</label>
+                        <select name="payment_method" class="form-control">{$paymentMethodOptions}</select>
+                    </div>
+                    <div class="form-group">
+                        <label>Payout destination</label>
+                        <input type="text" name="payment_id" value="{$paymentDestinationValue}" class="form-control">
+                    </div>
+                    <div class="form-group d-flex align-items-end">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" class="custom-control-input" id="admin_user_api_enabled_{$detailId}" name="api_enabled" value="1"{$apiEnabledChecked}>
+                            <label class="custom-control-label" for="admin_user_api_enabled_{$detailId}">API access enabled</label>
+                        </div>
+                    </div>
                 </div>
-            </div>
+                <div class="admin-actions">
+                    <button type="submit" class="btn btn-primary">Save user</button>
+                    <a href="{$closeUrl}" class="btn btn-secondary">Close detail</a>
+                </div>
+            </form>
         </div>
-        <div class="admin-actions">
-            <button type="submit" class="btn btn-primary">Save user</button>
-            <a href="{$closeUrl}" class="btn btn-secondary">Close detail</a>
+    </div>
+    <div class="admin-overview-grid">
+        <div class="admin-overview-stat"><span>Lifetime views</span><strong>{$viewsTotalLabel}</strong><small>{$trafficTotalLabel} traffic</small></div>
+        <div class="admin-overview-stat"><span>Lifetime revenue</span><strong>{$revenueTotalLabel}</strong><small>{$directRevenueLabel} direct + {$referralRevenueLabel} referral</small></div>
+        <div class="admin-overview-stat"><span>Stored media</span><strong>{$storageLabel}</strong><small>{$videosTotalLabel} files</small></div>
+        <div class="admin-overview-stat"><span>Remote imports</span><strong>{$remoteTotalLabel}</strong><small>{$dmcaTotalLabel} DMCA cases</small></div>
+        <div class="admin-overview-stat"><span>Domains</span><strong>{$activeDomainTotalLabel}</strong><small>{$domainTotalLabel} mapped total</small></div>
+        <div class="admin-overview-stat"><span>Payout pressure</span><strong>{$payoutOpenTotalLabel}</strong><small>{$payoutTotalLabel} requests total</small></div>
+        <div class="admin-overview-stat"><span>API requests today</span><strong>{$apiRequestsTodayLabel}</strong><small>{$apiRequestsHourLabel} in the last hour</small></div>
+        <div class="admin-overview-stat"><span>Live viewers</span><strong>{$liveViewersLabel}</strong><small>{$sessionCountLabel} tracked sessions shown</small></div>
+    </div>
+    <div class="admin-section-grid" id="users-charts">
+        <div class="admin-chart-card">
+            <h5 class="mb-2">Daily views</h5>
+            <p class="admin-chart-copy">View activity for the selected account.</p>
+            {$viewsChart}
         </div>
-    </form>
-    <div class="admin-actions mb-4">
-        <form method="POST" action="{$detailActionUrl}">
-            <input type="hidden" name="token" value="{$token}">
-            <input type="hidden" name="action" value="impersonate_user">
-            <input type="hidden" name="user_id" value="{$detailId}">
-            {$saveReturn}
-            <button type="submit" class="btn btn-secondary">Impersonate account</button>
-        </form>
-        <form method="POST" action="{$sectionUrl}" onsubmit="return confirm('Delete this user and all owned data permanently?');">
-            <input type="hidden" name="token" value="{$token}">
-            <input type="hidden" name="action" value="delete_user">
-            <input type="hidden" name="user_id" value="{$detailId}">
-            {$listReturn}
-            <button type="submit" class="btn btn-danger">Delete user</button>
-        </form>
-        <a href="{$searchSimilarUrl}" class="btn btn-secondary">Find similar users</a>
+        <div class="admin-chart-card">
+            <h5 class="mb-2">Daily traffic</h5>
+            <p class="admin-chart-copy">Traffic served over the reporting window.</p>
+            {$trafficChart}
+        </div>
+        <div class="admin-chart-card">
+            <h5 class="mb-2">Daily revenue</h5>
+            <p class="admin-chart-copy">Combined direct and referral earnings.</p>
+            {$revenueChart}
+        </div>
     </div>
     <div class="admin-detail-panels">
-        <div class="admin-detail-panel"><h5>Recent files</h5><ul class="admin-mini-list">{$videoList}</ul></div>
-        <div class="admin-detail-panel"><h5>Remote uploads</h5><ul class="admin-mini-list">{$remoteList}</ul></div>
-        <div class="admin-detail-panel"><h5>DMCA cases</h5><ul class="admin-mini-list">{$dmcaList}</ul></div>
-        <div class="admin-detail-panel"><h5>Payouts</h5><ul class="admin-mini-list">{$payoutList}</ul></div>
-        <div class="admin-detail-panel"><h5>Domains</h5><ul class="admin-mini-list">{$domainList}</ul></div>
+        <div class="admin-detail-panel" id="users-sessions">
+            <h5>Recent sessions</h5>
+            <div class="settings-table-wrap">
+                <table class="table">
+                    <thead><tr><th>Last seen</th><th>IP</th><th>User agent</th><th>Started</th></tr></thead>
+                    <tbody>{$sessionRows}</tbody>
+                </table>
+            </div>
+        </div>
+        <div class="admin-detail-panel" id="users-billing">
+            <h5>Balance ledger</h5>
+            <div class="settings-table-wrap">
+                <table class="table">
+                    <thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Amount</th><th>Description</th></tr></thead>
+                    <tbody>{$ledgerRows}</tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="admin-detail-panels" id="users-related">
+        <div class="admin-detail-panel"><h5>Top files</h5><ul class="admin-mini-list admin-list-tight">{$topFilesList}</ul></div>
+        <div class="admin-detail-panel"><h5>Recent files</h5><ul class="admin-mini-list admin-list-tight">{$videoList}</ul></div>
+        <div class="admin-detail-panel"><h5>Remote uploads</h5><ul class="admin-mini-list admin-list-tight">{$remoteList}</ul></div>
+        <div class="admin-detail-panel"><h5>DMCA cases</h5><ul class="admin-mini-list admin-list-tight">{$dmcaList}</ul></div>
+        <div class="admin-detail-panel"><h5>Payouts</h5><ul class="admin-mini-list admin-list-tight">{$payoutList}</ul></div>
+        <div class="admin-detail-panel"><h5>Domains</h5><ul class="admin-mini-list admin-list-tight">{$domainList}</ul></div>
+        <div class="admin-detail-panel"><h5>Audit trail</h5><ul class="admin-mini-list admin-list-tight">{$auditList}</ul></div>
     </div>
 </div>
 HTML;
@@ -4137,9 +4962,9 @@ HTML;
     return <<<HTML
 <div class="data settings-panel" id="users">
     <div class="settings-panel-title">User management</div>
-    <p class="settings-panel-subtitle">Search, promote, suspend, impersonate, and delete accounts with direct access to their recent operational footprint.</p>
+    <p class="settings-panel-subtitle">Search for accounts quickly, then open a detailed operator profile with traffic, billing, sessions, and related records.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar">
+    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="users-directory">
         <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Username, email, or user ID"></div>
         <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
         <div class="form-group"><label>Role</label><select name="role" class="form-control">{$roleFilterOptions}</select></div>
@@ -4242,7 +5067,7 @@ function ve_admin_render_videos_section_deep(): string
             ? number_format((float) ($detail['duration_seconds'] ?? 0), 1) . 's'
             : 'Unknown';
         $ownerUrl = ve_h(ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($detail['user_id'] ?? 0)], false));
-        $detailHtml = '<div class="admin-subsection">'
+        $detailHtml = '<div class="admin-subsection" id="videos-detail">'
             . '<h5>File detail: ' . $detailTitle . '</h5>'
             . '<div class="admin-meta-grid mb-4">'
             . '<div class="admin-meta-item"><span>Video ID</span><strong>#' . $detailId . '</strong></div>'
@@ -4292,7 +5117,7 @@ function ve_admin_render_videos_section_deep(): string
     <div class="settings-panel-title">Files and videos</div>
     <p class="settings-panel-subtitle">Moderate uploader content, inspect processing state, and control public visibility without leaving the backend shell.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar">
+    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="videos-library">
         {$userIdInput}
         <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Title, public ID, or owner"></div>
         <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
@@ -4386,7 +5211,7 @@ function ve_admin_render_remote_uploads_section_deep(): string
         $linkedVideoUrl = (int) ($detail['video_id'] ?? 0) > 0
             ? ve_h(ve_admin_url(['section' => 'videos', 'resource' => (string) (int) ($detail['video_id'] ?? 0)], false))
             : '';
-        $detailHtml = '<div class="admin-subsection">'
+        $detailHtml = '<div class="admin-subsection" id="remote-uploads-detail">'
             . '<h5>Remote job detail: #' . $detailId . '</h5>'
             . '<div class="admin-meta-grid mb-4">'
             . '<div class="admin-meta-item"><span>Owner</span><div><a href="' . ve_h(ve_admin_url(['section' => 'users', 'resource' => (string) (int) ($detail['user_id'] ?? 0)], false)) . '">' . ve_h((string) ($detail['username'] ?? '')) . '</a></div></div>'
@@ -4431,7 +5256,7 @@ function ve_admin_render_remote_uploads_section_deep(): string
     <div class="settings-panel-title">Remote uploads</div>
     <p class="settings-panel-subtitle">Inspect ingest jobs deeply enough to see queue state, worker progress, source normalization, and linked file creation.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar">
+    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="remote-uploads-queue">
         {$userIdInput}
         <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Source URL, video public ID, or owner"></div>
         <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
@@ -4571,7 +5396,7 @@ function ve_admin_render_dmca_section_deep(): string
                 . '</div>'
             : '<p class="admin-empty">No uploader response has been stored.</p>';
 
-        $detailHtml = '<div class="admin-subsection">'
+        $detailHtml = '<div class="admin-subsection" id="dmca-detail">'
             . '<h5>DMCA case: ' . ve_h((string) ($payload['case_code'] ?? '')) . '</h5>'
             . '<div class="admin-meta-grid mb-4">'
             . '<div class="admin-meta-item"><span>Status</span><div>' . ve_admin_status_badge_html($currentStatus) . '</div></div>'
@@ -4616,7 +5441,7 @@ function ve_admin_render_dmca_section_deep(): string
             . '</div></div>'
             . '<div class="admin-detail-panel"><h5>Uploader response</h5>' . $uploaderResponseHtml . '</div>'
             . '</div>'
-            . '<div class="admin-detail-panel mt-4"><h5>Timeline</h5><ul class="admin-timeline">' . $timelineHtml . '</ul></div>'
+            . '<div class="admin-detail-panel mt-4" id="dmca-events"><h5>Timeline</h5><ul class="admin-timeline">' . $timelineHtml . '</ul></div>'
             . '</div>';
     }
 
@@ -4628,7 +5453,7 @@ function ve_admin_render_dmca_section_deep(): string
     <div class="settings-panel-title">DMCA operations</div>
     <p class="settings-panel-subtitle">Work the complaint queue with full visibility into complainant data, uploader response state, deletion deadlines, and event history.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar">
+    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="dmca-queue">
         <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Case code, URL, title, or uploader"></div>
         <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusSelectOptions}</select></div>
         <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
@@ -4715,7 +5540,7 @@ function ve_admin_render_payouts_section_deep(): string
         $detailId = (int) ($detail['id'] ?? 0);
         $detailActionUrl = ve_h(ve_admin_url(['section' => 'payouts', 'resource' => (string) $detailId], false));
         $closeUrl = $sectionUrl;
-        $detailHtml = '<div class="admin-subsection">'
+        $detailHtml = '<div class="admin-subsection" id="payouts-detail">'
             . '<h5>Payout request: ' . ve_h((string) ($detail['public_id'] ?? '')) . '</h5>'
             . '<div class="admin-meta-grid mb-4">'
             . '<div class="admin-meta-item"><span>Status</span><div>' . ve_admin_status_badge_html((string) ($detail['status'] ?? 'pending')) . '</div></div>'
@@ -4729,7 +5554,7 @@ function ve_admin_render_payouts_section_deep(): string
             . '</div>'
             . '<div class="admin-detail-panels mb-4">'
             . '<div class="admin-detail-panel"><h5>Operator notes</h5><p>' . ve_h((string) ($detail['notes'] ?? 'No notes.')) . '</p><p class="admin-muted">Rejection reason: ' . ve_h((string) ($detail['rejection_reason'] ?? '')) . '</p></div>'
-            . '<div class="admin-detail-panel"><h5>Transfer tracking</h5><div class="admin-meta-grid">'
+            . '<div class="admin-detail-panel" id="payouts-transfer"><h5>Transfer tracking</h5><div class="admin-meta-grid">'
             . '<div class="admin-meta-item"><span>Reference</span><strong>' . ve_h((string) ($detail['transfer_reference'] ?? '')) . '</strong></div>'
             . '<div class="admin-meta-item"><span>Transfer row</span><strong>' . (is_array($transfer) ? ve_h((string) ($transfer['status'] ?? 'sent')) : 'Not created') . '</strong></div>'
             . '<div class="admin-meta-item"><span>Fee</span><strong>' . (is_array($transfer) ? ve_h(ve_dashboard_format_currency_micro_usd((int) ($transfer['fee_micro_usd'] ?? 0))) : '$0.00') . '</strong></div>'
@@ -4753,7 +5578,7 @@ function ve_admin_render_payouts_section_deep(): string
     <div class="settings-panel-title">Payout operations</div>
     <p class="settings-panel-subtitle">Review withdrawal requests with direct access to approval, rejection, payout settlement, and transfer accounting.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar">
+    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="payouts-queue">
         {$userIdInput}
         <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
         <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
@@ -4835,7 +5660,7 @@ function ve_admin_render_domains_section_deep(): string
         $detailActionUrl = ve_h(ve_admin_url(['section' => 'domains', 'resource' => (string) $detailId], false));
         $closeUrl = $sectionUrl;
         $listReturn = ve_admin_return_to_hidden_html(ve_admin_url(['section' => 'domains', 'resource' => null], false));
-        $detailHtml = '<div class="admin-subsection">'
+        $detailHtml = '<div class="admin-subsection" id="domains-detail">'
             . '<h5>Domain detail: ' . ve_h((string) ($detail['domain'] ?? '')) . '</h5>'
             . '<div class="admin-meta-grid mb-4">'
             . '<div class="admin-meta-item"><span>Status</span><div>' . ve_admin_status_badge_html((string) ($detail['status'] ?? 'pending_dns')) . '</div></div>'
@@ -4868,7 +5693,7 @@ function ve_admin_render_domains_section_deep(): string
     <div class="settings-panel-title">Domain operations</div>
     <p class="settings-panel-subtitle">Track account-level custom domains, validate DNS resolution, and remove broken mappings without leaving the backend.</p>
     {$metricsHtml}
-    <form method="GET" action="{$sectionUrl}" class="admin-toolbar">
+    <form method="GET" action="{$sectionUrl}" class="admin-toolbar" id="domains-directory">
         <div class="form-group"><label>Search</label><input type="text" name="q" value="{$queryValue}" class="form-control" placeholder="Domain or uploader"></div>
         <div class="form-group"><label>Status</label><select name="status" class="form-control">{$statusOptions}</select></div>
         <div class="form-group form-group--action"><button type="submit" class="btn btn-primary">Apply filters</button></div>
@@ -4930,7 +5755,7 @@ function ve_admin_render_app_section_deep(): string
     <div class="settings-panel-title">App settings</div>
     <p class="settings-panel-subtitle">Control backend operating thresholds and keep the role and permission model visible to anyone maintaining this panel.</p>
     {$metricsHtml}
-    <div class="admin-subsection">
+    <div class="admin-subsection" id="app-general">
         <h5>Operator thresholds</h5>
         <form method="POST" action="{$sectionUrl}" class="admin-stack">
             <input type="hidden" name="token" value="{$token}">
@@ -4959,7 +5784,7 @@ function ve_admin_render_app_section_deep(): string
             </div>
         </form>
     </div>
-    <div class="admin-subsection">
+    <div class="admin-subsection" id="app-roles">
         <h5>Role catalog</h5>
         <div class="settings-table-wrap">
             <table class="table">
@@ -4968,7 +5793,7 @@ function ve_admin_render_app_section_deep(): string
             </table>
         </div>
     </div>
-    <div class="admin-subsection">
+    <div class="admin-subsection" id="app-permissions">
         <h5>Permission inventory</h5>
         <div class="settings-table-wrap">
             <table class="table">
@@ -5265,7 +6090,7 @@ function ve_admin_render_infrastructure_section_deep(): string
     <div class="settings-panel-title">Infrastructure</div>
     <p class="settings-panel-subtitle">Operate the storage and delivery plane from one backend surface: nodes, volumes, upload endpoints, delivery domains, and maintenance scheduling.</p>
     {$metricsHtml}
-    <div class="admin-subsection">
+    <div class="admin-subsection" id="infra-nodes">
         <h5>Storage nodes</h5>
         <div class="settings-table-wrap">
             <table class="table">
@@ -5296,7 +6121,7 @@ function ve_admin_render_infrastructure_section_deep(): string
         </div>
         <div class="admin-section-grid">{$nodeCards}</div>
     </div>
-    <div class="admin-subsection">
+    <div class="admin-subsection" id="infra-volumes">
         <h5>Storage volumes</h5>
         <div class="settings-table-wrap">
             <table class="table">
@@ -5324,7 +6149,7 @@ function ve_admin_render_infrastructure_section_deep(): string
         </div>
         <div class="admin-section-grid">{$volumeCards}</div>
     </div>
-    <div class="admin-subsection">
+    <div class="admin-subsection" id="infra-endpoints">
         <h5>Upload endpoints</h5>
         <div class="settings-table-wrap">
             <table class="table">
@@ -5354,7 +6179,7 @@ function ve_admin_render_infrastructure_section_deep(): string
         </div>
         <div class="admin-section-grid">{$endpointCards}</div>
     </div>
-    <div class="admin-subsection">
+    <div class="admin-subsection" id="infra-delivery">
         <h5>Delivery domains</h5>
         <div class="settings-table-wrap">
             <table class="table">
@@ -5379,7 +6204,7 @@ function ve_admin_render_infrastructure_section_deep(): string
         </div>
         <div class="admin-section-grid">{$deliveryCards}</div>
     </div>
-    <div class="admin-subsection">
+    <div class="admin-subsection" id="infra-maintenance">
         <h5>Maintenance windows</h5>
         <div class="admin-form-card mb-3">
             <h6>Schedule maintenance window</h6>
@@ -5464,7 +6289,7 @@ function ve_admin_render_audit_section_deep(): string
             : ve_h((string) ($detail['target_type'] ?? '')) . ' #' . (int) ($detail['target_id'] ?? 0);
         $beforeHtml = ve_admin_pretty_json_html((string) ($detail['before_json'] ?? '{}'));
         $afterHtml = ve_admin_pretty_json_html((string) ($detail['after_json'] ?? '{}'));
-        $detailHtml = '<div class="admin-subsection">'
+        $detailHtml = '<div class="admin-subsection" id="audit-detail">'
             . '<h5>Audit detail: #' . (int) ($detail['id'] ?? 0) . '</h5>'
             . '<div class="admin-meta-grid mb-4">'
             . '<div class="admin-meta-item"><span>Actor</span><strong>' . ve_h((string) ($detail['actor_username'] ?? 'System')) . '</strong></div>'
@@ -5488,7 +6313,7 @@ function ve_admin_render_audit_section_deep(): string
     <div class="settings-panel-title">Audit log</div>
     <p class="settings-panel-subtitle">Inspect backend actions with exact timestamps, actor identity, target records, and before/after payloads.</p>
     {$metricsHtml}
-    <div class="settings-table-wrap">
+    <div class="settings-table-wrap" id="audit-feed">
         <table class="table">
             <thead><tr><th>Time</th><th>Actor</th><th>Event</th><th>Target</th><th>IP</th></tr></thead>
             <tbody>{$rowsHtml}</tbody>
@@ -5502,12 +6327,25 @@ HTML;
 
 function ve_admin_backend_mobile_nav_html(array $actorUser, string $activeSection): string
 {
-    unset($actorUser, $activeSection);
+    $items = [];
 
-    return '<li class="nav-item"><a href="' . ve_h(ve_url('/dashboard')) . '" class="nav-link"><i class="fad fa-shapes"></i>Dashboard</a></li>'
-        . '<li class="nav-item"><a href="' . ve_h(ve_url('/')) . '" class="nav-link"><i class="fad fa-home"></i>Home</a></li>'
-        . '<li class="nav-item"><a href="' . ve_h(ve_url('/api-docs')) . '" class="nav-link"><i class="fad fa-brackets-curly"></i>API Docs</a></li>'
-        . '<li class="nav-item"><a href="' . ve_h(ve_url('/contact')) . '" class="nav-link"><i class="fad fa-life-ring"></i>Contact</a></li>';
+    foreach (ve_admin_allowed_sections_for_user($actorUser) as $code => $section) {
+        $activeClass = $code === $activeSection ? ' active' : '';
+        $items[] = '<li class="nav-item"><a href="' . ve_h(ve_admin_url(['section' => $code, 'resource' => null, 'page' => null], false)) . '" class="nav-link' . $activeClass . '"><i class="fad ' . ve_h((string) ($section['icon'] ?? 'fa-circle')) . '"></i>' . ve_h((string) ($section['label'] ?? ucfirst($code))) . '</a></li>';
+    }
+
+    $items[] = '<li class="nav-item"><a href="' . ve_h(ve_url('/dashboard')) . '" class="nav-link"><i class="fad fa-shapes"></i>Dashboard</a></li>';
+    $items[] = '<li class="nav-item"><a href="' . ve_h(ve_url('/')) . '" class="nav-link"><i class="fad fa-home"></i>Home</a></li>';
+    $items[] = '<li class="nav-item"><a href="' . ve_h(ve_url('/api-docs')) . '" class="nav-link"><i class="fad fa-brackets-curly"></i>API Docs</a></li>';
+    $items[] = '<li class="nav-item"><a href="' . ve_h(ve_url('/contact')) . '" class="nav-link"><i class="fad fa-life-ring"></i>Contact</a></li>';
+
+    $stopControl = ve_admin_impersonation_stop_control_html('nav-link btn btn-link admin-stop-button', false);
+
+    if ($stopControl !== '') {
+        $items[] = '<li class="nav-item">' . $stopControl . '</li>';
+    }
+
+    return implode('', $items);
 }
 
 function ve_admin_unimplemented_section_html(string $section): string
@@ -5590,7 +6428,7 @@ function ve_handle_backend_request(): void
                     }
 
                     ve_flash('success', 'Impersonation started.');
-                    break;
+                    ve_redirect(ve_url('/dashboard'));
 
                 case 'delete_user':
                     if (!ve_user_has_permission($actorUser, 'admin.users.delete')) {
@@ -5802,17 +6640,14 @@ function ve_handle_backend_request(): void
     $currentUser = ve_current_user();
     $shellUser = is_array($currentUser) ? $currentUser : $actorUser;
     $context = ve_admin_dashboard_shell_context($shellUser);
+    $context['header_nav_html'] = ve_admin_backend_header_nav_html($actorUser, $activeSection);
+    $context['header_action_html'] = ve_admin_impersonation_stop_control_html('btn btn-sm btn-secondary admin-stop-button', true);
     $context['mobile_nav_html'] = ve_admin_backend_mobile_nav_html($actorUser, $activeSection);
     $title = (string) ((ve_admin_sections()[$activeSection]['label'] ?? 'Backend') . ' - Video Engine');
-    $roleLabel = ve_h(ve_admin_role_label(ve_admin_primary_role_code_for_user_id((int) ($actorUser['id'] ?? 0))));
-    $overviewSnapshot = ve_admin_overview_snapshot();
-    $sidebarIntroHtml = '<div class="status-block d-flex align-items-center mb-4">'
-        . '<i class="fad fa-shield-alt"></i>'
-        . '<div class="info ml-3"><h4 class="m-0">Backend</h4><a href="' . ve_h(ve_url('/dashboard')) . '">Return to dashboard</a><div class="text-muted mt-1">' . $roleLabel . '</div></div>'
-        . '</div>';
+    $sidebarIntroHtml = ve_admin_backend_sidebar_intro_html($actorUser, $activeSection);
     $menuHtml = ve_admin_backend_sidebar_menu_html($actorUser, $activeSection);
     $contentHtml = ve_admin_section_content_html($activeSection);
-    $widgetsHtml = ve_admin_backend_widgets_html($overviewSnapshot);
+    $widgetsHtml = '';
 
     ve_html(ve_rewrite_html_paths(ve_admin_dashboard_shell(
         $context,

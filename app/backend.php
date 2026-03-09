@@ -4119,6 +4119,89 @@ HTML;
 HTML;
 }
 
+function ve_dashboard_runtime_dropdown_html(): string
+{
+    if (!function_exists('ve_admin_user_dropdown_html')) {
+        return '';
+    }
+
+    return ve_admin_user_dropdown_html([
+        'dmca_url' => ve_h(ve_url('/dmca-manager')),
+        'api_docs_url' => ve_h(ve_url('/api-docs')),
+        'referrals_url' => ve_h(ve_url('/referrals')),
+        'settings_url' => ve_h(ve_url('/settings')),
+        'logout_url' => ve_h(ve_url('/logout')),
+    ]);
+}
+
+function ve_dashboard_runtime_stop_control_html(): string
+{
+    if (!function_exists('ve_admin_impersonation_stop_control_html')) {
+        return '';
+    }
+
+    return ve_admin_impersonation_stop_control_html('nav-link admin-dashboard-stop', true);
+}
+
+function ve_dashboard_runtime_admin_head_html(): string
+{
+    return <<<HTML
+<style>
+    .main-menu .admin-header-stop {
+        display: inline-flex;
+        align-items: center;
+        margin-right: 8px;
+    }
+    .main-menu .admin-stop-form {
+        margin: 0;
+    }
+    .main-menu .admin-dashboard-stop {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 40px;
+        padding: 0 14px;
+        border: 1px solid rgba(255, 153, 0, 0.18);
+        background: rgba(255, 153, 0, 0.08);
+        color: #f1d2a2;
+        cursor: pointer;
+    }
+    .main-menu .admin-dashboard-stop:hover,
+    .main-menu .admin-dashboard-stop:focus {
+        color: #fff;
+        background: rgba(255, 153, 0, 0.14);
+    }
+</style>
+HTML;
+}
+
+function ve_dashboard_runtime_transform_logged_in_html(string $html): string
+{
+    $dropdownHtml = ve_dashboard_runtime_dropdown_html();
+
+    if ($dropdownHtml !== '') {
+        $html = (string) (preg_replace(
+            '/<div aria-labelledby="navbarDropdown" class="dropdown-menu dropdown-menu-right">.*?<\/div>\s*<\/li>/s',
+            $dropdownHtml . "\n                </li>",
+            $html,
+            1
+        ) ?? $html);
+    }
+
+    $stopControlHtml = ve_dashboard_runtime_stop_control_html();
+
+    if ($stopControlHtml !== '') {
+        $html = (string) (preg_replace(
+            '/(<li class="nav-item dropdown">\s*<a href="#" id="navbarDropdown")/s',
+            $stopControlHtml . '$1',
+            $html,
+            1
+        ) ?? $html);
+    }
+
+    return $html;
+}
+
 function ve_runtime_html_transform(string $html, string $relativePath = ''): string
 {
     $runtimeScript = ve_runtime_script_tag();
@@ -4143,6 +4226,11 @@ function ve_runtime_html_transform(string $html, string $relativePath = ''): str
 
         if (is_array($user)) {
             $html = str_replace('videoengine', (string) $user['username'], $html);
+            $html = ve_dashboard_runtime_transform_logged_in_html($html);
+
+            if (str_contains($html, '</head>')) {
+                $html = str_replace('</head>', ve_dashboard_runtime_admin_head_html() . '</head>', $html);
+            }
         }
 
         $html = str_replace('href="/?op=logout"', 'href="/logout"', $html);
