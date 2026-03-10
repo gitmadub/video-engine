@@ -5007,6 +5007,10 @@ function ve_video_secure_player_script(
         var subtitleUrlInput = document.getElementById('ve-subtitle-url-input');
         var subtitleFileInput = document.getElementById('ve-subtitle-file-input');
         var captionOverlay = document.getElementById('ve-caption-overlay');
+        var homeLink = document.getElementById('ve-home-link');
+        var speedButton = document.getElementById('ve-speed-button');
+        var speedPanel = document.getElementById('ve-speed-panel');
+        var speedPanelOpen = false;
         var watchedSeconds = 0;
         var watchAuditTimer = null;
         var lastWatchSampleAt = 0;
@@ -5638,11 +5642,20 @@ function ve_video_secure_player_script(
             return 'WEBVTT\\n\\n' + output.join('\\n');
         }
 
+        function closeSpeedPanel() {
+            if (speedPanel && speedButton) {
+                speedPanelOpen = false;
+                speedPanel.hidden = true;
+                speedButton.setAttribute('aria-expanded', 'false');
+            }
+        }
+
         function openSubtitlePanel() {
             if (!subtitlePanel || !subtitleButton) {
                 return;
             }
 
+            closeSpeedPanel();
             subtitlePanel.hidden = false;
             subtitlePanel.classList.add('is-visible');
             subtitleButton.classList.add('is-active');
@@ -6299,6 +6312,49 @@ function ve_video_secure_player_script(
                 });
             }
 
+            if (homeLink && fallbackUrl) {
+                homeLink.href = fallbackUrl;
+            }
+
+            if (speedButton && speedPanel) {
+                speedButton.addEventListener('click', function () {
+                    if (subtitlePanelOpen) {
+                        closeSubtitlePanel();
+                    }
+
+                    speedPanelOpen = !speedPanelOpen;
+                    speedPanel.hidden = !speedPanelOpen;
+                    speedButton.setAttribute('aria-expanded', String(speedPanelOpen));
+                    showControlsTemporarily();
+                });
+
+                speedPanel.querySelectorAll('.ve-speed-option').forEach(function (option) {
+                    option.addEventListener('click', function () {
+                        var rate = parseFloat(option.getAttribute('data-speed') || '1');
+
+                        if (video) {
+                            video.playbackRate = rate;
+                        }
+
+                        speedPanel.querySelectorAll('.ve-speed-option').forEach(function (opt) {
+                            opt.classList.toggle('is-active', opt === option);
+                        });
+
+                        var label = rate === 1 ? '1x' : rate + 'x';
+                        var placeholder = speedButton.querySelector('.vjs-icon-placeholder');
+
+                        if (placeholder) {
+                            placeholder.textContent = label;
+                        }
+
+                        speedPanelOpen = false;
+                        speedPanel.hidden = true;
+                        speedButton.setAttribute('aria-expanded', 'false');
+                        showControlsTemporarily();
+                    });
+                });
+            }
+
             ['mousemove', 'mouseenter', 'touchstart'].forEach(function (eventName) {
                 stage.addEventListener(eventName, showControlsTemporarily, { passive: true });
             });
@@ -6319,6 +6375,14 @@ function ve_video_secure_player_script(
                         || target.closest('a, button, input, label, form')
                     ) {
                         return;
+                    }
+                }
+
+                if (speedPanelOpen && speedPanel) {
+                    speedPanelOpen = false;
+                    speedPanel.hidden = true;
+                    if (speedButton) {
+                        speedButton.setAttribute('aria-expanded', 'false');
                     }
                 }
 
@@ -8795,10 +8859,10 @@ HTML);
         $previewVttUrl,
         ((int) ($ownerSettings['auto_subtitle_start'] ?? 0)) === 1
     );
-    $playerColour = strtolower(trim((string) ($ownerSettings['player_colour'] ?? 'ff9900')));
+    $playerColour = strtolower(trim((string) ($ownerSettings['player_colour'] ?? 'e50914')));
 
     if (!preg_match('/^[a-f0-9]{6}$/', $playerColour)) {
-        $playerColour = 'ff9900';
+        $playerColour = 'e50914';
     }
 
     $posterAsset = ve_video_resolve_poster_asset($video);
@@ -9297,6 +9361,7 @@ HTML);
                 border-left-width: 38px;
             }
         }
+        /* ── Netflix-inspired premium player chrome ── */
         .ve-stage.video-js {
             position: relative;
             width: 100%;
@@ -9306,7 +9371,15 @@ HTML);
             border: 0;
             border-radius: 0;
             color: #fff;
-            font-family: Arial, Helvetica, sans-serif;
+            font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+            --ve-glow: rgba(229, 9, 20, 0.35);
+            --ve-surface: rgba(20, 20, 20, 0.92);
+            --ve-surface-hover: rgba(255, 255, 255, 0.08);
+            --ve-text: #f4f4f4;
+            --ve-muted: rgba(255, 255, 255, 0.55);
+            --ve-border: rgba(255, 255, 255, 0.06);
+            --ve-track: rgba(255, 255, 255, 0.18);
+            --ve-load: rgba(255, 255, 255, 0.3);
         }
         .ve-stage.video-js .vjs-tech {
             position: absolute;
@@ -9324,7 +9397,7 @@ HTML);
             align-items: center;
             justify-content: center;
             background: transparent;
-            transition: opacity .18s ease;
+            transition: opacity .22s ease;
         }
         .ve-stage.video-js .ve-player-overlay.is-hidden {
             opacity: 0;
@@ -9368,76 +9441,119 @@ HTML);
             position: absolute;
             top: 50%;
             left: 50%;
-            z-index: 7;
-            width: 42px;
-            height: 42px;
-            margin: -21px 0 0 -21px;
+            z-index: 8;
+            width: 48px;
+            height: 48px;
+            margin: -24px 0 0 -24px;
             border-radius: 999px;
-            border: 3px solid rgba(255, 255, 255, 0.16);
-            border-top-color: rgba(255, 255, 255, 0.92);
-            animation: ve-player-button-spin .8s linear infinite;
+            border: 3px solid rgba(255, 255, 255, 0.12);
+            border-top-color: #fff;
+            animation: ve-player-button-spin .7s linear infinite;
             pointer-events: none;
         }
-        .ve-stage.video-js .vjs-big-play-button {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 120px;
-            height: 120px;
-            margin: -60px 0 0 -60px;
-            padding: 0;
-            border: 0;
-            border-radius: 9px;
-            background: transparent;
-            color: #fff;
+        /* ── Big play button (center overlay) ── */
+        .ve-stage.video-js .vjs-big-play-button,
+        .ve-stage.video-js .ve-player-overlay-button {
+            position: relative;
+            top: auto;
+            left: auto;
+            width: 80px;
+            height: 80px;
+            margin: 0;
+            transform: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            border: 2px solid rgba(255, 255, 255, 0.12);
+            background: rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+            transition: transform .2s ease, background .2s ease, border-color .2s ease, box-shadow .2s ease;
             cursor: pointer;
+            color: #fff;
+            padding: 0;
+        }
+        .ve-stage.video-js .vjs-big-play-button:hover,
+        .ve-stage.video-js .vjs-big-play-button:focus-visible,
+        .ve-stage.video-js .ve-player-overlay-button:hover,
+        .ve-stage.video-js .ve-player-overlay-button:focus-visible {
             opacity: 1;
-            transition: opacity .16s ease;
+            transform: scale(1.08);
+            background: rgba(229, 9, 20, 0.85);
+            border-color: rgba(229, 9, 20, 0.6);
+            box-shadow: 0 0 0 6px rgba(229, 9, 20, 0.15), 0 16px 48px rgba(0, 0, 0, 0.55);
         }
-        .ve-stage.video-js .vjs-big-play-button:hover {
-            opacity: 0.82;
-        }
-        .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder,
-        .ve-stage.video-js .ve-player-overlay-glyph {
+        .ve-stage.video-js .ve-player-overlay-glyph,
+        .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder {
             position: relative;
             display: block;
-            width: 120px;
-            height: 120px;
+            width: 80px;
+            height: 80px;
         }
-        .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before,
-        .ve-stage.video-js .ve-player-overlay-glyph::before {
+        .ve-stage.video-js .ve-player-overlay-glyph::before,
+        .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before {
             content: "";
             position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 0;
-            height: 0;
-            margin-top: -30px;
-            margin-left: -10px;
-            border-top: 30px solid transparent;
-            border-bottom: 30px solid transparent;
-            border-left: 48px solid #fff;
-            filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.45));
+            inset: 0;
+            width: 36px;
+            height: 36px;
+            margin: auto;
+            border: 0;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M8 5v14l11-7z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: contain;
+            transform: none;
+            filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));
+        }
+        .ve-stage.video-js .ve-player-overlay-label {
+            position: absolute;
+            width: 1px; height: 1px;
+            padding: 0; margin: -1px;
+            overflow: hidden; clip: rect(0,0,0,0); border: 0; white-space: nowrap;
+        }
+        .ve-stage.video-js .ve-player-overlay-button.is-starting,
+        .ve-stage.video-js .vjs-big-play-button.is-starting {
+            transform: none;
         }
         .ve-stage.video-js .vjs-big-play-button.is-starting .vjs-icon-placeholder::before,
         .ve-stage.video-js .ve-player-overlay-button.is-starting .ve-player-overlay-glyph::before {
             content: "";
-            width: 42px;
-            height: 42px;
-            margin: -21px 0 0 -21px;
+            width: 36px;
+            height: 36px;
+            margin: auto;
             border: 3px solid rgba(255, 255, 255, 0.16);
-            border-top-color: rgba(255, 255, 255, 0.92);
+            border-top-color: #fff;
             border-radius: 999px;
             border-left-width: 3px;
             border-bottom-width: 3px;
             border-right-width: 3px;
-            animation: ve-player-button-spin .8s linear infinite;
+            animation: ve-player-button-spin .7s linear infinite;
             filter: none;
+            background: none;
         }
-        .ve-stage.video-js .vjs-big-play-button.is-starting .vjs-icon-placeholder,
-        .ve-stage.video-js .ve-player-overlay-button.is-starting .ve-player-overlay-glyph {
-            opacity: 1;
+        /* ── Bottom gradient overlay ── */
+        .ve-stage.video-js::before {
+            content: "";
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            height: 45%;
+            z-index: 1;
+            background: linear-gradient(0deg, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.45) 40%, transparent 100%);
+            pointer-events: none;
+            transition: opacity .25s ease;
         }
+        .ve-stage.video-js::after {
+            content: none;
+        }
+        .ve-stage.video-js .vjs-tech,
+        .ve-stage.video-js .ve-player-poster,
+        .ve-stage.video-js .vjs-text-track-display {
+            z-index: 0;
+        }
+        /* ── Control bar ── */
         .ve-stage.video-js .vjs-control-bar {
             position: absolute;
             left: 0;
@@ -9445,17 +9561,91 @@ HTML);
             bottom: 0;
             z-index: 6;
             display: flex;
-            align-items: center;
-            min-height: 64px;
-            padding: 24px 12px 14px;
-            background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.28) 24%, rgba(0, 0, 0, 0.76) 72%, rgba(0, 0, 0, 0.94) 100%);
-            transition: opacity .18s ease, transform .18s ease;
+            flex-direction: column;
+            padding: 0 16px 12px;
+            background: transparent;
+            transition: opacity .25s ease, transform .25s ease;
         }
         .ve-stage.video-js.vjs-user-inactive .vjs-control-bar,
         .ve-stage.video-js:not(.vjs-has-started) .vjs-control-bar {
             opacity: 0;
-            transform: translateY(8px);
+            transform: translateY(6px);
             pointer-events: none;
+        }
+        /* ── Progress bar row ── */
+        .ve-stage.video-js .vjs-progress-control {
+            position: relative;
+            display: flex;
+            align-items: center;
+            width: 100%;
+            height: 24px;
+            margin-bottom: 6px;
+        }
+        .ve-stage.video-js .vjs-progress-holder {
+            position: relative;
+            display: block;
+            flex: 1 1 auto;
+            height: 4px;
+            border-radius: 999px;
+            background: var(--ve-track);
+            cursor: pointer;
+            overflow: visible;
+            transition: height .15s ease;
+        }
+        .ve-stage.video-js .vjs-progress-holder:hover {
+            height: 6px;
+        }
+        .ve-stage.video-js .vjs-load-progress,
+        .ve-stage.video-js .vjs-play-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: inherit;
+            border-radius: 999px;
+        }
+        .ve-stage.video-js .vjs-load-progress {
+            background: var(--ve-load);
+        }
+        .ve-stage.video-js .vjs-play-progress {
+            background: var(--ve-accent);
+        }
+        .ve-stage.video-js .vjs-play-progress::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            right: -7px;
+            width: 14px;
+            height: 14px;
+            border-radius: 999px;
+            background: #fff;
+            transform: translateY(-50%) scale(0);
+            box-shadow: 0 0 0 3px var(--ve-glow);
+            transition: transform .15s ease;
+        }
+        .ve-stage.video-js .vjs-progress-holder:hover .vjs-play-progress::before {
+            transform: translateY(-50%) scale(1);
+        }
+        .ve-stage.video-js .vjs-remaining-time {
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-end;
+            flex: 0 0 auto;
+            height: 24px;
+            min-width: 52px;
+            padding-left: 12px;
+            color: var(--ve-muted);
+            font-size: 0.78rem;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.01em;
+            white-space: nowrap;
+        }
+        /* ── Buttons row ── */
+        .ve-stage.video-js .vjs-buttons-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            width: 100%;
         }
         .ve-stage.video-js .vjs-control,
         .ve-stage.video-js .vjs-button {
@@ -9465,25 +9655,26 @@ HTML);
             justify-content: center;
             background: transparent;
             border: 0;
-            color: inherit;
+            color: #fff;
             font: inherit;
             line-height: 1;
             cursor: pointer;
-            transition: opacity .16s ease;
+            transition: background .15s ease, transform .12s ease, opacity .12s ease;
             appearance: none;
+            text-decoration: none;
         }
         .ve-stage.video-js .vjs-control:hover,
         .ve-stage.video-js .vjs-control:focus-visible,
         .ve-stage.video-js .vjs-button:hover,
         .ve-stage.video-js .vjs-button:focus-visible {
-            opacity: 0.82;
+            opacity: 1;
             outline: none;
         }
         .ve-stage.video-js .vjs-icon-placeholder {
             position: relative;
             display: block;
-            width: 36px;
-            height: 36px;
+            width: 24px;
+            height: 24px;
         }
         .ve-stage.video-js .vjs-icon-placeholder::before,
         .ve-stage.video-js .vjs-icon-placeholder::after {
@@ -9500,16 +9691,26 @@ HTML);
         .ve-stage.video-js .vjs-fullscreen-control,
         .ve-stage.video-js .vjs-mute-control,
         .ve-stage.video-js .vjs-seek-button,
+        .ve-stage.video-js .vjs-home-link,
+        .ve-stage.video-js .vjs-speed-toggle,
         .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
-            width: 44px;
+            width: 40px;
             height: 40px;
             padding: 0;
+            border-radius: 8px;
+            background: transparent;
+            transition: background .15s ease, transform .12s ease;
         }
-        .ve-stage.video-js .vjs-subs-caps-button {
-            position: relative;
-            display: inline-flex;
-            align-items: center;
+        .ve-stage.video-js .vjs-play-control:hover,
+        .ve-stage.video-js .vjs-fullscreen-control:hover,
+        .ve-stage.video-js .vjs-mute-control:hover,
+        .ve-stage.video-js .vjs-seek-button:hover,
+        .ve-stage.video-js .vjs-home-link:hover,
+        .ve-stage.video-js .vjs-speed-toggle:hover,
+        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button:hover {
+            background: var(--ve-surface-hover);
         }
+        /* Play/Pause icons */
         .ve-stage.video-js .vjs-play-control.vjs-paused .vjs-icon-placeholder::before {
             width: 24px;
             height: 24px;
@@ -9520,10 +9721,11 @@ HTML);
             height: 24px;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 5h4v14H7zm6 0h4v14h-4z'/%3E%3C/svg%3E");
         }
+        /* Skip buttons */
         .ve-stage.video-js .vjs-seek-button .vjs-icon-placeholder::before {
             width: 22px;
             height: 22px;
-            top: 46%;
+            top: 44%;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 5V1L5 8l7 7V9c3.3 0 6 2.7 6 6 0 1.2-.4 2.4-1 3.4l1.5 1.5A7.93 7.93 0 0 0 20 15c0-5-3.6-9.1-8-10z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-seek-button.skip-forward .vjs-icon-placeholder::before {
@@ -9536,13 +9738,13 @@ HTML);
             transform: translate(-50%, -50%);
             background: none;
             color: #fff;
-            font-size: 9px;
+            font-size: 8px;
             font-weight: 700;
-            letter-spacing: 0.02em;
         }
+        /* Volume */
         .ve-stage.video-js .vjs-mute-control .vjs-icon-placeholder::before {
-            width: 24px;
-            height: 24px;
+            width: 22px;
+            height: 22px;
         }
         .ve-stage.video-js .vjs-mute-control.vjs-vol-1 .vjs-icon-placeholder::before,
         .ve-stage.video-js .vjs-mute-control.vjs-vol-2 .vjs-icon-placeholder::before,
@@ -9552,32 +9754,16 @@ HTML);
         .ve-stage.video-js .vjs-mute-control.vjs-vol-0 .vjs-icon-placeholder::before {
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M16.5 12c0-.7-.1-1.4-.4-2l1.5-1.5c.6 1 .9 2.2.9 3.5 0 1.3-.3 2.5-.9 3.5L16.1 14c.3-.6.4-1.3.4-2zm3 0c0-2-.6-3.9-1.7-5.4l1.5-1.5A9.9 9.9 0 0 1 22 12c0 2.7-1 5.1-2.7 6.9l-1.5-1.5c1.1-1.5 1.7-3.4 1.7-5.4zM4.3 3 3 4.3 7.7 9H3v6h4l5 5v-6.7l4.7 4.7 1.3-1.3L4.3 3z'/%3E%3C/svg%3E");
         }
-        .ve-stage.video-js .vjs-fullscreen-control .vjs-icon-placeholder::before {
-            width: 22px;
-            height: 22px;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 7h-3v2h5v-5h-2v3zm0-12v3h2V5h-5v2h3z'/%3E%3C/svg%3E");
-        }
-        .ve-stage.video-js .vjs-fullscreen-control.is-active .vjs-icon-placeholder::before {
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M5 16h2v3h3v2H5v-5zm12 3v-3h2v5h-5v-2h3zM7 5v3H5V3h5v2H7zm12 3h-2V5h-3V3h5v5z'/%3E%3C/svg%3E");
-        }
-        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button .vjs-icon-placeholder::before {
-            content: "CC";
-            background: none;
-            color: #fff;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-        }
         .ve-stage.video-js .vjs-volume-panel {
             display: inline-flex;
             align-items: center;
             width: auto;
-            margin-right: 2px;
+            gap: 2px;
         }
         .ve-stage.video-js .vjs-volume-control {
             display: inline-flex;
             align-items: center;
-            width: 92px;
+            width: 80px;
             height: 40px;
         }
         .ve-stage.video-js .vjs-volume-bar {
@@ -9586,81 +9772,65 @@ HTML);
             margin: 0;
             accent-color: var(--ve-accent);
             cursor: pointer;
+            border-radius: 999px;
         }
-        .ve-stage.video-js .vjs-current-time,
-        .ve-stage.video-js .vjs-duration,
-        .ve-stage.video-js .vjs-time-divider,
-        .ve-stage.video-js .vjs-remaining-time {
+        /* Home link icon */
+        .ve-stage.video-js .vjs-home-link .vjs-icon-placeholder::before {
+            width: 20px;
+            height: 20px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M3.01 11.22V21a1 1 0 0 0 1 1h5v-6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v6h5a1 1 0 0 0 1-1v-9.78l-9-7.15z'/%3E%3Cpath d='M12 1.48 0 11h3V9.52l9-7.15 9 7.15V11h3z'/%3E%3C/svg%3E");
+        }
+        /* Captions button */
+        .ve-stage.video-js .vjs-subs-caps-button {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button .vjs-icon-placeholder::before {
+            content: "CC";
+            background: none;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+        }
+        /* Speed button */
+        .ve-stage.video-js .vjs-speed-button {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+        .ve-stage.video-js .vjs-speed-toggle {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            height: 40px;
+        }
+        .ve-stage.video-js .vjs-speed-toggle .vjs-icon-placeholder {
+            width: auto;
+            height: auto;
             color: #fff;
-            font-size: 0.94rem;
-            font-weight: 600;
-            text-shadow: 0 0 3px rgba(0, 0, 0, 0.85);
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0;
         }
-        .ve-stage.video-js .vjs-current-time,
-        .ve-stage.video-js .vjs-duration {
-            min-width: 52px;
+        .ve-stage.video-js .vjs-speed-toggle .vjs-icon-placeholder::before {
+            content: none;
         }
-        .ve-stage.video-js .vjs-time-divider {
-            width: 14px;
-        }
-        .ve-stage.video-js .vjs-progress-control {
-            position: absolute;
-            top: 8px;
-            left: 12px;
-            right: 92px;
-            height: 12px;
-        }
-        .ve-stage.video-js .vjs-progress-holder {
-            position: relative;
-            display: block;
-            width: 100%;
-            height: 4px;
-            margin-top: 4px;
-            border-radius: 2px;
-            background: rgba(255, 255, 255, 0.48);
-            cursor: pointer;
-        }
-        .ve-stage.video-js .vjs-load-progress,
-        .ve-stage.video-js .vjs-play-progress {
-            position: absolute;
-            top: 0;
-            left: 0;
-            height: 4px;
-            border-radius: 2px;
-        }
-        .ve-stage.video-js .vjs-load-progress {
-            background: rgba(255, 255, 255, 0.22);
-            opacity: 0.65;
-        }
-        .ve-stage.video-js .vjs-play-progress {
-            background: var(--ve-accent);
-        }
-        .ve-stage.video-js .vjs-play-progress::before {
-            content: "";
-            position: absolute;
-            top: 50%;
-            right: -7px;
-            width: 10px;
-            height: 10px;
-            border-radius: 999px;
-            background: #fff;
-            transform: translateY(-50%);
-        }
-        .ve-stage.video-js .vjs-remaining-time {
-            position: absolute;
-            top: -4px;
-            right: 0;
+        /* Fullscreen icon */
+        .ve-stage.video-js .vjs-fullscreen-control .vjs-icon-placeholder::before {
+            width: 20px;
             height: 20px;
-            font-size: 0.9rem;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 7h-3v2h5v-5h-2v3zm0-12v3h2V5h-5v2h3z'/%3E%3C/svg%3E");
         }
+        .ve-stage.video-js .vjs-fullscreen-control.is-active .vjs-icon-placeholder::before {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M5 16h2v3h3v2H5v-5zm12 3v-3h2v5h-5v-2h3zM7 5v3H5V3h5v2H7zm12 3h-2V5h-3V3h5v5z'/%3E%3C/svg%3E");
+        }
+        /* Spacer pushes right controls */
         .ve-stage.video-js .vjs-custom-control-spacer {
             flex: 1 1 auto;
-            min-width: 12px;
+            min-width: 4px;
         }
+        /* ── Hover tooltip ── */
         .ve-stage.video-js .vjs-mouse-display {
             position: absolute;
             top: 0;
@@ -9672,14 +9842,14 @@ HTML);
         }
         .ve-stage.video-js .vjs-time-tooltip {
             position: absolute;
-            bottom: 18px;
+            bottom: 16px;
             left: 50%;
             transform: translateX(-50%);
-            padding: 4px 7px;
+            padding: 4px 8px;
             border-radius: 4px;
-            background: rgba(0, 0, 0, 0.9);
+            background: rgba(0, 0, 0, 0.92);
             color: #fff;
-            font-size: 0.76rem;
+            font-size: 0.74rem;
             font-weight: 600;
             white-space: nowrap;
         }
@@ -9689,9 +9859,10 @@ HTML);
             left: 50%;
             transform: translateX(-50%);
             overflow: hidden;
-            border-radius: 5px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
             background: #000;
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.42);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
         }
         .ve-stage.video-js .vjs-thumbnail {
             width: 100%;
@@ -9704,63 +9875,122 @@ HTML);
             left: 0;
             right: 0;
             bottom: 0;
-            padding: 4px 8px;
+            padding: 3px 6px;
             color: #fff;
-            font-size: 0.8rem;
+            font-size: 0.72rem;
             font-weight: 600;
             text-align: center;
             text-shadow: 0 0 3px rgba(0, 0, 0, 0.85);
         }
+        /* ── Speed panel ── */
+        .ve-stage.video-js .ve-speed-panel {
+            position: absolute;
+            right: 0;
+            bottom: 48px;
+            z-index: 8;
+            width: 160px;
+            padding: 8px;
+            background: rgba(18, 18, 18, 0.96);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+        }
+        .ve-stage.video-js .ve-speed-panel[hidden] {
+            display: none !important;
+        }
+        .ve-stage.video-js .ve-speed-panel-header {
+            margin-bottom: 6px;
+            padding: 4px 8px;
+            color: var(--ve-muted);
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+        .ve-stage.video-js .ve-speed-list {
+            display: grid;
+            gap: 2px;
+        }
+        .ve-stage.video-js .ve-speed-option {
+            width: 100%;
+            min-height: 34px;
+            padding: 7px 10px;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--ve-text);
+            font: inherit;
+            font-size: 0.85rem;
+            text-align: left;
+            cursor: pointer;
+            transition: background .12s ease, color .12s ease;
+        }
+        .ve-stage.video-js .ve-speed-option:hover,
+        .ve-stage.video-js .ve-speed-option:focus-visible {
+            background: var(--ve-surface-hover);
+            outline: none;
+        }
+        .ve-stage.video-js .ve-speed-option.is-active {
+            color: var(--ve-accent);
+            font-weight: 700;
+            background: rgba(229, 9, 20, 0.1);
+        }
+        /* ── Subtitle panel ── */
         .ve-stage.video-js .ve-subtitle-panel {
             position: absolute;
             right: 0;
-            bottom: 44px;
+            bottom: 48px;
             z-index: 8;
             width: 220px;
             padding: 10px;
             background: rgba(18, 18, 18, 0.96);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 4px;
-            box-shadow: 0 16px 30px rgba(0, 0, 0, 0.36);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
         }
         .ve-stage.video-js .ve-subtitle-panel[hidden] {
             display: none !important;
         }
-        .ve-stage.video-js .ve-subtitle-panel.is-visible {
-            display: block;
-        }
         .ve-stage.video-js .ve-subtitle-panel-header {
-            margin-bottom: 8px;
-            color: rgba(255, 255, 255, 0.66);
-            font-size: 0.72rem;
+            margin-bottom: 6px;
+            padding: 4px 8px;
+            color: var(--ve-muted);
+            font-size: 0.68rem;
             font-weight: 700;
-            letter-spacing: 0.08em;
+            letter-spacing: 0.1em;
             text-transform: uppercase;
         }
         .ve-stage.video-js .ve-subtitle-list {
             display: grid;
-            gap: 4px;
+            gap: 2px;
         }
         .ve-stage.video-js .ve-subtitle-option {
             width: 100%;
             min-height: 34px;
-            padding: 8px 10px;
+            padding: 7px 10px;
             border: 0;
-            border-radius: 2px;
+            border-radius: 6px;
             background: transparent;
-            color: #f4f4f4;
+            color: var(--ve-text);
             font: inherit;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             text-align: left;
+            cursor: pointer;
+            transition: background .12s ease, color .12s ease;
         }
         .ve-stage.video-js .ve-subtitle-option:hover,
         .ve-stage.video-js .ve-subtitle-option:focus-visible {
-            background: rgba(255, 255, 255, 0.08);
+            background: var(--ve-surface-hover);
             outline: none;
         }
         .ve-stage.video-js .ve-subtitle-option.is-active {
             color: var(--ve-accent);
             font-weight: 700;
+            background: rgba(229, 9, 20, 0.1);
         }
         .ve-stage.video-js .ve-subtitle-url-form {
             display: grid;
@@ -9771,8 +10001,8 @@ HTML);
             width: 100%;
             min-height: 34px;
             padding: 0 10px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 2px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
             background: rgba(255, 255, 255, 0.04);
             color: #fff;
             font: inherit;
@@ -9780,34 +10010,37 @@ HTML);
         .ve-stage.video-js .ve-subtitle-url-form button {
             min-height: 34px;
             border: 0;
-            border-radius: 2px;
+            border-radius: 6px;
             background: var(--ve-accent);
-            color: #111;
+            color: #fff;
             font: inherit;
             font-weight: 700;
+            cursor: pointer;
         }
         .ve-stage.video-js .ve-subtitle-status {
-            margin-top: 8px;
-            color: rgba(255, 255, 255, 0.68);
-            font-size: 0.8rem;
+            margin-top: 6px;
+            padding: 0 4px;
+            color: var(--ve-muted);
+            font-size: 0.78rem;
             line-height: 1.4;
         }
         .ve-stage.video-js .ve-subtitle-status.is-error {
-            color: #ff9b9b;
+            color: #ff6b6b;
         }
+        /* ── Caption overlay ── */
         .ve-stage.video-js .ve-caption-overlay {
             position: absolute;
             left: 50%;
-            bottom: 72px;
+            bottom: 80px;
             z-index: 5;
             display: none;
             max-width: min(92%, 760px);
-            padding: 8px 12px;
-            background: rgba(0, 0, 0, 0.78);
+            padding: 8px 14px;
+            background: rgba(0, 0, 0, 0.82);
             border-radius: 4px;
             color: #fff;
-            font-size: 0.98rem;
-            font-weight: 700;
+            font-size: 1rem;
+            font-weight: 600;
             line-height: 1.45;
             text-align: center;
             white-space: pre-line;
@@ -9817,19 +10050,20 @@ HTML);
         .ve-stage.video-js .ve-caption-overlay.is-visible {
             display: block;
         }
+        /* ── Player state toast ── */
         .ve-stage.video-js .ve-player-state {
             position: absolute;
-            left: 12px;
-            bottom: 68px;
+            left: 16px;
+            bottom: 80px;
             z-index: 7;
-            max-width: calc(100% - 24px);
-            padding: 8px 10px;
-            border-radius: 4px;
-            background: rgba(0, 0, 0, 0.82);
-            color: #f4f4f4;
+            max-width: calc(100% - 32px);
+            padding: 8px 12px;
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.86);
+            color: var(--ve-text);
             font-size: 0.82rem;
             opacity: 0;
-            transform: translateY(8px);
+            transform: translateY(6px);
             pointer-events: none;
             transition: opacity .18s ease, transform .18s ease;
         }
@@ -9838,443 +10072,59 @@ HTML);
             transform: translateY(0);
         }
         .ve-stage.video-js .ve-player-state.is-error {
-            color: #ff9b9b;
+            color: #ff6b6b;
         }
+        /* ── Mobile adjustments ── */
         @media (max-width: 767px) {
-            .ve-stage.video-js .vjs-big-play-button {
-                width: 96px;
-                height: 96px;
-                margin: -48px 0 0 -48px;
+            .ve-stage.video-js .vjs-big-play-button,
+            .ve-stage.video-js .ve-player-overlay-button {
+                width: 64px;
+                height: 64px;
             }
-            .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder,
-            .ve-stage.video-js .ve-player-overlay-glyph {
-                width: 96px;
-                height: 96px;
+            .ve-stage.video-js .ve-player-overlay-glyph,
+            .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder {
+                width: 64px;
+                height: 64px;
             }
-            .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before,
-            .ve-stage.video-js .ve-player-overlay-glyph::before {
-                margin-top: -24px;
-                margin-left: -8px;
-                border-top-width: 24px;
-                border-bottom-width: 24px;
-                border-left-width: 38px;
+            .ve-stage.video-js .ve-player-overlay-glyph::before,
+            .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before {
+                width: 28px;
+                height: 28px;
             }
             .ve-stage.video-js .vjs-control-bar {
-                min-height: 58px;
-                padding: 24px 8px 10px;
+                padding: 0 10px 8px;
             }
-            .ve-stage.video-js .vjs-progress-control {
-                left: 8px;
-                right: 74px;
+            .ve-stage.video-js .vjs-buttons-row {
+                gap: 2px;
+            }
+            .ve-stage.video-js .vjs-play-control,
+            .ve-stage.video-js .vjs-fullscreen-control,
+            .ve-stage.video-js .vjs-mute-control,
+            .ve-stage.video-js .vjs-seek-button,
+            .ve-stage.video-js .vjs-home-link,
+            .ve-stage.video-js .vjs-speed-toggle,
+            .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
+                width: 36px;
+                height: 36px;
             }
             .ve-stage.video-js .vjs-volume-control {
                 display: none;
             }
-            .ve-stage.video-js .vjs-current-time,
-            .ve-stage.video-js .vjs-duration,
-            .ve-stage.video-js .vjs-time-divider,
             .ve-stage.video-js .vjs-remaining-time {
-                font-size: 0.82rem;
+                font-size: 0.72rem;
+                min-width: 44px;
             }
+            .ve-stage.video-js .ve-speed-panel,
             .ve-stage.video-js .ve-subtitle-panel {
                 width: min(220px, calc(100vw - 20px));
-                right: -4px;
             }
             .ve-stage.video-js .ve-caption-overlay {
                 bottom: 64px;
                 font-size: 0.88rem;
             }
             .ve-stage.video-js .ve-player-state {
-                bottom: 60px;
-            }
-        }
-        .ve-stage.video-js {
-            --ve-player-surface: linear-gradient(180deg, rgba(11, 11, 11, 0.06) 0%, rgba(8, 8, 8, 0.84) 100%);
-            --ve-player-panel: linear-gradient(180deg, rgba(30, 30, 30, 0.94) 0%, rgba(15, 15, 15, 0.98) 100%);
-            --ve-player-panel-border: rgba(255, 153, 0, 0.14);
-            --ve-player-panel-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
-            --ve-player-button-bg: linear-gradient(180deg, rgba(39, 39, 39, 0.96) 0%, rgba(20, 20, 20, 0.98) 100%);
-            --ve-player-button-border: rgba(255, 255, 255, 0.08);
-            --ve-player-track: rgba(255, 255, 255, 0.16);
-            --ve-player-load: rgba(255, 255, 255, 0.26);
-            --ve-player-text: #f4f4f4;
-            --ve-player-muted: rgba(222, 222, 222, 0.74);
-            font-family: Arial, Helvetica, sans-serif;
-        }
-        .ve-stage.video-js::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            z-index: 1;
-            background:
-                linear-gradient(180deg, rgba(8, 8, 8, 0) 0%, rgba(8, 8, 8, 0.1) 42%, rgba(5, 5, 5, 0.68) 100%),
-                radial-gradient(circle at 50% 58%, rgba(255, 153, 0, 0.04) 0%, rgba(255, 153, 0, 0) 30%, rgba(0, 0, 0, 0.18) 100%);
-            pointer-events: none;
-        }
-        .ve-stage.video-js::after {
-            content: "";
-            position: absolute;
-            inset: auto 0 0 0;
-            height: 34%;
-            z-index: 1;
-            background: linear-gradient(180deg, rgba(255, 153, 0, 0) 0%, rgba(255, 153, 0, 0.03) 16%, rgba(8, 8, 8, 0.84) 100%);
-            pointer-events: none;
-        }
-        .ve-stage.video-js .vjs-tech,
-        .ve-stage.video-js .ve-player-poster,
-        .ve-stage.video-js .vjs-text-track-display {
-            z-index: 0;
-        }
-        .ve-stage.video-js .ve-player-overlay {
-            z-index: 4;
-            background: transparent;
-        }
-        .ve-stage.video-js .ve-player-overlay-button,
-        .ve-stage.video-js .vjs-big-play-button {
-            position: relative;
-            top: auto;
-            left: auto;
-            width: 112px;
-            height: 112px;
-            margin: 0;
-            transform: none;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 999px;
-            border: 1px solid rgba(255, 153, 0, 0.22);
-            background:
-                radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 34%),
-                linear-gradient(180deg, rgba(36, 36, 36, 0.98) 0%, rgba(16, 16, 16, 0.98) 100%);
-            box-shadow: 0 20px 54px rgba(0, 0, 0, 0.46), 0 0 0 7px rgba(255, 153, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-            transition: transform .22s ease, background-color .22s ease, opacity .18s ease, box-shadow .22s ease, border-color .22s ease, filter .22s ease;
-        }
-        .ve-stage.video-js .ve-player-overlay-button:hover,
-        .ve-stage.video-js .ve-player-overlay-button:focus-visible,
-        .ve-stage.video-js .vjs-big-play-button:hover,
-        .ve-stage.video-js .vjs-big-play-button:focus-visible {
-            opacity: 1;
-            transform: translateY(-2px) scale(1.03);
-            border-color: rgba(255, 153, 0, 0.38);
-            box-shadow: 0 30px 64px rgba(0, 0, 0, 0.5), 0 0 0 9px rgba(255, 153, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-            filter: saturate(1.04);
-        }
-        .ve-stage.video-js .ve-player-overlay-glyph,
-        .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder {
-            width: 112px;
-            height: 112px;
-        }
-        .ve-stage.video-js .ve-player-overlay-glyph::before,
-        .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before {
-            inset: 0;
-            width: 40px;
-            height: 40px;
-            margin: auto;
-            border: 0;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Cpath fill='%23ffffff' d='M15 11.5 31 22 15 32.5z'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: center;
-            background-size: contain;
-            transform: none;
-            filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.28));
-        }
-        .ve-stage.video-js .ve-player-overlay-label {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            padding: 0;
-            margin: -1px;
-            overflow: hidden;
-            clip: rect(0, 0, 0, 0);
-            border: 0;
-            white-space: nowrap;
-        }
-        .ve-stage.video-js .ve-player-overlay-button.is-starting,
-        .ve-stage.video-js .vjs-big-play-button.is-starting {
-            transform: none;
-        }
-        .ve-stage.video-js .vjs-loading-spinner {
-            z-index: 8;
-            width: 48px;
-            height: 48px;
-            margin: -24px 0 0 -24px;
-            border-width: 3px;
-            border-color: rgba(255, 255, 255, 0.18);
-            border-top-color: rgba(255, 255, 255, 0.96);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
-        }
-        .ve-stage.video-js .vjs-control-bar {
-            left: 14px;
-            right: 14px;
-            bottom: 14px;
-            min-height: 84px;
-            padding: 30px 14px 14px;
-            gap: 8px;
-            border: 1px solid var(--ve-player-panel-border);
-            border-radius: 18px;
-            background: var(--ve-player-panel);
-            box-shadow: var(--ve-player-panel-shadow);
-            transition: opacity .22s ease, transform .22s ease, box-shadow .22s ease;
-        }
-        .ve-stage.video-js .vjs-control-bar::before {
-            content: "";
-            position: absolute;
-            left: 14px;
-            right: 14px;
-            top: 0;
-            height: 1px;
-            border-radius: 999px;
-            background: linear-gradient(90deg, rgba(255, 153, 0, 0) 0%, rgba(255, 153, 0, 0.76) 24%, rgba(255, 184, 77, 0.98) 50%, rgba(255, 153, 0, 0.76) 76%, rgba(255, 153, 0, 0) 100%);
-            opacity: 0.9;
-        }
-        .ve-stage.video-js.vjs-user-inactive .vjs-control-bar,
-        .ve-stage.video-js:not(.vjs-has-started) .vjs-control-bar {
-            opacity: 0;
-            transform: translateY(12px);
-            pointer-events: none;
-        }
-        .ve-stage.video-js .vjs-progress-control {
-            top: 9px;
-            left: 14px;
-            right: 14px;
-            height: 16px;
-        }
-        .ve-stage.video-js .vjs-progress-holder {
-            height: 5px;
-            margin-top: 5px;
-            border-radius: 999px;
-            background: var(--ve-player-track);
-            overflow: visible;
-            transition: height .18s ease, transform .18s ease;
-        }
-        .ve-stage.video-js .vjs-progress-holder:hover {
-            height: 7px;
-            transform: translateY(-1px);
-        }
-        .ve-stage.video-js .vjs-load-progress,
-        .ve-stage.video-js .vjs-play-progress {
-            height: 5px;
-            border-radius: 999px;
-        }
-        .ve-stage.video-js .vjs-load-progress {
-            background: var(--ve-player-load);
-            opacity: 1;
-        }
-        .ve-stage.video-js .vjs-play-progress::before {
-            right: -8px;
-            width: 12px;
-            height: 12px;
-            box-shadow: 0 0 0 3px rgba(255, 153, 0, 0.22), 0 6px 18px rgba(0, 0, 0, 0.34);
-            transition: transform .18s ease, box-shadow .18s ease;
-        }
-        .ve-stage.video-js .vjs-progress-holder:hover .vjs-play-progress::before {
-            transform: translateY(-50%) scale(1.1);
-            box-shadow: 0 0 0 4px rgba(255, 153, 0, 0.28), 0 8px 24px rgba(0, 0, 0, 0.36);
-        }
-        .ve-stage.video-js .vjs-control,
-        .ve-stage.video-js .vjs-button {
-            color: var(--ve-player-text);
-        }
-        .ve-stage.video-js .vjs-play-control,
-        .ve-stage.video-js .vjs-fullscreen-control,
-        .ve-stage.video-js .vjs-mute-control,
-        .ve-stage.video-js .vjs-seek-button,
-        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
-            width: 42px;
-            height: 42px;
-            border: 1px solid var(--ve-player-button-border);
-            border-radius: 14px;
-            background: var(--ve-player-button-bg);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-            transition: transform .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .18s ease;
-        }
-        .ve-stage.video-js .vjs-play-control {
-            border-color: rgba(255, 153, 0, 0.22);
-            background: linear-gradient(180deg, rgba(255, 153, 0, 0.2) 0%, rgba(255, 153, 0, 0.08) 100%), var(--ve-player-button-bg);
-        }
-        .ve-stage.video-js .vjs-control:hover,
-        .ve-stage.video-js .vjs-control:focus-visible,
-        .ve-stage.video-js .vjs-button:hover,
-        .ve-stage.video-js .vjs-button:focus-visible {
-            opacity: 1;
-            background: linear-gradient(180deg, rgba(255, 172, 51, 0.16) 0%, rgba(255, 153, 0, 0.06) 100%), var(--ve-player-button-bg);
-            border-color: rgba(255, 172, 51, 0.28);
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.26), 0 0 0 1px rgba(255, 153, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-            transform: translateY(-1px);
-        }
-        .ve-stage.video-js .vjs-icon-placeholder {
-            width: 22px;
-            height: 22px;
-        }
-        .ve-stage.video-js .vjs-volume-panel {
-            margin-right: 6px;
-            gap: 8px;
-        }
-        .ve-stage.video-js .vjs-volume-control {
-            width: 84px;
-            height: 42px;
-        }
-        .ve-stage.video-js .vjs-volume-bar {
-            height: 4px;
-            border-radius: 999px;
-            accent-color: var(--ve-accent);
-        }
-        .ve-stage.video-js .vjs-current-time,
-        .ve-stage.video-js .vjs-duration,
-        .ve-stage.video-js .vjs-time-divider,
-        .ve-stage.video-js .vjs-remaining-time {
-            height: 42px;
-            color: var(--ve-player-text);
-            font-size: 0.8rem;
-            font-weight: 700;
-            text-shadow: none;
-        }
-        .ve-stage.video-js .vjs-current-time,
-        .ve-stage.video-js .vjs-duration {
-            min-width: 44px;
-            color: var(--ve-player-muted);
-        }
-        .ve-stage.video-js .vjs-time-divider {
-            width: 10px;
-            color: rgba(255, 255, 255, 0.36);
-        }
-        .ve-stage.video-js .vjs-remaining-time {
-            position: static;
-            width: auto;
-            min-width: 58px;
-            height: 42px;
-            margin-right: 6px;
-            color: var(--ve-player-muted);
-            font-size: 0.8rem;
-        }
-        .ve-stage.video-js .vjs-current-time-display,
-        .ve-stage.video-js .vjs-duration-display,
-        .ve-stage.video-js .vjs-remaining-time-display {
-            letter-spacing: 0.01em;
-        }
-        .ve-stage.video-js .vjs-custom-control-spacer {
-            min-width: 10px;
-        }
-        .ve-stage.video-js .vjs-time-tooltip {
-            bottom: 22px;
-            padding: 5px 8px;
-            border-radius: 999px;
-            background: rgba(19, 19, 19, 0.94);
-            color: var(--ve-player-text);
-            font-size: 0.74rem;
-        }
-        .ve-stage.video-js .vjs-thumbnail-holder {
-            bottom: 36px;
-            border-radius: 12px;
-            border: 1px solid rgba(255, 153, 0, 0.12);
-            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.46);
-        }
-        .ve-stage.video-js .ve-subtitle-panel {
-            right: 0;
-            bottom: 58px;
-            width: 240px;
-            padding: 12px;
-            border-radius: 14px;
-            background: linear-gradient(180deg, rgba(29, 29, 29, 0.98) 0%, rgba(15, 15, 15, 0.98) 100%);
-            border: 1px solid rgba(255, 153, 0, 0.14);
-            box-shadow: 0 22px 40px rgba(0, 0, 0, 0.42);
-        }
-        .ve-stage.video-js .ve-subtitle-panel-header {
-            margin-bottom: 10px;
-            color: rgba(255, 255, 255, 0.54);
-            font-size: 0.68rem;
-            letter-spacing: 0.14em;
-        }
-        .ve-stage.video-js .ve-subtitle-option {
-            min-height: 38px;
-            padding: 9px 12px;
-            border-radius: 10px;
-            color: var(--ve-player-text);
-            transition: background-color .18s ease, transform .18s ease, color .18s ease;
-        }
-        .ve-stage.video-js .ve-subtitle-option:hover,
-        .ve-stage.video-js .ve-subtitle-option:focus-visible {
-            background: rgba(255, 153, 0, 0.12);
-            transform: translateX(2px);
-        }
-        .ve-stage.video-js .ve-caption-overlay {
-            bottom: 118px;
-            padding: 10px 14px;
-            border-radius: 12px;
-            background: rgba(12, 12, 12, 0.88);
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
-        }
-        .ve-stage.video-js .ve-player-state {
-            left: 16px;
-            bottom: 114px;
-            padding: 10px 12px;
-            border-radius: 12px;
-            background: rgba(12, 12, 12, 0.88);
-            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
-        }
-        @media (max-width: 767px) {
-            .ve-stage.video-js .ve-player-overlay-button,
-            .ve-stage.video-js .vjs-big-play-button {
-                width: 92px;
-                height: 92px;
-            }
-            .ve-stage.video-js .ve-player-overlay-glyph,
-            .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder {
-                width: 92px;
-                height: 92px;
-            }
-            .ve-stage.video-js .ve-player-overlay-glyph::before,
-            .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before {
-                width: 34px;
-                height: 34px;
-            }
-            .ve-stage.video-js .vjs-control-bar {
                 left: 10px;
-                right: 10px;
-                bottom: 10px;
-                min-height: 76px;
-                padding: 28px 10px 10px;
-                gap: 4px;
-                border-radius: 18px;
-            }
-            .ve-stage.video-js .vjs-progress-control {
-                left: 10px;
-                right: 10px;
-            }
-            .ve-stage.video-js .vjs-play-control,
-            .ve-stage.video-js .vjs-fullscreen-control,
-            .ve-stage.video-js .vjs-mute-control,
-            .ve-stage.video-js .vjs-seek-button,
-            .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
-                width: 38px;
-                height: 38px;
-            }
-            .ve-stage.video-js .vjs-current-time,
-            .ve-stage.video-js .vjs-duration,
-            .ve-stage.video-js .vjs-time-divider,
-            .ve-stage.video-js .vjs-remaining-time {
-                font-size: 0.74rem;
-            }
-            .ve-stage.video-js .vjs-remaining-time {
-                display: none;
-            }
-            .ve-stage.video-js .vjs-volume-control {
-                display: none;
-            }
-            .ve-stage.video-js .ve-subtitle-panel {
-                right: -2px;
-                bottom: 54px;
-                width: min(240px, calc(100vw - 24px));
-            }
-            .ve-stage.video-js .ve-caption-overlay {
-                bottom: 92px;
-                font-size: 0.88rem;
-            }
-            .ve-stage.video-js .ve-player-state {
-                left: 10px;
-                right: 10px;
-                bottom: 88px;
-                max-width: none;
+                bottom: 64px;
             }
         }
     </style>
@@ -10306,38 +10156,6 @@ HTML);
             </div>
             <div id="ve-caption-overlay" class="ve-caption-overlay" aria-live="polite"></div>
             <div id="ve-player-controls" class="vjs-control-bar" dir="ltr">
-                <button type="button" id="ve-play-toggle" class="vjs-play-control vjs-control vjs-button vjs-paused" title="Play" aria-label="Play">
-                    <span class="vjs-icon-placeholder" aria-hidden="true"></span>
-                    <span class="vjs-control-text" aria-live="polite">Play</span>
-                </button>
-                <button type="button" id="ve-skip-back" class="vjs-seek-button skip-back skip-10 vjs-control vjs-button" title="Seek back 10 seconds" aria-label="Seek back 10 seconds">
-                    <span class="vjs-icon-placeholder" aria-hidden="true"></span>
-                    <span class="vjs-control-text" aria-live="polite">Seek back 10 seconds</span>
-                </button>
-                <button type="button" id="ve-skip-forward" class="vjs-seek-button skip-forward skip-10 vjs-control vjs-button" title="Seek forward 10 seconds" aria-label="Seek forward 10 seconds">
-                    <span class="vjs-icon-placeholder" aria-hidden="true"></span>
-                    <span class="vjs-control-text" aria-live="polite">Seek forward 10 seconds</span>
-                </button>
-                <div class="vjs-volume-panel vjs-control vjs-volume-panel-horizontal">
-                    <button type="button" id="ve-mute-toggle" class="vjs-mute-control vjs-control vjs-button vjs-vol-3" title="Mute" aria-label="Mute">
-                        <span class="vjs-icon-placeholder" aria-hidden="true"></span>
-                        <span class="vjs-control-text" aria-live="polite">Mute</span>
-                    </button>
-                    <div class="vjs-volume-control vjs-control vjs-volume-horizontal">
-                        <input type="range" id="ve-volume-range" class="vjs-volume-bar vjs-slider-bar vjs-slider vjs-slider-horizontal" min="0" max="100" step="1" value="100" aria-label="Volume Level" aria-live="polite" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-valuetext="100%">
-                    </div>
-                </div>
-                <div class="vjs-current-time vjs-time-control vjs-control">
-                    <span class="vjs-control-text" role="presentation">Current Time&nbsp;</span>
-                    <span id="ve-current-time-display" class="vjs-current-time-display" aria-live="off" role="presentation">0:00</span>
-                </div>
-                <div class="vjs-time-control vjs-time-divider" aria-hidden="true">
-                    <div><span>/</span></div>
-                </div>
-                <div class="vjs-duration vjs-time-control vjs-control">
-                    <span class="vjs-control-text" role="presentation">Duration&nbsp;</span>
-                    <span id="ve-duration-display" class="vjs-duration-display" aria-live="off" role="presentation">0:00</span>
-                </div>
                 <div class="vjs-progress-control vjs-control">
                     <div id="ve-progress-holder" tabindex="0" class="vjs-progress-holder vjs-slider vjs-slider-horizontal" role="slider" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Progress Bar" aria-valuetext="0:00 of 0:00">
                         <div id="ve-load-progress" class="vjs-load-progress" style="width:0%;"></div>
@@ -10350,32 +10168,78 @@ HTML);
                         </div>
                         <div id="ve-play-progress" class="vjs-play-progress vjs-slider-bar" aria-hidden="true" style="width:0%;"></div>
                     </div>
-                </div>
-                <div class="vjs-remaining-time vjs-time-control vjs-control">
-                    <span class="vjs-control-text" role="presentation">Remaining Time&nbsp;</span>
-                    <span aria-hidden="true">-</span>
-                    <span id="ve-remaining-time-display" class="vjs-remaining-time-display" aria-live="off" role="presentation">0:00</span>
-                </div>
-                <div class="vjs-custom-control-spacer vjs-spacer">&nbsp;</div>
-                <div class="vjs-subs-caps-button vjs-menu-button vjs-menu-button-popup vjs-control vjs-button">
-                    <button type="button" id="ve-subtitle-button" class="vjs-subs-caps-button vjs-menu-button vjs-menu-button-popup vjs-button" title="Captions" aria-label="Captions" aria-controls="ve-subtitle-panel" aria-expanded="false">
-                        <span class="vjs-icon-placeholder" aria-hidden="true"></span>
-                        <span class="vjs-control-text" aria-live="polite">Captions</span>
-                    </button>
-                    <div id="ve-subtitle-panel" class="ve-subtitle-panel vjs-menu" hidden>
-                        <div class="ve-subtitle-panel-header">Captions Settings</div>
-                        <div id="ve-subtitle-list" class="ve-subtitle-list"></div>
-                        <form id="ve-subtitle-url-form" class="ve-subtitle-url-form" hidden>
-                            <input type="url" id="ve-subtitle-url-input" placeholder="https://example.com/subtitles.vtt" inputmode="url">
-                            <button type="submit">Load</button>
-                        </form>
-                        <div id="ve-subtitle-status" class="ve-subtitle-status" hidden></div>
+                    <div class="vjs-remaining-time vjs-time-control vjs-control">
+                        <span class="vjs-control-text" role="presentation">Remaining Time&nbsp;</span>
+                        <span aria-hidden="true">-</span>
+                        <span id="ve-remaining-time-display" class="vjs-remaining-time-display" aria-live="off" role="presentation">0:00</span>
                     </div>
                 </div>
-                <button type="button" id="ve-fullscreen-toggle" class="vjs-fullscreen-control vjs-control vjs-button" title="Fullscreen" aria-label="Fullscreen">
-                    <span class="vjs-icon-placeholder" aria-hidden="true"></span>
-                    <span class="vjs-control-text" aria-live="polite">Fullscreen</span>
-                </button>
+                <div class="vjs-buttons-row">
+                    <button type="button" id="ve-play-toggle" class="vjs-play-control vjs-control vjs-button vjs-paused" title="Play" aria-label="Play">
+                        <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                        <span class="vjs-control-text" aria-live="polite">Play</span>
+                    </button>
+                    <button type="button" id="ve-skip-back" class="vjs-seek-button skip-back skip-10 vjs-control vjs-button" title="Seek back 10 seconds" aria-label="Seek back 10 seconds">
+                        <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                        <span class="vjs-control-text" aria-live="polite">Seek back 10 seconds</span>
+                    </button>
+                    <button type="button" id="ve-skip-forward" class="vjs-seek-button skip-forward skip-10 vjs-control vjs-button" title="Seek forward 10 seconds" aria-label="Seek forward 10 seconds">
+                        <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                        <span class="vjs-control-text" aria-live="polite">Seek forward 10 seconds</span>
+                    </button>
+                    <div class="vjs-volume-panel vjs-control vjs-volume-panel-horizontal">
+                        <button type="button" id="ve-mute-toggle" class="vjs-mute-control vjs-control vjs-button vjs-vol-3" title="Mute" aria-label="Mute">
+                            <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                            <span class="vjs-control-text" aria-live="polite">Mute</span>
+                        </button>
+                        <div class="vjs-volume-control vjs-control vjs-volume-horizontal">
+                            <input type="range" id="ve-volume-range" class="vjs-volume-bar vjs-slider-bar vjs-slider vjs-slider-horizontal" min="0" max="100" step="1" value="100" aria-label="Volume Level" aria-live="polite" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-valuetext="100%">
+                        </div>
+                    </div>
+                    <div class="vjs-custom-control-spacer vjs-spacer">&nbsp;</div>
+                    <a id="ve-home-link" class="vjs-home-link vjs-control vjs-button" title="Visit Website" aria-label="Visit Website" target="_blank" rel="noopener">
+                        <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                        <span class="vjs-control-text">Visit Website</span>
+                    </a>
+                    <div class="vjs-subs-caps-button vjs-menu-button vjs-menu-button-popup vjs-control vjs-button">
+                        <button type="button" id="ve-subtitle-button" class="vjs-subs-caps-button vjs-menu-button vjs-menu-button-popup vjs-button" title="Captions" aria-label="Captions" aria-controls="ve-subtitle-panel" aria-expanded="false">
+                            <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                            <span class="vjs-control-text" aria-live="polite">Captions</span>
+                        </button>
+                        <div id="ve-subtitle-panel" class="ve-subtitle-panel vjs-menu" hidden>
+                            <div class="ve-subtitle-panel-header">Captions Settings</div>
+                            <div id="ve-subtitle-list" class="ve-subtitle-list"></div>
+                            <form id="ve-subtitle-url-form" class="ve-subtitle-url-form" hidden>
+                                <input type="url" id="ve-subtitle-url-input" placeholder="https://example.com/subtitles.vtt" inputmode="url">
+                                <button type="submit">Load</button>
+                            </form>
+                            <div id="ve-subtitle-status" class="ve-subtitle-status" hidden></div>
+                        </div>
+                    </div>
+                    <div class="vjs-speed-button vjs-menu-button vjs-control vjs-button">
+                        <button type="button" id="ve-speed-button" class="vjs-speed-toggle vjs-button" title="Playback Speed" aria-label="Playback Speed" aria-expanded="false">
+                            <span class="vjs-icon-placeholder" aria-hidden="true">1x</span>
+                            <span class="vjs-control-text">Playback Speed</span>
+                        </button>
+                        <div id="ve-speed-panel" class="ve-speed-panel vjs-menu" hidden>
+                            <div class="ve-speed-panel-header">Playback Speed</div>
+                            <div id="ve-speed-list" class="ve-speed-list">
+                                <button type="button" class="ve-speed-option" data-speed="0.25">0.25x</button>
+                                <button type="button" class="ve-speed-option" data-speed="0.5">0.5x</button>
+                                <button type="button" class="ve-speed-option" data-speed="0.75">0.75x</button>
+                                <button type="button" class="ve-speed-option is-active" data-speed="1">Normal</button>
+                                <button type="button" class="ve-speed-option" data-speed="1.25">1.25x</button>
+                                <button type="button" class="ve-speed-option" data-speed="1.5">1.5x</button>
+                                <button type="button" class="ve-speed-option" data-speed="1.75">1.75x</button>
+                                <button type="button" class="ve-speed-option" data-speed="2">2x</button>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" id="ve-fullscreen-toggle" class="vjs-fullscreen-control vjs-control vjs-button" title="Fullscreen" aria-label="Fullscreen">
+                        <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                        <span class="vjs-control-text" aria-live="polite">Fullscreen</span>
+                    </button>
+                </div>
             </div>
             <input type="file" id="ve-subtitle-file-input" accept=".vtt,.srt,text/vtt" hidden>
             <div id="ve-player-state" class="ve-player-state"></div>
