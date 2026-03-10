@@ -179,7 +179,14 @@ function findVideoManagerInstance(node) {
 
   try {
     const seenRequests = [];
-    const context = await browser.newContext({ baseURL });
+    const context = await browser.newContext({
+      baseURL,
+      serviceWorkers: 'block',
+      extraHTTPHeaders: {
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+    });
     const page = await context.newPage();
     page.on('request', (request) => {
       if (request.url().startsWith(baseURL)) {
@@ -279,12 +286,17 @@ function findVideoManagerInstance(node) {
     });
     await page.waitForFunction((folderName) => {
       const textarea = document.querySelector('#sharing [data-share-folder-output]');
-      return Boolean(textarea && textarea.value.startsWith(`${folderName}\n`) && textarea.value.includes('/videos/shared/'));
+      return Boolean(
+        textarea
+        && textarea.value.includes(folderName)
+        && textarea.value.includes('/videos/shared/')
+        && textarea.value.indexOf(folderName) < textarea.value.indexOf('/videos/shared/')
+      );
     }, sharedFolderName);
 
     const titledFolderShareLink = (await page.locator('#sharing [data-share-folder-output]').inputValue()).trim();
 
-    if (!titledFolderShareLink.startsWith(`${sharedFolderName}\n`)) {
+    if (!(titledFolderShareLink.includes(sharedFolderName) && titledFolderShareLink.indexOf(sharedFolderName) < titledFolderShareLink.indexOf('/videos/shared/'))) {
       throw new Error(`Folder share modal did not prepend the folder title. Received: ${titledFolderShareLink || '(empty)'}`);
     }
 

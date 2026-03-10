@@ -2610,18 +2610,54 @@ HTML;
         $videoTitle = ve_h((string) ($video['title'] ?? 'Untitled video'));
         $watchUrl = ve_h(ve_absolute_url('/d/' . rawurlencode((string) ($video['public_id'] ?? ''))));
         $embedUrl = ve_h(ve_absolute_url('/e/' . rawurlencode((string) ($video['public_id'] ?? ''))));
-        $thumbUrl = ve_h(ve_video_public_thumbnail_url($video, 'single'));
         $videoSize = ve_h(ve_video_format_bytes(ve_video_download_size_bytes($video)));
         $videoCreated = ve_h(ve_video_legacy_date_label((string) ($video['created_at'] ?? '')));
-        $videoCards .= '<article class="ve-video-card"><img src="' . $thumbUrl . '" alt="' . $videoTitle . '"><div><h2>' . $videoTitle . '</h2><p>' . $videoSize . ' • ' . $videoCreated . '</p><div class="ve-video-actions"><a href="' . $watchUrl . '" target="_blank" rel="noopener">Watch</a><a href="' . $embedUrl . '" target="_blank" rel="noopener">Embed</a></div></div></article>';
+        $videoRows .= <<<HTML
+<li class="video item d-flex align-items-center">
+    <div class="name">
+        <h4><a href="{$watchUrl}" target="_blank" rel="noopener">{$videoTitle}</a></h4>
+        <div class="ve-public-actions">
+            <a href="{$watchUrl}" target="_blank" rel="noopener">Watch</a>
+            <a href="{$embedUrl}" target="_blank" rel="noopener">Embed</a>
+        </div>
+    </div>
+    <div class="size d-none d-sm-block">{$videoSize}</div>
+    <div class="date d-none d-sm-block">{$videoCreated}</div>
+    <div class="views d-none d-sm-block">-</div>
+</li>
+HTML;
     }
 
-    if ($folderCards === '') {
-        $folderCards = '<p class="ve-empty">No shared subfolders.</p>';
+    $foldersSection = '';
+
+    if ($hasSubfolders) {
+        $foldersSection = <<<HTML
+        <div class="files mb-4">
+            <div class="title_wrap d-flex align-items-center justify-content-between flex-wrap">
+                <div>
+                    <h2 class="title mb-1">Folders</h2>
+                    <span>Browse the shared sub-folders inside this folder.</span>
+                </div>
+            </div>
+            <ul class="file_list">
+                <li class="header d-flex align-items-center">
+                    <div class="name">Name</div>
+                    <div class="size">Size</div>
+                    <div class="date">Created</div>
+                    <div class="views">Views</div>
+                </li>
+                {$folderRows}
+            </ul>
+        </div>
+HTML;
     }
 
-    if ($videoCards === '') {
-        $videoCards = '<p class="ve-empty">No public videos are available in this folder yet.</p>';
+    if ($videoRows === '') {
+        $videoRows = <<<HTML
+<li class="d-flex align-items-center ve-public-empty">
+    <div class="name"><h4>No public videos are available in this folder yet.</h4></div>
+</li>
+HTML;
     }
 
     ve_html(<<<HTML
@@ -2629,55 +2665,175 @@ HTML;
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>{$pageTitle}</title>
+    <script src="{$jqueryUrl}"></script>
+    <link rel="stylesheet" href="{$bootstrapCssUrl}">
+    <link rel="stylesheet" href="{$styleCssUrl}">
+    <link rel="stylesheet" href="{$panelCssUrl}">
+    <link rel="stylesheet" href="{$videoPageCssUrl}">
     <style>
-        body { margin: 0; font-family: Arial, sans-serif; background: #f5f6f8; color: #1f2933; }
-        .ve-shell { max-width: 1080px; margin: 0 auto; padding: 32px 20px 56px; }
-        .ve-hero { background: linear-gradient(135deg, #111827, #1f2937); color: #fff; border-radius: 20px; padding: 24px; }
-        .ve-hero h1 { margin: 0 0 8px; font-size: 2rem; }
-        .ve-meta { display: flex; flex-wrap: wrap; gap: 16px; color: rgba(255,255,255,0.75); font-size: 0.95rem; }
-        .ve-share { width: 100%; margin-top: 18px; border: 0; border-radius: 12px; padding: 12px 14px; resize: none; min-height: 76px; }
-        .ve-section { margin-top: 24px; }
-        .ve-section h2 { margin: 0 0 12px; font-size: 1.2rem; }
-        .ve-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-        .ve-folder-card, .ve-video-card { background: #fff; border-radius: 16px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); text-decoration: none; color: inherit; }
-        .ve-folder-card { display: block; padding: 16px; }
-        .ve-folder-card strong { display: block; margin-bottom: 6px; }
-        .ve-folder-card span, .ve-folder-card small { display: block; color: #52606d; }
-        .ve-video-card { display: grid; grid-template-columns: 180px 1fr; overflow: hidden; }
-        .ve-video-card img { width: 100%; height: 100%; min-height: 140px; object-fit: cover; background: #d9e2ec; }
-        .ve-video-card div { padding: 16px; }
-        .ve-video-card h2 { margin: 0 0 8px; font-size: 1.1rem; }
-        .ve-video-card p { margin: 0 0 12px; color: #52606d; }
-        .ve-video-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-        .ve-video-actions a { text-decoration: none; padding: 10px 14px; border-radius: 10px; background: #111827; color: #fff; }
-        .ve-empty { margin: 0; padding: 18px; background: #fff; border-radius: 16px; color: #52606d; }
-        @media (max-width: 720px) {
-            .ve-video-card { grid-template-columns: 1fr; }
-            .ve-video-card img { min-height: 180px; }
+        body {
+            background: #0d0d0d;
+        }
+        .player-wrap .ve-folder-stage {
+            width: 100%;
+            min-height: 280px;
+            background:
+                radial-gradient(circle at top right, rgba(255, 153, 0, 0.2), transparent 34%),
+                linear-gradient(135deg, #111 0%, #1d1d1d 55%, #080808 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .ve-folder-stage-copy {
+            width: min(720px, calc(100% - 48px));
+            text-align: center;
+            color: #fff;
+        }
+        .ve-folder-stage-copy img {
+            width: 120px;
+            margin-bottom: 18px;
+        }
+        .ve-folder-stage-copy h1 {
+            margin: 0 0 14px;
+            font-size: clamp(2rem, 3vw, 3.2rem);
+            letter-spacing: -0.03em;
+        }
+        .ve-folder-stage-copy p {
+            margin: 0;
+            color: rgba(255, 255, 255, 0.72);
+            font-size: 1rem;
+        }
+        .title-wrap .btn {
+            min-width: 152px;
+        }
+        .file_manager.public-folder-manager .title_wrap {
+            margin-bottom: 0;
+        }
+        .file_manager.public-folder-manager .files {
+            background: #fff;
+            border-radius: 0 0 8px 8px;
+            overflow: hidden;
+        }
+        .ve-public-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            font-size: 0.875rem;
+        }
+        .ve-public-actions a {
+            color: #ea8c00;
+            font-weight: 700;
+            text-decoration: none;
+        }
+        .ve-public-actions a:hover {
+            text-decoration: underline;
+        }
+        .ve-public-empty {
+            background: #fff;
+        }
+        .ve-public-empty .name {
+            width: 100%;
+        }
+        @media (max-width: 767.98px) {
+            .player-wrap .ve-folder-stage {
+                min-height: 220px;
+            }
+            .title-wrap .btn {
+                width: 100%;
+                margin-top: 12px;
+            }
         }
     </style>
 </head>
 <body>
-    <main class="ve-shell">
-        <section class="ve-hero">
-            <h1>{$safeFolderName}</h1>
-            <div class="ve-meta">
-                <span>Folder size: {$folderSize}</span>
-                <span>Created: {$folderCreated}</span>
+    <div class="player-wrap container">
+        <div style="--aspect-ratio: 16/9;" class="ve-folder-stage">
+            <div class="ve-folder-stage-copy">
+                <img src="{$logoUrl}" alt="DoodStream">
+                <h1>{$safeFolderName}</h1>
+                <p>Shared from the secure video dashboard with the same watch links and embedded playback flow.</p>
             </div>
-            <textarea class="ve-share" onclick="this.focus();this.select()" readonly>{$shareUrl}</textarea>
-        </section>
-        <section class="ve-section">
-            <h2>Folders</h2>
-            <div class="ve-grid">{$folderCards}</div>
-        </section>
-        <section class="ve-section">
-            <h2>Videos</h2>
-            <div class="ve-grid">{$videoCards}</div>
-        </section>
-    </main>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="title-wrap">
+            <div class="d-flex flex-wrap align-items-center justify-content-between">
+                <div class="info">
+                    <h4>{$safeFolderName}</h4>
+                    <div class="d-flex flex-wrap align-items-center text-muted font-weight-bold">
+                        <div class="size"><i class="fad fa-save mr-1"></i>{$folderSize}</div>
+                        <span class="mx-2"></span>
+                        <div class="uploadate"><i class="fad fa-calendar-alt mr-1"></i>{$folderCreated}</div>
+                    </div>
+                </div>
+                <button class="btn btn-white" type="button" data-copy-target="ve-public-folder-share">
+                    <i class="fad fa-link mr-2"></i>Copy Share Link
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container my-3">
+        <div class="video-content text-center">
+            <div class="buttonInside">
+                <textarea id="ve-public-folder-share" class="form-control export-txt" rows="1">{$shareUrl}</textarea>
+                <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="ve-public-folder-share">copy</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container my-4">
+        <div class="file_manager public-folder-manager">
+            {$foldersSection}
+            <div class="files">
+                <div class="title_wrap d-flex align-items-center justify-content-between flex-wrap">
+                    <div>
+                        <h2 class="title mb-1">Videos</h2>
+                        <span>Only public videos are visible inside this shared folder.</span>
+                    </div>
+                </div>
+                <ul class="file_list">
+                    <li class="header d-flex align-items-center">
+                        <div class="name">Name</div>
+                        <div class="size">Size</div>
+                        <div class="date">Created</div>
+                        <div class="views">Views</div>
+                    </li>
+                    {$videoRows}
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script src="{$bootstrapJsUrl}"></script>
+    <script>
+        (function () {
+            function copyTarget(targetId) {
+                var field = document.getElementById(targetId);
+
+                if (!field) {
+                    return;
+                }
+
+                field.focus();
+                field.select();
+
+                try {
+                    document.execCommand('copy');
+                } catch (error) {}
+            }
+
+            document.querySelectorAll('[data-copy-target]').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    copyTarget(button.getAttribute('data-copy-target'));
+                });
+            });
+        }());
+    </script>
 </body>
 </html>
 HTML);
@@ -5267,6 +5423,7 @@ function ve_video_secure_player_script(
         var thumbnailImage = document.getElementById('ve-thumbnail-image');
         var thumbnailText = document.getElementById('ve-thumbnail-text');
         var fullscreenToggleButton = document.getElementById('ve-fullscreen-toggle');
+        var cinemaToggleButton = document.getElementById('ve-cinema-toggle');
         var watchTimeValue = document.getElementById('ve-watch-time-value');
         var positionValue = document.getElementById('ve-position-value');
         var skipBackButton = document.getElementById('ve-skip-back');
@@ -5283,6 +5440,7 @@ function ve_video_secure_player_script(
         var speedButton = document.getElementById('ve-speed-button');
         var speedPanel = document.getElementById('ve-speed-panel');
         var speedPanelOpen = false;
+        var cinemaModeActive = false;
         var watchedSeconds = 0;
         var watchAuditTimer = null;
         var lastWatchSampleAt = 0;
@@ -5549,6 +5707,38 @@ function ve_video_secure_player_script(
             fullscreenToggleButton.classList.toggle('is-active', active);
             fullscreenToggleButton.title = active ? 'Exit Fullscreen' : 'Fullscreen';
             fullscreenToggleButton.setAttribute('aria-label', active ? 'Exit Fullscreen' : 'Fullscreen');
+        }
+
+        function postPlayerHostMessage(type, payload) {
+            if (window.parent && window.parent !== window && typeof window.parent.postMessage === 'function') {
+                window.parent.postMessage(Object.assign({ type: type }, payload || {}), '*');
+            }
+        }
+
+        function updateCinemaUi() {
+            if (!cinemaToggleButton) {
+                return;
+            }
+
+            cinemaToggleButton.classList.toggle('is-active', cinemaModeActive);
+            cinemaToggleButton.title = cinemaModeActive ? 'Exit Cinema Mode' : 'Cinema Mode';
+            cinemaToggleButton.setAttribute('aria-label', cinemaModeActive ? 'Exit Cinema Mode' : 'Cinema Mode');
+        }
+
+        function setCinemaMode(active) {
+            cinemaModeActive = Boolean(active);
+            updateCinemaUi();
+            postPlayerHostMessage('ve-player-cinema-toggle', { active: cinemaModeActive });
+        }
+
+        function closePlayerPanels() {
+            if (speedPanelOpen) {
+                closeSpeedPanel();
+            }
+
+            if (subtitlePanelOpen) {
+                closeSubtitlePanel();
+            }
         }
 
         function clearControlsHideTimer() {
@@ -6394,9 +6584,13 @@ function ve_video_secure_player_script(
                 }
 
                 closeSubtitlePanel();
-            });
+            }, true);
 
             document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape' && cinemaModeActive) {
+                    setCinemaMode(false);
+                }
+
                 if (event.key === 'Escape' && subtitlePanelOpen) {
                     closeSubtitlePanel();
                 }
@@ -6598,6 +6792,13 @@ function ve_video_secure_player_script(
                 });
             }
 
+            if (cinemaToggleButton) {
+                cinemaToggleButton.addEventListener('click', function () {
+                    setCinemaMode(!cinemaModeActive);
+                    showControlsTemporarily();
+                });
+            }
+
             if (homeLink && fallbackUrl) {
                 homeLink.href = fallbackUrl;
             }
@@ -6664,13 +6865,7 @@ function ve_video_secure_player_script(
                     }
                 }
 
-                if (speedPanelOpen) {
-                    closeSpeedPanel();
-                }
-
-                if (subtitlePanelOpen) {
-                    closeSubtitlePanel();
-                }
+                closePlayerPanels();
 
                 showControlsTemporarily();
                 togglePlaybackFromSurface();
@@ -6690,6 +6885,28 @@ function ve_video_secure_player_script(
                 if (subtitlePanelOpen && !target.closest('#ve-subtitle-panel') && !target.closest('#ve-subtitle-button')) {
                     closeSubtitlePanel();
                 }
+            }, true);
+
+            window.addEventListener('message', function (event) {
+                var data = event && event.data && typeof event.data === 'object' ? event.data : null;
+
+                if (!data || typeof data.type !== 'string') {
+                    return;
+                }
+
+                if (data.type === 've-close-player-panels') {
+                    closePlayerPanels();
+                    return;
+                }
+
+                if (data.type === 've-player-cinema-sync') {
+                    cinemaModeActive = Boolean(data.active);
+                    updateCinemaUi();
+                }
+            });
+
+            window.addEventListener('blur', function () {
+                closePlayerPanels();
             });
 
             stage.addEventListener('mouseleave', function () {
@@ -6703,6 +6920,7 @@ function ve_video_secure_player_script(
             video.addEventListener('volumechange', updateVolumeUi);
             document.addEventListener('fullscreenchange', updateFullscreenUi);
             document.addEventListener('webkitfullscreenchange', updateFullscreenUi);
+            updateCinemaUi();
         }
 
         function warmPlaybackRuntime() {
@@ -8706,7 +8924,7 @@ HTML;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-top: 12px;
+            margin-top: 0;
         }
         .download_vd {
             min-width: 260px;
@@ -8730,6 +8948,55 @@ HTML;
             color: #c7c7c7;
             font-weight: 600;
         }
+        .player-wrap {
+            position: relative;
+            z-index: 3;
+            transition: box-shadow .2s ease, transform .2s ease;
+        }
+        body.ve-cinema-mode {
+            background: #050505;
+        }
+        body.ve-cinema-mode::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.82);
+            pointer-events: none;
+            z-index: 1;
+        }
+        body.ve-cinema-mode .player-wrap {
+            position: fixed;
+            inset: 16px;
+            z-index: 4;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: auto;
+            max-width: none;
+            margin: 0;
+            padding: 0;
+            box-shadow: none;
+            transform: none;
+        }
+        body.ve-cinema-mode #os_player {
+            width: min(calc(100vw - 32px), calc((100vh - 32px) * 16 / 9));
+            max-width: none;
+            margin: 0 auto;
+        }
+        body.ve-cinema-mode .container:not(.player-wrap) {
+            position: relative;
+            z-index: 0;
+            opacity: 0.2;
+            transition: opacity .2s ease;
+        }
+        @media (max-width: 767.98px) {
+            body.ve-cinema-mode .player-wrap {
+                inset: 8px;
+            }
+            body.ve-cinema-mode #os_player {
+                width: min(calc(100vw - 16px), calc((100vh - 16px) * 16 / 9));
+            }
+        }
         .spinner-inline {
             display: inline-block;
             width: 18px;
@@ -8744,14 +9011,77 @@ HTML;
             to { transform: rotate(360deg); }
         }
         @media (max-width: 767.98px) {
-            .copy-in {
-                position: static;
+            .player-wrap,
+            .player-wrap.container,
+            .container,
+            .container.my-3,
+            .container.mt-4 {
+                max-width: 100%;
+            }
+            .player-wrap.container,
+            .container.my-3,
+            .container.mt-4,
+            .container {
+                padding-left: 12px;
+                padding-right: 12px;
+            }
+            .title-wrap .d-flex {
+                gap: 10px;
+            }
+            .title-wrap .info,
+            .title-wrap .text-right {
                 width: 100%;
-                margin-top: 8px;
+            }
+            .nav-pills#pills-tab {
+                display: flex;
+                flex-wrap: nowrap;
+                align-items: stretch;
+                margin-left: -4px;
+                margin-right: -4px;
+            }
+            .nav-pills#pills-tab .nav-item {
+                flex: 1 1 0;
+                min-width: 0;
+                margin-right: 0;
+                padding-left: 4px;
+                padding-right: 4px;
+            }
+            .nav-pills#pills-tab .nav-link {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 42px;
+                padding: 8px 6px;
+                font-size: 12px;
+                line-height: 1.2;
+                text-align: center;
+            }
+            .v-owner {
+                position: static;
+                display: block;
+                margin-bottom: 8px;
+                text-align: right;
+            }
+            .buttonInside {
+                margin-bottom: 8px;
+            }
+            .copy-in {
+                position: absolute;
+                right: 5px;
+                top: 5px;
+                width: auto;
+                margin-top: 0;
             }
             .export-txt {
-                padding-right: 12px;
-                height: 60px !important;
+                height: 42px !important;
+                min-height: 42px;
+                padding-right: 68px;
+                overflow: hidden;
+                white-space: nowrap;
+            }
+            #code_txt_ec {
+                height: 42px !important;
+                min-height: 42px;
             }
         }
     </style>
@@ -8834,6 +9164,18 @@ HTML;
             var activeRequestToken = '';
             var activeDownloadToken = '';
             var requestInFlight = false;
+            var cinemaModeActive = false;
+
+            function getPlayerFrameWindow() {
+                var host = document.getElementById('os_player');
+                var frame = host ? host.querySelector('iframe') : null;
+
+                if (!frame || !frame.contentWindow) {
+                    return null;
+                }
+
+                return frame.contentWindow;
+            }
 
             function updateDownloadStatus(message) {
                 if (downloadStatus) {
@@ -8873,6 +9215,18 @@ HTML;
                 downloadButton.setAttribute('data-ready', '0');
                 downloadButton.setAttribute('href', '#download_now');
                 downloadButton.innerHTML = '<span class="spinner-inline" aria-hidden="true"></span>';
+            }
+
+            function setDownloadCountdownState(remaining) {
+                if (!downloadButton) {
+                    return;
+                }
+
+                downloadButton.classList.add('loading', 'disabled');
+                downloadButton.classList.remove('download-ready');
+                downloadButton.setAttribute('data-ready', '0');
+                downloadButton.setAttribute('href', '#download_now');
+                downloadButton.textContent = 'Wait ' + remaining + 's';
             }
 
             function submitProtectedDownload() {
@@ -8957,12 +9311,14 @@ HTML;
                     window.clearInterval(countdownTimer);
                 }
 
+                setDownloadCountdownState(remaining);
                 updateDownloadStatus('Please wait ' + remaining + ' seconds before the protected download link is issued.');
 
                 countdownTimer = window.setInterval(function () {
                     remaining -= 1;
 
                     if (remaining > 0) {
+                        setDownloadCountdownState(remaining);
                         updateDownloadStatus('Please wait ' + remaining + ' seconds before the protected download link is issued.');
                         return;
                     }
@@ -9023,10 +9379,14 @@ HTML;
 
                     requestInFlight = true;
                     activeRequestToken = '';
-                    setDownloadBusyState();
-                    updateDownloadStatus(downloadWaitSeconds === 0
-                        ? 'Issuing protected premium download link...'
-                        : 'Starting protected download timer...');
+
+                    if (downloadWaitSeconds > 0) {
+                        setDownloadCountdownState(downloadWaitSeconds);
+                        updateDownloadStatus('Please wait ' + downloadWaitSeconds + ' seconds before the protected download link is issued.');
+                    } else {
+                        setDownloadBusyState();
+                        updateDownloadStatus('Issuing protected premium download link...');
+                    }
 
                     postDownloadForm(downloadRequestUrl, {
                         token: downloadCsrfToken,
@@ -9062,6 +9422,51 @@ HTML;
                     });
                 });
             }
+
+            document.addEventListener('pointerdown', function (event) {
+                var host = document.getElementById('os_player');
+                var frameWindow = getPlayerFrameWindow();
+
+                if (!host || !frameWindow || host.contains(event.target)) {
+                    return;
+                }
+
+                frameWindow.postMessage({ type: 've-close-player-panels' }, '*');
+            }, true);
+
+            window.addEventListener('message', function (event) {
+                var data = event && event.data && typeof event.data === 'object' ? event.data : null;
+
+                if (!data || typeof data.type !== 'string') {
+                    return;
+                }
+
+                if (data.type === 've-player-cinema-toggle') {
+                    cinemaModeActive = Boolean(data.active);
+                    document.body.classList.toggle('ve-cinema-mode', cinemaModeActive);
+
+                    var frameWindow = getPlayerFrameWindow();
+
+                    if (frameWindow) {
+                        frameWindow.postMessage({ type: 've-player-cinema-sync', active: cinemaModeActive }, '*');
+                    }
+                }
+            });
+
+            document.addEventListener('keydown', function (event) {
+                if (event.key !== 'Escape' || !cinemaModeActive) {
+                    return;
+                }
+
+                cinemaModeActive = false;
+                document.body.classList.remove('ve-cinema-mode');
+
+                var frameWindow = getPlayerFrameWindow();
+
+                if (frameWindow) {
+                    frameWindow.postMessage({ type: 've-player-cinema-sync', active: false }, '*');
+                }
+            });
 
             $(document).on('click', '.player_lights', function (event) {
                 event.preventDefault();
@@ -9687,6 +10092,10 @@ HTML);
             --ve-title-font: Averta, "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
             --ve-control-size: 56px;
         }
+        .ve-stage.video-js,
+        .ve-stage.video-js *:not(svg):not(path) {
+            font-family: var(--ve-title-font) !important;
+        }
         .ve-stage.video-js .vjs-tech {
             position: absolute;
             inset: 0;
@@ -10026,6 +10435,7 @@ HTML);
         .ve-stage.video-js .vjs-mute-control,
         .ve-stage.video-js .vjs-seek-button,
         .ve-stage.video-js .vjs-home-link,
+        .ve-stage.video-js .vjs-cinema-toggle,
         .ve-stage.video-js .vjs-speed-toggle,
         .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
             width: 56px;
@@ -10036,13 +10446,42 @@ HTML);
             transition: background .15s ease, opacity .15s ease;
         }
         .ve-stage.video-js .vjs-play-control:hover,
+        .ve-stage.video-js .vjs-play-control:focus-visible,
         .ve-stage.video-js .vjs-fullscreen-control:hover,
+        .ve-stage.video-js .vjs-fullscreen-control:focus-visible,
         .ve-stage.video-js .vjs-mute-control:hover,
+        .ve-stage.video-js .vjs-mute-control:focus-visible,
         .ve-stage.video-js .vjs-seek-button:hover,
+        .ve-stage.video-js .vjs-seek-button:focus-visible,
         .ve-stage.video-js .vjs-home-link:hover,
+        .ve-stage.video-js .vjs-home-link:focus-visible,
+        .ve-stage.video-js .vjs-cinema-toggle:hover,
+        .ve-stage.video-js .vjs-cinema-toggle:focus-visible,
         .ve-stage.video-js .vjs-speed-toggle:hover,
-        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button:hover {
+        .ve-stage.video-js .vjs-speed-toggle:focus-visible,
+        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button:hover,
+        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button:focus-visible {
             background: transparent;
+            transform: translateY(-1px) scale(1.04);
+            opacity: 0.92;
+        }
+        .ve-stage.video-js .vjs-play-control:hover .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-play-control:focus-visible .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-fullscreen-control:hover .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-fullscreen-control:focus-visible .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-mute-control:hover .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-mute-control:focus-visible .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-seek-button:hover .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-seek-button:focus-visible .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-home-link:hover .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-home-link:focus-visible .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-cinema-toggle:hover .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-cinema-toggle:focus-visible .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-speed-toggle:hover .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-speed-toggle:focus-visible .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button:hover .vjs-icon-placeholder,
+        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button:focus-visible .vjs-icon-placeholder {
+            transform: scale(1.08);
         }
         /* Play/Pause icons */
         .ve-stage.video-js .vjs-play-control.vjs-paused .vjs-icon-placeholder::before {
@@ -10061,17 +10500,17 @@ HTML);
             border-radius: 999px;
         }
         .ve-stage.video-js .vjs-seek-button .vjs-icon-placeholder {
-            width: 54px;
-            height: 24px;
+            width: 62px;
+            height: 35px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
+            gap: 4px;
         }
         .ve-stage.video-js .vjs-seek-button .vjs-icon-placeholder::before {
             position: static;
-            width: 22px;
-            height: 22px;
+            width: 35px;
+            height: 35px;
             transform: none;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z'/%3E%3C/svg%3E");
         }
@@ -10085,12 +10524,15 @@ HTML);
             transform: none;
             background: none;
             color: #fff;
-            font-size: 13px;
-            line-height: 1;
+            font-size: 12px;
+            line-height: 35px;
             font-weight: 800;
             font-family: var(--ve-title-font);
             font-variant-numeric: tabular-nums;
             letter-spacing: 0;
+            display: inline-flex;
+            align-items: center;
+            height: 35px;
         }
         .ve-stage.video-js .vjs-seek-button.skip-forward .vjs-icon-placeholder::after {
             order: 1;
@@ -10131,11 +10573,36 @@ HTML);
             border-radius: 999px;
             background: transparent;
         }
+        .ve-stage.video-js .vjs-control-bar:hover,
+        .ve-stage.video-js .vjs-progress-control:hover,
+        .ve-stage.video-js .vjs-volume-panel:hover,
+        .ve-stage.video-js .vjs-volume-control:hover,
+        .ve-stage.video-js .vjs-volume-bar:hover {
+            transform: none;
+            opacity: 1;
+            background: transparent;
+            filter: none;
+        }
+        .ve-stage.video-js .ve-speed-panel:hover,
+        .ve-stage.video-js .ve-subtitle-panel:hover {
+            transform: none;
+            opacity: 1;
+            background: rgba(18, 18, 18, 0.96);
+            filter: none;
+        }
         /* Home link icon */
         .ve-stage.video-js .vjs-home-link .vjs-icon-placeholder::before {
             width: 28px;
             height: 28px;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z'/%3E%3C/svg%3E");
+        }
+        .ve-stage.video-js .vjs-cinema-toggle .vjs-icon-placeholder::before {
+            width: 32px;
+            height: 24px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 24'%3E%3Crect x='3' y='4' width='26' height='12' rx='2.5' fill='white' fill-opacity='0.14'/%3E%3Cpath d='M7 19h18' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M16 16.5v3' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3Crect x='1.75' y='2.75' width='28.5' height='14.5' rx='3.25' fill='none' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E");
+        }
+        .ve-stage.video-js .vjs-cinema-toggle.is-active .vjs-icon-placeholder::before {
+            opacity: 1;
         }
         /* Captions button - subtitle icon */
         .ve-stage.video-js .vjs-subs-caps-button {
@@ -10209,14 +10676,14 @@ HTML);
             font-size: 0.76rem;
             font-weight: 600;
             white-space: nowrap;
-            font-family: inherit;
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .vjs-thumbnail-holder {
             position: absolute;
             bottom: 30px;
             left: 50%;
             transform: translateX(-50%);
-            overflow: hidden;
+            overflow: visible;
             border-radius: 6px;
             border: 1px solid rgba(255, 255, 255, 0.08);
             background: #000;
@@ -10230,22 +10697,26 @@ HTML);
         }
         .ve-stage.video-js .vjs-thumbnail-text {
             position: absolute;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            padding: 3px 6px;
+            left: 50%;
+            right: auto;
+            top: calc(100% + 8px);
+            bottom: auto;
+            transform: translateX(-50%);
+            min-width: 78px;
+            padding: 0;
             color: #fff;
-            font-size: 0.72rem;
-            font-weight: 600;
+            font-size: 0.88rem;
+            font-weight: 700;
             text-align: center;
             text-shadow: 0 0 3px rgba(0, 0, 0, 0.85);
-            font-family: inherit;
+            font-family: var(--ve-title-font);
+            white-space: nowrap;
         }
         /* ── Speed panel ── */
         .ve-stage.video-js .ve-speed-panel {
             position: absolute;
             right: 0;
-            bottom: 48px;
+            bottom: calc(100% + 14px);
             z-index: 8;
             width: 160px;
             padding: 8px;
@@ -10255,9 +10726,22 @@ HTML);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .ve-speed-panel[hidden] {
             display: none !important;
+        }
+        .ve-stage.video-js .ve-speed-panel::after {
+            content: "";
+            position: absolute;
+            right: calc((var(--ve-control-size) - 14px) / 2);
+            bottom: -7px;
+            width: 14px;
+            height: 14px;
+            background: rgba(18, 18, 18, 0.96);
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            transform: rotate(45deg);
         }
         .ve-stage.video-js .ve-speed-panel-header {
             margin-bottom: 6px;
@@ -10267,7 +10751,7 @@ HTML);
             font-weight: 700;
             letter-spacing: 0.1em;
             text-transform: uppercase;
-            font-family: inherit;
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .ve-speed-list {
             display: grid;
@@ -10286,6 +10770,7 @@ HTML);
             text-align: left;
             cursor: pointer;
             transition: background .12s ease, color .12s ease;
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .ve-speed-option:hover,
         .ve-stage.video-js .ve-speed-option:focus-visible {
@@ -10301,7 +10786,7 @@ HTML);
         .ve-stage.video-js .ve-subtitle-panel {
             position: absolute;
             right: 0;
-            bottom: 48px;
+            bottom: calc(100% + 14px);
             z-index: 8;
             width: 240px;
             max-width: calc(100vw - 32px);
@@ -10312,10 +10797,23 @@ HTML);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
-            overflow: hidden;
+            overflow: visible;
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .ve-subtitle-panel[hidden] {
             display: none !important;
+        }
+        .ve-stage.video-js .ve-subtitle-panel::after {
+            content: "";
+            position: absolute;
+            right: calc((var(--ve-control-size) - 14px) / 2);
+            bottom: -7px;
+            width: 14px;
+            height: 14px;
+            background: rgba(18, 18, 18, 0.96);
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            transform: rotate(45deg);
         }
         .ve-stage.video-js .ve-subtitle-panel-header {
             margin-bottom: 6px;
@@ -10325,7 +10823,7 @@ HTML);
             font-weight: 700;
             letter-spacing: 0.1em;
             text-transform: uppercase;
-            font-family: inherit;
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .ve-subtitle-list {
             display: grid;
@@ -10344,6 +10842,7 @@ HTML);
             text-align: left;
             cursor: pointer;
             transition: background .12s ease, color .12s ease;
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .ve-subtitle-option:hover,
         .ve-stage.video-js .ve-subtitle-option:focus-visible {
@@ -10375,6 +10874,7 @@ HTML);
             font: inherit;
             font-size: 0.82rem;
             box-sizing: border-box;
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .ve-subtitle-url-form button {
             min-height: 34px;
@@ -10385,6 +10885,7 @@ HTML);
             font: inherit;
             font-weight: 700;
             cursor: pointer;
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .ve-subtitle-status {
             margin-top: 6px;
@@ -10392,6 +10893,7 @@ HTML);
             color: var(--ve-muted);
             font-size: 0.78rem;
             line-height: 1.4;
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .ve-subtitle-status.is-error {
             color: #ff6b6b;
@@ -10471,13 +10973,28 @@ HTML);
             .ve-stage.video-js .vjs-mute-control,
             .ve-stage.video-js .vjs-seek-button,
             .ve-stage.video-js .vjs-home-link,
+            .ve-stage.video-js .vjs-cinema-toggle,
             .ve-stage.video-js .vjs-speed-toggle,
             .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
                 width: 46px;
                 height: 46px;
             }
+            .ve-stage.video-js .vjs-seek-button {
+                width: 70px;
+            }
+            .ve-stage.video-js .vjs-seek-button .vjs-icon-placeholder {
+                width: 58px;
+                height: 35px;
+            }
             .ve-stage.video-js .vjs-volume-control {
                 display: none;
+            }
+            .ve-stage.video-js .vjs-subs-caps-button,
+            .ve-stage.video-js .vjs-cinema-toggle {
+                display: none !important;
+            }
+            .ve-stage.video-js {
+                --ve-control-size: 46px;
             }
             .ve-stage.video-js .vjs-remaining-time {
                 font-size: 0.72rem;
@@ -10603,6 +11120,10 @@ HTML);
                             </div>
                         </div>
                     </div>
+                    <button type="button" id="ve-cinema-toggle" class="vjs-cinema-toggle vjs-control vjs-button" title="Cinema Mode" aria-label="Cinema Mode">
+                        <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                        <span class="vjs-control-text" aria-live="polite">Cinema Mode</span>
+                    </button>
                     <button type="button" id="ve-fullscreen-toggle" class="vjs-fullscreen-control vjs-control vjs-button" title="Fullscreen" aria-label="Fullscreen">
                         <span class="vjs-icon-placeholder" aria-hidden="true"></span>
                         <span class="vjs-control-text" aria-live="polite">Fullscreen</span>
@@ -10896,7 +11417,8 @@ HTML;
     $vueJs = 'https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.min.js';
     $videoPageJs = ve_h(ve_url('/assets/js/video_page__q_f247575e8408.js'));
     $bootstrapJs = ve_h(ve_url('/assets/js/video_dashboard_bootstrap.js'));
-    $legacyJs = ve_h(ve_url('/assets/js/video_dashboard_legacy.js'));
+    $legacyJsVersion = (string) (@filemtime(ve_root_path('assets', 'js', 'video_dashboard_legacy.js')) ?: time());
+    $legacyJs = ve_h(ve_url('/assets/js/video_dashboard_legacy.js?v=' . rawurlencode($legacyJsVersion)));
     $extraScripts = '<script src="' . ve_h($vueJs) . '"></script>'
         . '<script src="' . ve_h($selectionJs) . '"></script>'
         . '<script src="' . $videoPageJs . '"></script>'
