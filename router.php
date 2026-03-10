@@ -11,6 +11,14 @@ if (is_string($path) && ($path === '/video-engine' || str_starts_with($path, '/v
 }
 
 if (is_string($path) && $path !== '/') {
+    if ($path === '/backend' || str_starts_with($path, '/backend/')) {
+        $_SERVER['SCRIPT_NAME'] = ($isBasePrefixed ? '/video-engine' : '') . '/backend/index.php';
+        $_SERVER['PHP_SELF'] = $_SERVER['SCRIPT_NAME'];
+        $_SERVER['PATH_INFO'] = $path === '/backend' ? '' : substr($path, strlen('/backend'));
+        require __DIR__ . '/backend/index.php';
+        return true;
+    }
+
     if (str_starts_with($path, '/storage/private/')) {
         http_response_code(403);
         echo 'Forbidden';
