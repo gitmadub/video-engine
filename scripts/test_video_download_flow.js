@@ -271,7 +271,7 @@ async function elementDocumentBox(page, selector) {
     });
     const freePage = await anonymousContext.newPage();
     debugPage(freePage, 'watch');
-    await freePage.goto(watchUrl, { waitUntil: 'networkidle' });
+    await freePage.goto(watchUrl, { waitUntil: 'domcontentloaded' });
 
     await freePage.waitForSelector('#ve-download-button');
 
@@ -393,7 +393,7 @@ async function elementDocumentBox(page, selector) {
     const noSessionContext = await browser.newContext({ baseURL });
     const noSessionPage = await noSessionContext.newPage();
     debugPage(noSessionPage, 'no-session');
-    await noSessionPage.goto(watchUrl, { waitUntil: 'networkidle' });
+    await noSessionPage.goto(watchUrl, { waitUntil: 'domcontentloaded' });
     const noSessionCsrf = await extractInlineStringVariable(noSessionPage, 'downloadCsrfToken');
     const noSessionReplay = await fetchHtmlStatus(noSessionPage, freeResolveBody.download_action, {
       method: 'POST',
@@ -426,6 +426,7 @@ async function elementDocumentBox(page, selector) {
       poster: 0,
       previewVtt: 0,
       previewJpg: 0,
+      key: 0,
       manifest: 0,
       segment: 0,
     };
@@ -433,6 +434,11 @@ async function elementDocumentBox(page, selector) {
     const pulsePlaybackTokens = [];
     let playbackTriggeredAt = 0;
     let startupSegmentRequests = 0;
+    let secondSegmentRequests = 0;
+    let postPlayManifestRequests = 0;
+    let postPlayKeyRequests = 0;
+    let replayedStartupSegmentRequests = 0;
+    let warmedStartupSegmentUrl = '';
     embedPage.on('request', (request) => {
       const url = request.url();
 
@@ -478,9 +484,20 @@ async function elementDocumentBox(page, selector) {
         return;
       }
 
+      if (url.includes('/key?token=')) {
+        if (isPrePlay) {
+          prePlayNetwork.key += 1;
+        } else {
+          postPlayKeyRequests += 1;
+        }
+        return;
+      }
+
       if (url.includes('/manifest.m3u8')) {
         if (isPrePlay) {
           prePlayNetwork.manifest += 1;
+        } else {
+          postPlayManifestRequests += 1;
         }
         return;
       }
@@ -491,10 +508,62 @@ async function elementDocumentBox(page, selector) {
         } else if ((Date.now() - playbackTriggeredAt) <= 2500) {
           startupSegmentRequests += 1;
         }
+
+        if (!isPrePlay && /\/segment\/part_00001\.bin(?:$|\?)/.test(url)) {
+          secondSegmentRequests += 1;
+        }
+
+        if (!isPrePlay && warmedStartupSegmentUrl && url === warmedStartupSegmentUrl) {
+          replayedStartupSegmentRequests += 1;
+        }
       }
     });
-    await embedPage.goto(embedUrl, { waitUntil: 'networkidle' });
+    await embedPage.goto(embedUrl, { waitUntil: 'domcontentloaded' });
     await embedPage.waitForSelector('#ve-secure-player', { timeout: 15000 });
+    await embedPage.waitForLoadState('load');
+    await embedPage.waitForFunction(() => {
+      const debug = window.__VE_SECURE_PLAYER_DEBUG || null;
+      return Boolean(
+        debug
+        && debug.pageLoaded === true
+        && debug.manifestPreloaded === true
+        && typeof debug.startupSegmentUrl === 'string'
+        && debug.startupSegmentUrl.includes('/segment/')
+      );
+    }, null, { timeout: 10000 });
+
+    const embedAssets = await embedPage.evaluate(() => ({
+      scripts: Array.from(document.querySelectorAll('script[src]')).map((node) => node.getAttribute('src') || ''),
+      styles: Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map((node) => node.getAttribute('href') || ''),
+    }));
+    const embedWarmupState = await embedPage.evaluate(() => window.__VE_SECURE_PLAYER_DEBUG || {});
+    warmedStartupSegmentUrl = String(embedWarmupState.startupSegmentUrl || '');
+
+    if (embedAssets.scripts.some((url) => /cdn\.jsdelivr\.net/i.test(url)) || embedAssets.styles.some((url) => /cdn\.jsdelivr\.net/i.test(url))) {
+      throw new Error(`Secure embed player should not depend on jsDelivr CDN assets. Observed: ${JSON.stringify(embedAssets)}`);
+    }
+
+    if (!embedAssets.scripts.some((url) => /\/assets\/vendor\/hls\/hls\.min\.js(?:$|\?)/.test(url))) {
+      throw new Error(`Secure embed player should load local hls.js. Observed scripts: ${JSON.stringify(embedAssets.scripts)}`);
+    }
+
+    const hasCustomControlBar = await embedPage.locator('#ve-player-controls').count();
+    const hasVideoJsShell = await embedPage.locator('#video_player.video-js').count();
+
+    if (hasCustomControlBar !== 1 || hasVideoJsShell !== 1) {
+      throw new Error(`Secure embed player should render the custom video-js style shell. Observed shell=${hasVideoJsShell}, controls=${hasCustomControlBar}.`);
+    }
+
+    const playerBox = await elementDocumentBox(embedPage, '#video_player');
+    const overlayButtonBox = await elementDocumentBox(embedPage, '#ve-player-overlay-button');
+    const playerCenterX = playerBox.x + (playerBox.width / 2);
+    const playerCenterY = playerBox.y + (playerBox.height / 2);
+    const overlayCenterX = overlayButtonBox.x + (overlayButtonBox.width / 2);
+    const overlayCenterY = overlayButtonBox.y + (overlayButtonBox.height / 2);
+
+    if (Math.abs(playerCenterX - overlayCenterX) > 4 || Math.abs(playerCenterY - overlayCenterY) > 4) {
+      throw new Error(`The big play overlay button should be visually centered. Player=${JSON.stringify(playerBox)} overlay=${JSON.stringify(overlayButtonBox)}.`);
+    }
 
     if ((await embedPage.locator('.ve-embed-title').count()) !== 0) {
       throw new Error('Embed player should not render the extra title bar above or below the real player.');
@@ -519,12 +588,20 @@ async function elementDocumentBox(page, selector) {
       throw new Error(`Preview thumbnails should stay cold before playback starts. Observed ${JSON.stringify(prePlayNetwork)}.`);
     }
 
-    if (prePlayNetwork.segment !== 0) {
-      throw new Error(`Secure stream segments should not preload before playback starts. Observed ${JSON.stringify(prePlayNetwork)}.`);
+    if (prePlayNetwork.key !== 1) {
+      throw new Error(`Secure playback should warm the AES key exactly once before playback starts. Observed ${JSON.stringify(prePlayNetwork)}.`);
+    }
+
+    if (prePlayNetwork.segment !== 1) {
+      throw new Error(`Secure stream should lazy-preload exactly one startup segment after page load. Observed ${JSON.stringify(prePlayNetwork)}.`);
     }
 
     if (prePlayNetwork.manifest > 1) {
       throw new Error(`Secure playback should at most warm the manifest once before playback starts. Observed ${JSON.stringify(prePlayNetwork)}.`);
+    }
+
+    if (!String(embedWarmupState.startupSegmentUrl || '').includes('/segment/')) {
+      throw new Error(`Secure embed warmup state should expose the prefetched startup segment URL. Received: ${JSON.stringify(embedWarmupState)}`);
     }
 
     if (prePlayPlaybackCalls.length !== 0) {
@@ -591,6 +668,14 @@ async function elementDocumentBox(page, selector) {
       throw new Error(`Secure playback should only fetch the current segment plus one segment ahead at startup. Observed ${startupSegmentRequests} startup segment requests.`);
     }
 
+    if (secondSegmentRequests < 1) {
+      throw new Error(`Secure playback should fetch the second segment after startup. Observed ${secondSegmentRequests} requests for part_00001.bin.`);
+    }
+
+    if (postPlayManifestRequests !== 0 || postPlayKeyRequests !== 0 || replayedStartupSegmentRequests !== 0) {
+      throw new Error(`Manifest, key, and warmed startup segment should be reused from preload memory on click. Observed manifest=${postPlayManifestRequests}, key=${postPlayKeyRequests}, replayedStartupSegment=${replayedStartupSegmentRequests}.`);
+    }
+
     if (requiredPulseCountFor(minWatchSeconds) > 1) {
       const nonEmptyPulseTokens = pulsePlaybackTokens.filter(Boolean);
       const uniquePulseTokens = new Set(nonEmptyPulseTokens);
@@ -619,10 +704,83 @@ async function elementDocumentBox(page, selector) {
     await freePage.close();
     await anonymousContext.close();
 
+    const refreshContext = await browser.newContext({ baseURL });
+    const refreshEmbedPage = await refreshContext.newPage();
+    debugPage(refreshEmbedPage, 'refresh');
+    let sessionRefreshRequests = 0;
+    refreshEmbedPage.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().includes(`/api/videos/${publicId}/playback/session`)) {
+        sessionRefreshRequests += 1;
+      }
+    });
+    await refreshEmbedPage.goto(embedUrl, { waitUntil: 'domcontentloaded' });
+    await refreshEmbedPage.waitForSelector('#ve-secure-player', { timeout: 15000 });
+    await refreshEmbedPage.waitForLoadState('load');
+    await refreshEmbedPage.waitForFunction(() => {
+      const debug = window.__VE_SECURE_PLAYER_DEBUG || null;
+      return Boolean(debug && typeof debug.expireSessionForTest === 'function' && typeof debug.refreshSession === 'function');
+    }, null, { timeout: 10000 });
+    const forcedExpiry = await refreshEmbedPage.evaluate(() => {
+      const debug = window.__VE_SECURE_PLAYER_DEBUG || null;
+
+      if (!debug || typeof debug.expireSessionForTest !== 'function') {
+        return false;
+      }
+
+      debug.expireSessionForTest();
+      return true;
+    });
+
+    if (!forcedExpiry) {
+      throw new Error('Secure embed QA could not force an expired playback session.');
+    }
+
+    await refreshEmbedPage.evaluate(async () => {
+      const video = document.getElementById('ve-secure-player');
+
+      if (!video) {
+        return;
+      }
+
+      video.muted = true;
+
+      try {
+        await video.play();
+      } catch (error) {
+        // The readiness check below will fail if playback never begins.
+      }
+    });
+
+    await refreshEmbedPage.waitForFunction(() => {
+      const video = document.getElementById('ve-secure-player');
+      return Boolean(video && !video.paused && video.currentTime > 1);
+    }, null, { timeout: 20000 });
+
+    const refreshState = await refreshEmbedPage.evaluate(() => {
+      const debug = window.__VE_SECURE_PLAYER_DEBUG || {};
+      const state = document.getElementById('ve-player-state');
+      return {
+        refreshCount: Number(debug.sessionRefreshCount || 0),
+        stateVisible: Boolean(state && state.classList.contains('is-visible')),
+        stateText: state ? String(state.textContent || '') : '',
+      };
+    });
+
+    if (sessionRefreshRequests < 1 || refreshState.refreshCount < 1) {
+      throw new Error(`Expired playback sessions should refresh automatically before playback starts. Observed requests=${sessionRefreshRequests}, state=${JSON.stringify(refreshState)}.`);
+    }
+
+    if (refreshState.stateVisible) {
+      throw new Error(`Secure playback should not show an error after refreshing an expired session. Observed: ${JSON.stringify(refreshState)}.`);
+    }
+
+    await refreshEmbedPage.close();
+    await refreshContext.close();
+
     const repeatContext = await browser.newContext({ baseURL });
     const repeatEmbedPage = await repeatContext.newPage();
     debugPage(repeatEmbedPage, 'repeat');
-    await repeatEmbedPage.goto(embedUrl, { waitUntil: 'networkidle' });
+    await repeatEmbedPage.goto(embedUrl, { waitUntil: 'domcontentloaded' });
     await repeatEmbedPage.waitForSelector('#ve-secure-player', { timeout: 15000 });
     await repeatEmbedPage.waitForFunction(() => {
       const state = document.getElementById('ve-player-state');
@@ -674,7 +832,7 @@ async function elementDocumentBox(page, selector) {
 
       const premiumPage = await premiumContext.newPage();
       debugPage(premiumPage, 'premium');
-      await premiumPage.goto(watchUrl, { waitUntil: 'networkidle' });
+      await premiumPage.goto(watchUrl, { waitUntil: 'domcontentloaded' });
 
       if ((await premiumPage.locator('.own-file').count()) === 0) {
         throw new Error('Owner/premium watch page should render the own-file notice.');

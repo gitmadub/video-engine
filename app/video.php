@@ -3621,6 +3621,52 @@ function ve_video_issue_playback_session(array $video): array
     ];
 }
 
+function ve_video_playback_preview_vtt_url(array $video, string $sessionToken): ?string
+{
+    if (!is_file(ve_video_preview_vtt_path($video))) {
+        return null;
+    }
+
+    return '/stream/' . rawurlencode((string) $video['public_id']) . '/preview.vtt?token=' . rawurlencode($sessionToken);
+}
+
+/**
+ * @return array{
+ *     session_token:string,
+ *     manifest_url:string,
+ *     key_url:string,
+ *     preview_url:string,
+ *     playback_token:string,
+ *     client_proof_key:string,
+ *     pulse_client_token:string,
+ *     pulse_server_token:string,
+ *     pulse_sequence:int,
+ *     session_ttl_seconds:int,
+ *     issued_at_ms:int
+ * }
+ */
+function ve_video_playback_session_payload(array $video, array $session): array
+{
+    $sessionToken = (string) ($session['token'] ?? '');
+    $previewVttUrl = $sessionToken !== ''
+        ? ve_video_playback_preview_vtt_url($video, $sessionToken)
+        : null;
+
+    return [
+        'session_token' => $sessionToken,
+        'manifest_url' => ve_absolute_url((string) ($session['manifest_url'] ?? '')),
+        'key_url' => ve_absolute_url('/stream/' . rawurlencode((string) $video['public_id']) . '/key?token=' . rawurlencode($sessionToken)),
+        'preview_url' => $previewVttUrl !== null ? ve_absolute_url($previewVttUrl) : '',
+        'playback_token' => (string) ($session['playback_token'] ?? ''),
+        'client_proof_key' => (string) ($session['client_proof_key'] ?? ''),
+        'pulse_client_token' => (string) ($session['pulse_client_token'] ?? ''),
+        'pulse_server_token' => (string) ($session['pulse_server_token'] ?? ''),
+        'pulse_sequence' => max(0, (int) ($session['pulse_sequence'] ?? 0)),
+        'session_ttl_seconds' => (int) ve_video_config()['session_ttl'],
+        'issued_at_ms' => ve_timestamp() * 1000,
+    ];
+}
+
 function ve_video_find_playback_session(array $video, ?string $token): ?array
 {
     $token = is_string($token) ? trim($token) : '';
@@ -4312,6 +4358,27 @@ function ve_video_playback_full_api(string $publicId): void
     ve_json($result, $statusCode);
 }
 
+function ve_video_playback_session_api(string $publicId): void
+{
+    if (!ve_is_method('POST')) {
+        ve_method_not_allowed(['POST']);
+    }
+
+    $video = ve_video_get_by_public_id($publicId);
+
+    if (!is_array($video) || !ve_video_is_request_visible($video) || (string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        ve_not_found();
+    }
+
+    $session = ve_video_issue_playback_session($video);
+
+    ve_json([
+        'status' => 'ok',
+        'message' => 'A fresh playback session was issued.',
+        'session' => ve_video_playback_session_payload($video, $session),
+    ]);
+}
+
 function ve_video_mark_playback_started(array $video, array $session): void
 {
     $sessionId = (int) ($session['id'] ?? 0);
@@ -4481,11 +4548,16 @@ function ve_video_stream_segment(string $publicId, string $filename): void
         ve_not_found();
     }
 
-    ve_video_record_segment_delivery($video, $session, (int) (filesize($path) ?: 0));
+    $isPrefetch = trim((string) ($_SERVER['HTTP_X_PLAYBACK_PREFETCH'] ?? '')) === '1';
+
+    if (!$isPrefetch) {
+        ve_video_record_segment_delivery($video, $session, (int) (filesize($path) ?: 0));
+    }
 
     header('Content-Type: video/mp2t');
     header('Content-Length: ' . (string) filesize($path));
     header('Cache-Control: private, max-age=300');
+    header('X-Playback-Prefetch: ' . ($isPrefetch ? '1' : '0'));
     header('X-Content-Type-Options: nosniff');
     readfile($path);
     exit;
@@ -4824,52 +4896,117 @@ function ve_video_stream_preview_vtt(string $publicId): void
     exit;
 }
 
-function ve_video_secure_player_script(array $session, string $publicId, int $minimumWatchSeconds, ?string $previewVttUrl = null): string
+function ve_video_secure_player_script(
+    array $session,
+    string $publicId,
+    int $minimumWatchSeconds,
+    ?string $previewVttUrl = null,
+    bool $autoSubtitleStart = false
+): string
 {
-    $manifestUrl = json_encode(ve_absolute_url((string) $session['manifest_url']), JSON_UNESCAPED_SLASHES);
-    $sessionToken = json_encode((string) $session['token'], JSON_UNESCAPED_SLASHES);
-    $playbackToken = json_encode((string) ($session['playback_token'] ?? ''), JSON_UNESCAPED_SLASHES);
+    $video = ve_video_get_by_public_id($publicId);
+    $sessionPayload = is_array($video) ? ve_video_playback_session_payload($video, $session) : [
+        'session_token' => (string) ($session['token'] ?? ''),
+        'manifest_url' => ve_absolute_url((string) ($session['manifest_url'] ?? '')),
+        'key_url' => ve_absolute_url('/stream/' . rawurlencode($publicId) . '/key?token=' . rawurlencode((string) ($session['token'] ?? ''))),
+        'preview_url' => $previewVttUrl !== null ? ve_absolute_url($previewVttUrl) : '',
+        'playback_token' => (string) ($session['playback_token'] ?? ''),
+        'client_proof_key' => (string) ($session['client_proof_key'] ?? ''),
+        'pulse_client_token' => (string) ($session['pulse_client_token'] ?? ''),
+        'pulse_server_token' => (string) ($session['pulse_server_token'] ?? ''),
+        'pulse_sequence' => max(0, (int) ($session['pulse_sequence'] ?? 0)),
+        'session_ttl_seconds' => (int) ve_video_config()['session_ttl'],
+        'issued_at_ms' => ve_timestamp() * 1000,
+    ];
+    if ($previewVttUrl !== null) {
+        $sessionPayload['preview_url'] = ve_absolute_url($previewVttUrl);
+    }
+    $manifestUrl = json_encode((string) ($sessionPayload['manifest_url'] ?? ''), JSON_UNESCAPED_SLASHES);
+    $keyUrl = json_encode((string) ($sessionPayload['key_url'] ?? ''), JSON_UNESCAPED_SLASHES);
+    $hlsJsUrl = ve_h(ve_absolute_url('/assets/vendor/hls/hls.min.js'));
+    $sessionToken = json_encode((string) ($sessionPayload['session_token'] ?? ''), JSON_UNESCAPED_SLASHES);
+    $playbackToken = json_encode((string) ($sessionPayload['playback_token'] ?? ''), JSON_UNESCAPED_SLASHES);
     $homeUrl = json_encode(ve_absolute_url('/'), JSON_UNESCAPED_SLASHES);
-    $previewUrl = json_encode($previewVttUrl !== null ? ve_absolute_url($previewVttUrl) : '', JSON_UNESCAPED_SLASHES);
+    $previewUrl = json_encode((string) ($sessionPayload['preview_url'] ?? ''), JSON_UNESCAPED_SLASHES);
     $pulseViewUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/pulse'), JSON_UNESCAPED_SLASHES);
     $qualifyViewUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/qualify'), JSON_UNESCAPED_SLASHES);
     $fullPlayUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/full'), JSON_UNESCAPED_SLASHES);
+    $sessionRefreshUrl = json_encode(ve_absolute_url('/api/videos/' . rawurlencode($publicId) . '/playback/session'), JSON_UNESCAPED_SLASHES);
     $minimumWatchSeconds = max(5, $minimumWatchSeconds);
     $pulseIntervalSeconds = ve_video_pulse_interval_seconds($minimumWatchSeconds);
     $requiredPulseCount = ve_video_required_pulse_count($minimumWatchSeconds);
     $segmentSeconds = max(1, (int) ve_video_config()['segment_seconds']);
-    $pulseClientToken = json_encode((string) ($session['pulse_client_token'] ?? ''), JSON_UNESCAPED_SLASHES);
-    $pulseServerToken = json_encode((string) ($session['pulse_server_token'] ?? ''), JSON_UNESCAPED_SLASHES);
-    $pulseSequence = max(0, (int) ($session['pulse_sequence'] ?? 0));
-    $clientProofKey = json_encode((string) ($session['client_proof_key'] ?? ''), JSON_UNESCAPED_SLASHES);
+    $pulseClientToken = json_encode((string) ($sessionPayload['pulse_client_token'] ?? ''), JSON_UNESCAPED_SLASHES);
+    $pulseServerToken = json_encode((string) ($sessionPayload['pulse_server_token'] ?? ''), JSON_UNESCAPED_SLASHES);
+    $pulseSequence = max(0, (int) ($sessionPayload['pulse_sequence'] ?? 0));
+    $clientProofKey = json_encode((string) ($sessionPayload['client_proof_key'] ?? ''), JSON_UNESCAPED_SLASHES);
+    $sessionTtlSeconds = max(60, (int) ($sessionPayload['session_ttl_seconds'] ?? (int) ve_video_config()['session_ttl']));
+    $sessionIssuedAtMs = max(0, (int) ($sessionPayload['issued_at_ms'] ?? (ve_timestamp() * 1000)));
+    $previewColumns = VE_VIDEO_PREVIEW_COLUMNS;
+    $previewRows = VE_VIDEO_PREVIEW_ROWS;
+    $autoSubtitleStart = $autoSubtitleStart ? 'true' : 'false';
 
     return <<<HTML
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
-<script src="https://cdn.jsdelivr.net/npm/plyr@3/dist/plyr.polyfilled.min.js"></script>
+<script src="{$hlsJsUrl}"></script>
 <script>
     (function () {
         var manifestUrl = {$manifestUrl};
+        var keyUrl = {$keyUrl};
         var sessionToken = {$sessionToken};
         var playbackToken = {$playbackToken};
         var previewUrl = {$previewUrl};
+        var autoSubtitleStart = {$autoSubtitleStart};
         var fallbackUrl = {$homeUrl};
         var pulseViewUrl = {$pulseViewUrl};
         var qualifyViewUrl = {$qualifyViewUrl};
         var fullPlayUrl = {$fullPlayUrl};
+        var sessionRefreshUrl = {$sessionRefreshUrl};
         var minimumWatchSeconds = {$minimumWatchSeconds};
         var pulseIntervalSeconds = {$pulseIntervalSeconds};
         var requiredPulseCount = {$requiredPulseCount};
         var segmentSeconds = {$segmentSeconds};
+        var sessionTtlSeconds = {$sessionTtlSeconds};
+        var sessionIssuedAtMs = {$sessionIssuedAtMs};
         var playbackClientToken = {$pulseClientToken};
         var playbackServerToken = {$pulseServerToken};
         var playbackSequence = {$pulseSequence};
         var clientProofKey = {$clientProofKey};
+        var previewColumns = {$previewColumns};
+        var previewRows = {$previewRows};
         var video = document.getElementById('ve-secure-player');
         var stage = document.querySelector('.ve-stage');
         var state = document.getElementById('ve-player-state');
         var overlay = document.getElementById('ve-player-overlay');
         var overlayButton = document.getElementById('ve-player-overlay-button');
-        var player = null;
+        var loadingSpinner = document.getElementById('ve-loading-spinner');
+        var controlsBar = document.getElementById('ve-player-controls');
+        var playToggleButton = document.getElementById('ve-play-toggle');
+        var muteToggleButton = document.getElementById('ve-mute-toggle');
+        var volumeRange = document.getElementById('ve-volume-range');
+        var currentTimeDisplay = document.getElementById('ve-current-time-display');
+        var durationDisplay = document.getElementById('ve-duration-display');
+        var remainingTimeDisplay = document.getElementById('ve-remaining-time-display');
+        var progressHolder = document.getElementById('ve-progress-holder');
+        var loadProgress = document.getElementById('ve-load-progress');
+        var playProgress = document.getElementById('ve-play-progress');
+        var mouseDisplay = document.getElementById('ve-mouse-display');
+        var timeTooltip = document.getElementById('ve-time-tooltip');
+        var thumbnailHolder = document.getElementById('ve-thumbnail-holder');
+        var thumbnailImage = document.getElementById('ve-thumbnail-image');
+        var thumbnailText = document.getElementById('ve-thumbnail-text');
+        var fullscreenToggleButton = document.getElementById('ve-fullscreen-toggle');
+        var watchTimeValue = document.getElementById('ve-watch-time-value');
+        var positionValue = document.getElementById('ve-position-value');
+        var skipBackButton = document.getElementById('ve-skip-back');
+        var skipForwardButton = document.getElementById('ve-skip-forward');
+        var subtitleButton = document.getElementById('ve-subtitle-button');
+        var subtitlePanel = document.getElementById('ve-subtitle-panel');
+        var subtitleList = document.getElementById('ve-subtitle-list');
+        var subtitleStatus = document.getElementById('ve-subtitle-status');
+        var subtitleUrlForm = document.getElementById('ve-subtitle-url-form');
+        var subtitleUrlInput = document.getElementById('ve-subtitle-url-input');
+        var subtitleFileInput = document.getElementById('ve-subtitle-file-input');
+        var captionOverlay = document.getElementById('ve-caption-overlay');
         var watchedSeconds = 0;
         var watchAuditTimer = null;
         var lastWatchSampleAt = 0;
@@ -4898,8 +5035,51 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         var playbackBootstrapped = false;
         var streamActivated = false;
         var sourceFailure = false;
+        var sessionRefreshPromise = null;
+        var sessionRefreshTimer = null;
+        var sessionRefreshCount = 0;
+        var preloadManifestPromise = null;
+        var preloadKeyPromise = null;
+        var preloadStartupSegmentPromise = null;
+        var preloadedManifestText = '';
+        var preloadedKeyBytes = null;
+        var preloadedStartupSegmentBytes = null;
+        var preparedManifestPromise = null;
+        var preparedManifestUrl = '';
+        var preparedKeyBlobUrl = '';
+        var preparedStartupSegmentBlobUrl = '';
+        var hlsSourceLoadPromise = null;
+        var preloadStartupSegmentUrl = '';
+        var startupPartReady = false;
+        var postLoadWarmupScheduled = false;
+        var streamResourceVersion = 0;
+        var pageLoaded = document.readyState === 'complete';
         var bufferLowWatermark = Math.max(1.5, segmentSeconds * 0.5);
         var bufferHighWatermark = Math.max(bufferLowWatermark + 0.75, segmentSeconds + 0.75);
+        var sessionRefreshLeadMs = Math.max(30000, Math.min(120000, Math.floor(sessionTtlSeconds * 1000 * 0.2)));
+        var preloadDebug = window.__VE_SECURE_PLAYER_DEBUG = window.__VE_SECURE_PLAYER_DEBUG || {};
+        var subtitleEntries = [];
+        var subtitleCounter = 0;
+        var activeSubtitleId = null;
+        var activeSubtitleTrack = null;
+        var activeSubtitleCueHandler = null;
+        var subtitlePanelOpen = false;
+        var controlsBootstrapped = false;
+        var controlsHideTimer = null;
+        var previewMetadataPromise = null;
+        var previewCues = [];
+
+        preloadDebug.pageLoaded = pageLoaded;
+        preloadDebug.manifestPreloaded = false;
+        preloadDebug.startupSegmentPreloaded = false;
+        preloadDebug.startupSegmentUrl = '';
+        preloadDebug.keyPreloaded = false;
+        preloadDebug.preparedManifestUrl = '';
+        preloadDebug.preparedKeyUrl = '';
+        preloadDebug.preparedStartupSegmentUrl = '';
+        preloadDebug.sessionTtlSeconds = sessionTtlSeconds;
+        preloadDebug.sessionIssuedAtMs = sessionIssuedAtMs;
+        preloadDebug.sessionRefreshCount = 0;
 
         function setState(message, isError) {
             if (!state) {
@@ -4921,26 +5101,1206 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             if (mode === 'hidden') {
                 overlay.classList.add('is-hidden');
+                if (stage) {
+                    stage.classList.add('vjs-has-started');
+                }
                 return;
             }
 
             if (mode === 'loading') {
                 overlay.classList.add('is-loading');
             }
+
+            if (stage) {
+                stage.classList.remove('vjs-has-started');
+            }
         }
 
-        function bootUi() {
-            if (!video || !window.Plyr || player) {
+        function setLoadingSpinner(active) {
+            if (loadingSpinner) {
+                loadingSpinner.hidden = !active;
+            }
+
+            if (stage) {
+                stage.classList.toggle('vjs-waiting', Boolean(active));
+            }
+        }
+
+        function setOverlayButtonLoading(active) {
+            if (!overlayButton) {
                 return;
             }
 
-            player = new window.Plyr(video, {
-                controls: ['play-large', 'play', 'progress', 'current-time', 'mute', 'volume', 'settings', 'pip', 'fullscreen'],
-                settings: ['speed'],
-                keyboard: { focused: true, global: false },
-                disableContextMenu: true,
-                previewThumbnails: previewUrl ? { enabled: true, src: previewUrl } : { enabled: false }
+            overlayButton.classList.toggle('is-starting', Boolean(active));
+            overlayButton.setAttribute('aria-busy', active ? 'true' : 'false');
+        }
+
+        function padTimePart(value) {
+            var numericValue = Math.max(0, Math.floor(Number(value || 0)));
+            return numericValue < 10 ? '0' + numericValue : String(numericValue);
+        }
+
+        function formatPlayerTime(seconds) {
+            var totalSeconds = Math.max(0, Math.floor(Number(seconds || 0)));
+            var hours = Math.floor(totalSeconds / 3600);
+            var minutes = Math.floor((totalSeconds % 3600) / 60);
+            var secondsPart = totalSeconds % 60;
+
+            if (hours > 0) {
+                return hours + ':' + padTimePart(minutes) + ':' + padTimePart(secondsPart);
+            }
+
+            return padTimePart(minutes) + ':' + padTimePart(secondsPart);
+        }
+
+        function formatControlTime(seconds) {
+            var totalSeconds = Math.max(0, Math.floor(Number(seconds || 0)));
+            var hours = Math.floor(totalSeconds / 3600);
+            var minutes = Math.floor((totalSeconds % 3600) / 60);
+            var secondsPart = totalSeconds % 60;
+
+            if (hours > 0) {
+                return hours + ':' + padTimePart(minutes) + ':' + padTimePart(secondsPart);
+            }
+
+            return String(minutes) + ':' + padTimePart(secondsPart);
+        }
+
+        function getBufferedEndSeconds() {
+            if (!video || !video.buffered || video.buffered.length === 0) {
+                return 0;
+            }
+
+            var currentTime = Number(video.currentTime || 0);
+            var furthestEnd = 0;
+
+            for (var index = 0; index < video.buffered.length; index += 1) {
+                var start = Number(video.buffered.start(index) || 0);
+                var end = Number(video.buffered.end(index) || 0);
+
+                if (end > furthestEnd) {
+                    furthestEnd = end;
+                }
+
+                if (currentTime + 0.1 >= start && currentTime <= end + 0.1) {
+                    return end;
+                }
+            }
+
+            return furthestEnd;
+        }
+
+        function updateBufferDisplay() {
+            if (!loadProgress || !video) {
+                return;
+            }
+
+            var duration = Number(video.duration || 0);
+            var bufferedEnd = getBufferedEndSeconds();
+            var bufferedPercent = duration > 0 && Number.isFinite(duration)
+                ? Math.max(0, Math.min(100, (bufferedEnd / duration) * 100))
+                : 0;
+
+            loadProgress.style.width = bufferedPercent.toFixed(2) + '%';
+        }
+
+        function updatePlaybackProgress() {
+            if (!playProgress || !progressHolder || !video) {
+                return;
+            }
+
+            var duration = Number(video.duration || 0);
+            var currentTime = Number(video.currentTime || 0);
+            var percent = duration > 0 && Number.isFinite(duration)
+                ? Math.max(0, Math.min(100, (currentTime / duration) * 100))
+                : 0;
+            var currentLabel = formatControlTime(currentTime);
+            var durationLabel = duration > 0 && Number.isFinite(duration) ? formatControlTime(duration) : '--:--';
+
+            playProgress.style.width = percent.toFixed(2) + '%';
+            progressHolder.setAttribute('aria-valuenow', percent.toFixed(2));
+            progressHolder.setAttribute('aria-valuetext', currentLabel + ' of ' + durationLabel);
+        }
+
+        function updatePlaybackUi() {
+            if (!video) {
+                return;
+            }
+
+            var paused = Boolean(video.paused);
+            var ended = Boolean(video.ended);
+
+            if (stage) {
+                stage.classList.toggle('vjs-paused', paused);
+                stage.classList.toggle('vjs-playing', !paused && !ended);
+                stage.classList.toggle('vjs-ended', ended);
+            }
+
+            if (playToggleButton) {
+                playToggleButton.classList.toggle('vjs-paused', paused);
+                playToggleButton.classList.toggle('vjs-playing', !paused && !ended);
+                playToggleButton.title = paused ? 'Play' : 'Pause';
+                playToggleButton.setAttribute('aria-label', paused ? 'Play' : 'Pause');
+            }
+        }
+
+        function updateVolumeUi() {
+            var volumeLevel = video ? Math.max(0, Math.min(1, Number(video.volume || 0))) : 1;
+            var muted = !video || Boolean(video.muted) || volumeLevel <= 0;
+            var levelClass = muted ? 'vjs-vol-0' : (volumeLevel < 0.35 ? 'vjs-vol-1' : (volumeLevel < 0.7 ? 'vjs-vol-2' : 'vjs-vol-3'));
+
+            if (muteToggleButton) {
+                muteToggleButton.className = 'vjs-mute-control vjs-control vjs-button ' + levelClass;
+                muteToggleButton.title = muted ? 'Unmute' : 'Mute';
+                muteToggleButton.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
+            }
+
+            if (volumeRange) {
+                var numericValue = muted ? 0 : Math.round(volumeLevel * 100);
+                volumeRange.value = String(numericValue);
+                volumeRange.setAttribute('aria-valuenow', String(numericValue));
+                volumeRange.setAttribute('aria-valuetext', numericValue + '%');
+            }
+        }
+
+        function updateFullscreenUi() {
+            if (!fullscreenToggleButton) {
+                return;
+            }
+
+            var fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || null;
+            var active = Boolean(stage && fullscreenElement === stage);
+            fullscreenToggleButton.classList.toggle('is-active', active);
+            fullscreenToggleButton.title = active ? 'Exit Fullscreen' : 'Fullscreen';
+            fullscreenToggleButton.setAttribute('aria-label', active ? 'Exit Fullscreen' : 'Fullscreen');
+        }
+
+        function clearControlsHideTimer() {
+            if (controlsHideTimer !== null) {
+                window.clearTimeout(controlsHideTimer);
+                controlsHideTimer = null;
+            }
+        }
+
+        function setControlsActive(active) {
+            if (!stage) {
+                return;
+            }
+
+            stage.classList.toggle('vjs-user-active', Boolean(active));
+            stage.classList.toggle('vjs-user-inactive', !active);
+        }
+
+        function showControlsTemporarily() {
+            setControlsActive(true);
+            clearControlsHideTimer();
+
+            if (!video || video.paused || video.ended || !streamActivated) {
+                return;
+            }
+
+            controlsHideTimer = window.setTimeout(function () {
+                setControlsActive(false);
+            }, 2200);
+        }
+
+        function parsePreviewTimecode(value) {
+            var match = String(value || '').trim().match(/^(?:(\d+):)?(\d{2}):(\d{2})\.(\d{3})$/);
+
+            if (!match) {
+                return 0;
+            }
+
+            var hours = Number(match[1] || 0);
+            var minutes = Number(match[2] || 0);
+            var secondsPart = Number(match[3] || 0);
+            var milliseconds = Number(match[4] || 0);
+
+            return (hours * 3600) + (minutes * 60) + secondsPart + (milliseconds / 1000);
+        }
+
+        function parsePreviewMetadata(text) {
+            var lines = String(text || '').split(/\\r\\n|\\r|\\n/);
+            var cues = [];
+
+            for (var index = 0; index < lines.length; index += 1) {
+                var timingLine = String(lines[index] || '').trim();
+
+                if (timingLine === '' || timingLine.indexOf('-->') === -1) {
+                    continue;
+                }
+
+                var parts = timingLine.split('-->');
+                var start = parsePreviewTimecode(parts[0] || '');
+                var end = parsePreviewTimecode(parts[1] || '');
+                var target = '';
+
+                for (var nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+                    target = String(lines[nextIndex] || '').trim();
+
+                    if (target !== '') {
+                        break;
+                    }
+                }
+
+                if (target === '') {
+                    continue;
+                }
+
+                var hashParts = target.split('#xywh=');
+                var imageUrl = '';
+
+                try {
+                    imageUrl = new URL(hashParts[0], previewUrl).toString();
+                } catch (error) {
+                    imageUrl = '';
+                }
+
+                var xywh = String(hashParts[1] || '').split(',').map(function (part) {
+                    return Number(part || 0);
+                });
+
+                cues.push({
+                    start: start,
+                    end: end,
+                    imageUrl: imageUrl,
+                    x: xywh[0] || 0,
+                    y: xywh[1] || 0,
+                    width: xywh[2] || 0,
+                    height: xywh[3] || 0,
+                });
+            }
+
+            return cues;
+        }
+
+        function ensurePreviewMetadata() {
+            if (!previewUrl) {
+                return Promise.resolve([]);
+            }
+
+            if (previewMetadataPromise !== null) {
+                return previewMetadataPromise;
+            }
+
+            previewMetadataPromise = fetch(previewUrl, {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: {
+                    'X-Playback-Session': sessionToken,
+                },
+            }).then(function (response) {
+                if (!response || !response.ok) {
+                    return '';
+                }
+
+                return response.text();
+            }).then(function (payload) {
+                previewCues = parsePreviewMetadata(payload);
+                return previewCues;
+            }).catch(function () {
+                previewCues = [];
+                return previewCues;
             });
+
+            return previewMetadataPromise;
+        }
+
+        function setProgressPreview(hoverSeconds, ratio) {
+            if (!mouseDisplay || !timeTooltip || !progressHolder) {
+                return;
+            }
+
+            var rect = progressHolder.getBoundingClientRect();
+            var left = Math.max(0, Math.min(rect.width, rect.width * ratio));
+
+            mouseDisplay.style.left = left + 'px';
+            mouseDisplay.classList.add('is-visible');
+            timeTooltip.textContent = formatControlTime(hoverSeconds);
+
+            if (!thumbnailHolder || !thumbnailImage || !thumbnailText) {
+                return;
+            }
+
+            ensurePreviewMetadata().then(function (cues) {
+                var activeCue = null;
+
+                for (var cueIndex = 0; cueIndex < cues.length; cueIndex += 1) {
+                    if (hoverSeconds >= cues[cueIndex].start && hoverSeconds <= cues[cueIndex].end) {
+                        activeCue = cues[cueIndex];
+                        break;
+                    }
+                }
+
+                if (!activeCue || !activeCue.imageUrl || !activeCue.width || !activeCue.height) {
+                    thumbnailHolder.hidden = true;
+                    return;
+                }
+
+                var scale = Math.min(1, 200 / activeCue.width);
+                var width = Math.round(activeCue.width * scale);
+                var height = Math.round(activeCue.height * scale);
+
+                thumbnailHolder.hidden = false;
+                thumbnailHolder.style.width = width + 'px';
+                thumbnailHolder.style.height = height + 'px';
+                thumbnailImage.style.backgroundImage = 'url("' + activeCue.imageUrl + '")';
+                thumbnailImage.style.backgroundSize = (previewColumns * width) + 'px ' + (previewRows * height) + 'px';
+                thumbnailImage.style.backgroundPosition = (-Math.round(activeCue.x * scale)) + 'px ' + (-Math.round(activeCue.y * scale)) + 'px';
+                thumbnailText.textContent = formatPlayerTime(hoverSeconds);
+            });
+        }
+
+        function clearProgressPreview() {
+            if (mouseDisplay) {
+                mouseDisplay.classList.remove('is-visible');
+            }
+
+            if (thumbnailHolder) {
+                thumbnailHolder.hidden = true;
+            }
+        }
+
+        function updateWatchTimeDisplay() {
+            if (!watchTimeValue) {
+                return;
+            }
+
+            watchTimeValue.textContent = formatPlayerTime(watchedSeconds);
+        }
+
+        function updatePositionDisplay() {
+            if (!video) {
+                return;
+            }
+
+            var duration = Number(video.duration || 0);
+            var currentTime = Number(video.currentTime || 0);
+            var durationLabel = duration > 0 && Number.isFinite(duration) ? formatPlayerTime(duration) : '--:--';
+            var remainingSeconds = duration > 0 && Number.isFinite(duration) ? Math.max(0, duration - currentTime) : 0;
+
+            if (positionValue) {
+                positionValue.textContent = formatPlayerTime(currentTime) + ' / ' + durationLabel;
+            }
+
+            if (currentTimeDisplay) {
+                currentTimeDisplay.textContent = formatControlTime(currentTime);
+            }
+
+            if (durationDisplay) {
+                durationDisplay.textContent = duration > 0 && Number.isFinite(duration) ? formatControlTime(duration) : '--:--';
+            }
+
+            if (remainingTimeDisplay) {
+                remainingTimeDisplay.textContent = duration > 0 && Number.isFinite(duration) ? formatControlTime(remainingSeconds) : '--:--';
+            }
+
+            updatePlaybackProgress();
+            updateBufferDisplay();
+        }
+
+        function setSubtitleStatus(message, isError) {
+            if (!subtitleStatus) {
+                return;
+            }
+
+            subtitleStatus.textContent = message || '';
+            subtitleStatus.hidden = !message;
+            subtitleStatus.classList.toggle('is-error', Boolean(message && isError));
+        }
+
+        function clearCaptionOverlay() {
+            if (!captionOverlay) {
+                return;
+            }
+
+            captionOverlay.textContent = '';
+            captionOverlay.classList.remove('is-visible');
+        }
+
+        function renderActiveSubtitleCue() {
+            if (!captionOverlay || !activeSubtitleTrack) {
+                clearCaptionOverlay();
+                return;
+            }
+
+            var cues = activeSubtitleTrack.activeCues;
+            var lines = [];
+
+            if (cues && cues.length) {
+                for (var cueIndex = 0; cueIndex < cues.length; cueIndex += 1) {
+                    var cue = cues[cueIndex];
+                    var cueText = cue && typeof cue.text === 'string' ? cue.text.trim() : '';
+
+                    if (cueText) {
+                        lines.push(cueText);
+                    }
+                }
+            }
+
+            if (lines.length === 0) {
+                clearCaptionOverlay();
+                return;
+            }
+
+            captionOverlay.textContent = lines.join('\\n');
+            captionOverlay.classList.add('is-visible');
+        }
+
+        function unbindActiveSubtitleTrack() {
+            if (activeSubtitleTrack && activeSubtitleCueHandler && typeof activeSubtitleTrack.removeEventListener === 'function') {
+                activeSubtitleTrack.removeEventListener('cuechange', activeSubtitleCueHandler);
+            }
+
+            activeSubtitleTrack = null;
+            activeSubtitleCueHandler = null;
+            clearCaptionOverlay();
+        }
+
+        function bindActiveSubtitleTrack(track) {
+            unbindActiveSubtitleTrack();
+
+            if (!track) {
+                return;
+            }
+
+            activeSubtitleTrack = track;
+            activeSubtitleCueHandler = renderActiveSubtitleCue;
+
+            if (typeof activeSubtitleTrack.addEventListener === 'function') {
+                activeSubtitleTrack.addEventListener('cuechange', activeSubtitleCueHandler);
+            }
+
+            renderActiveSubtitleCue();
+        }
+
+        function normalizeSubtitleLanguage(value) {
+            var fallback = 'en';
+            var rawValue = String(value || '').trim().toLowerCase();
+            var matched = rawValue.match(/[a-z]{2,3}(?:-[a-z]{2})?/i);
+            return matched ? matched[0] : fallback;
+        }
+
+        function subtitleLabelFromSource(source, fallbackLabel) {
+            var explicitLabel = String(fallbackLabel || '').trim();
+
+            if (explicitLabel !== '') {
+                return explicitLabel;
+            }
+
+            var rawSource = String(source || '').trim();
+
+            if (rawSource === '') {
+                return 'Subtitle';
+            }
+
+            try {
+                var url = new URL(rawSource, window.location.href);
+                var lastSegment = url.pathname.split('/').pop() || '';
+                var cleaned = lastSegment.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
+                return cleaned !== '' ? cleaned : 'Subtitle';
+            } catch (error) {
+                return 'Subtitle';
+            }
+        }
+
+        function normalizeSubtitleContent(text) {
+            var normalizedText = String(text || '').replace(/\\r\\n/g, '\\n').replace(/\\r/g, '\\n').trim();
+
+            if (normalizedText === '') {
+                throw new Error('Subtitle file is empty.');
+            }
+
+            if (/^WEBVTT/i.test(normalizedText)) {
+                return normalizedText;
+            }
+
+            var lines = normalizedText.split('\\n');
+            var output = [];
+
+            for (var index = 0; index < lines.length; index += 1) {
+                var line = lines[index];
+                var trimmed = line.trim();
+                var nextLine = index + 1 < lines.length ? lines[index + 1].trim() : '';
+
+                if (/^\d+$/.test(trimmed) && nextLine.indexOf('-->') !== -1) {
+                    continue;
+                }
+
+                if (trimmed.indexOf('-->') !== -1) {
+                    output.push(line.replace(/,(\d{3})/g, '.$1'));
+                    continue;
+                }
+
+                output.push(line);
+            }
+
+            return 'WEBVTT\\n\\n' + output.join('\\n');
+        }
+
+        function openSubtitlePanel() {
+            if (!subtitlePanel || !subtitleButton) {
+                return;
+            }
+
+            subtitlePanel.hidden = false;
+            subtitlePanel.classList.add('is-visible');
+            subtitleButton.classList.add('is-active');
+            subtitleButton.setAttribute('aria-expanded', 'true');
+            subtitlePanelOpen = true;
+        }
+
+        function closeSubtitlePanel() {
+            if (!subtitlePanel || !subtitleButton) {
+                return;
+            }
+
+            subtitlePanel.classList.remove('is-visible');
+            subtitlePanel.hidden = true;
+            subtitleButton.classList.remove('is-active');
+            subtitleButton.setAttribute('aria-expanded', 'false');
+            subtitlePanelOpen = false;
+
+            if (subtitleUrlForm) {
+                subtitleUrlForm.hidden = true;
+            }
+        }
+
+        function toggleSubtitleUrlForm(forceVisible) {
+            if (!subtitleUrlForm) {
+                return;
+            }
+
+            var shouldShow = typeof forceVisible === 'boolean' ? forceVisible : subtitleUrlForm.hidden;
+            subtitleUrlForm.hidden = !shouldShow;
+
+            if (shouldShow && subtitleUrlInput) {
+                subtitleUrlInput.focus();
+                subtitleUrlInput.select();
+            }
+        }
+
+        function renderSubtitleMenu() {
+            if (!subtitleList) {
+                return;
+            }
+
+            subtitleList.innerHTML = '';
+
+            function appendOption(label, isActive, handler, className) {
+                var button = document.createElement('button');
+                button.type = 'button';
+                button.className = 've-subtitle-option'
+                    + (isActive ? ' is-active' : '')
+                    + (className ? ' ' + className : '');
+                button.textContent = label;
+                button.addEventListener('click', handler);
+                subtitleList.appendChild(button);
+            }
+
+            appendOption('Captions Off', activeSubtitleId === null, function () {
+                selectSubtitle(null);
+            });
+
+            subtitleEntries.forEach(function (entry) {
+                appendOption(entry.label, activeSubtitleId === entry.id, function () {
+                    selectSubtitle(entry.id);
+                });
+            });
+
+            appendOption('Upload From PC', false, function () {
+                if (subtitleFileInput) {
+                    subtitleFileInput.click();
+                }
+            }, 'is-secondary');
+
+            appendOption('Load From URL', false, function () {
+                toggleSubtitleUrlForm(true);
+            }, 'is-secondary');
+        }
+
+        function updateSubtitleButtonState() {
+            if (!subtitleButton) {
+                return;
+            }
+
+            subtitleButton.classList.toggle('has-subtitle', activeSubtitleId !== null);
+        }
+
+        function removeSubtitleEntry(entry) {
+            if (!entry) {
+                return;
+            }
+
+            if (entry.objectUrl && window.URL && typeof window.URL.revokeObjectURL === 'function') {
+                window.URL.revokeObjectURL(entry.objectUrl);
+            }
+
+            if (entry.element && entry.element.parentNode) {
+                entry.element.parentNode.removeChild(entry.element);
+            }
+
+            subtitleEntries = subtitleEntries.filter(function (candidate) {
+                return candidate.id !== entry.id;
+            });
+        }
+
+        function selectSubtitle(id) {
+            activeSubtitleId = id === null ? null : id;
+
+            subtitleEntries.forEach(function (entry) {
+                if (entry.track) {
+                    entry.track.mode = entry.id === activeSubtitleId ? 'hidden' : 'disabled';
+                }
+            });
+
+            if (activeSubtitleId === null) {
+                unbindActiveSubtitleTrack();
+                updateSubtitleButtonState();
+                renderSubtitleMenu();
+                return;
+            }
+
+            var nextEntry = null;
+
+            for (var index = 0; index < subtitleEntries.length; index += 1) {
+                if (subtitleEntries[index].id === activeSubtitleId) {
+                    nextEntry = subtitleEntries[index];
+                    break;
+                }
+            }
+
+            if (!nextEntry || !nextEntry.track) {
+                activeSubtitleId = null;
+                unbindActiveSubtitleTrack();
+                updateSubtitleButtonState();
+                renderSubtitleMenu();
+                return;
+            }
+
+            nextEntry.track.mode = 'hidden';
+            bindActiveSubtitleTrack(nextEntry.track);
+            updateSubtitleButtonState();
+            renderSubtitleMenu();
+        }
+
+        function registerSubtitleTrack(sourceUrl, label, language, activateByDefault, objectUrl) {
+            if (!video || !sourceUrl) {
+                return Promise.reject(new Error('Subtitle source is missing.'));
+            }
+
+            var trackElement = document.createElement('track');
+            var entry = {
+                id: 'subtitle-' + String(subtitleCounter += 1),
+                label: subtitleLabelFromSource(sourceUrl, label),
+                language: normalizeSubtitleLanguage(language || label || sourceUrl),
+                element: trackElement,
+                track: null,
+                objectUrl: objectUrl || '',
+            };
+
+            trackElement.kind = 'subtitles';
+            trackElement.label = entry.label;
+            trackElement.srclang = entry.language;
+            trackElement.src = sourceUrl;
+            trackElement.default = false;
+
+            return new Promise(function (resolve, reject) {
+                var settled = false;
+
+                function cleanup() {
+                    trackElement.removeEventListener('load', handleLoad);
+                    trackElement.removeEventListener('error', handleError);
+                }
+
+                function handleLoad() {
+                    if (settled) {
+                        return;
+                    }
+
+                    settled = true;
+                    cleanup();
+                    entry.track = trackElement.track || null;
+
+                    if (entry.track) {
+                        entry.track.mode = 'disabled';
+                    }
+
+                    subtitleEntries.push(entry);
+                    renderSubtitleMenu();
+
+                    if (activateByDefault || (autoSubtitleStart && activeSubtitleId === null)) {
+                        selectSubtitle(entry.id);
+                    } else {
+                        updateSubtitleButtonState();
+                    }
+
+                    setSubtitleStatus('Loaded ' + entry.label + '.', false);
+                    resolve(entry);
+                }
+
+                function handleError() {
+                    if (settled) {
+                        return;
+                    }
+
+                    settled = true;
+                    cleanup();
+
+                    if (trackElement.parentNode) {
+                        trackElement.parentNode.removeChild(trackElement);
+                    }
+
+                    if (objectUrl && window.URL && typeof window.URL.revokeObjectURL === 'function') {
+                        window.URL.revokeObjectURL(objectUrl);
+                    }
+
+                    reject(new Error('Subtitle track could not be loaded.'));
+                }
+
+                trackElement.addEventListener('load', handleLoad);
+                trackElement.addEventListener('error', handleError);
+                video.appendChild(trackElement);
+
+                window.setTimeout(function () {
+                    if (!settled && trackElement.track && trackElement.track.cues !== null) {
+                        handleLoad();
+                    }
+                }, 350);
+            });
+        }
+
+        function addSubtitleFromText(text, label, language, activateByDefault) {
+            var subtitleBlob = new Blob([normalizeSubtitleContent(text)], { type: 'text/vtt' });
+            var objectUrl = window.URL && typeof window.URL.createObjectURL === 'function'
+                ? window.URL.createObjectURL(subtitleBlob)
+                : '';
+
+            if (!objectUrl) {
+                return Promise.reject(new Error('This browser cannot create a local subtitle track.'));
+            }
+
+            return registerSubtitleTrack(objectUrl, label, language, activateByDefault, objectUrl);
+        }
+
+        function loadSubtitleFromUrl(url, label, language, activateByDefault) {
+            var targetUrl = String(url || '').trim();
+
+            if (targetUrl === '') {
+                return Promise.reject(new Error('Subtitle URL is required.'));
+            }
+
+            setSubtitleStatus('Loading subtitles...', false);
+
+            return fetch(targetUrl, {
+                method: 'GET',
+                credentials: 'omit',
+            }).then(function (response) {
+                if (!response || !response.ok) {
+                    throw new Error('Subtitle URL could not be fetched.');
+                }
+
+                return response.text();
+            }).then(function (text) {
+                return addSubtitleFromText(text, label || subtitleLabelFromSource(targetUrl), language, activateByDefault);
+            });
+        }
+
+        function loadSubtitleManifest(url) {
+            var manifestUrl = String(url || '').trim();
+
+            if (manifestUrl === '') {
+                return Promise.resolve([]);
+            }
+
+            return fetch(manifestUrl, {
+                method: 'GET',
+                credentials: 'omit',
+            }).then(function (response) {
+                if (!response || !response.ok) {
+                    throw new Error('Subtitle manifest could not be fetched.');
+                }
+
+                return response.json();
+            }).then(function (payload) {
+                var items = [];
+
+                if (Array.isArray(payload)) {
+                    items = payload;
+                } else if (payload && Array.isArray(payload.tracks)) {
+                    items = payload.tracks;
+                }
+
+                return items.reduce(function (sequence, item, itemIndex) {
+                    return sequence.then(function () {
+                        if (!item || typeof item !== 'object') {
+                            return null;
+                        }
+
+                        var itemUrl = String(item.file || item.src || item.url || '').trim();
+
+                        if (itemUrl === '') {
+                            return null;
+                        }
+
+                        return loadSubtitleFromUrl(
+                            itemUrl,
+                            String(item.label || item.title || item.name || ('Subtitle ' + String(itemIndex + 1))),
+                            String(item.lang || item.language || ''),
+                            autoSubtitleStart && activeSubtitleId === null && itemIndex === 0
+                        ).catch(function () {
+                            return null;
+                        });
+                    });
+                }, Promise.resolve()).then(function () {
+                    return items;
+                });
+            });
+        }
+
+        function loadInitialSubtitles() {
+            var params = new URLSearchParams(window.location.search || '');
+            var specs = [];
+
+            params.forEach(function (value, key) {
+                var match = String(key).match(/^c(\d+)_file$/i);
+
+                if (!match || !value) {
+                    return;
+                }
+
+                var slot = match[1];
+                specs.push({
+                    index: Number(slot),
+                    url: String(value),
+                    label: String(params.get('c' + slot + '_label') || ('Subtitle ' + slot)),
+                    language: String(params.get('c' + slot + '_lang') || ''),
+                });
+            });
+
+            specs.sort(function (left, right) {
+                return left.index - right.index;
+            });
+
+            var sequence = Promise.resolve();
+
+            specs.forEach(function (spec, index) {
+                sequence = sequence.then(function () {
+                    return loadSubtitleFromUrl(
+                        spec.url,
+                        spec.label,
+                        spec.language,
+                        autoSubtitleStart && activeSubtitleId === null && index === 0
+                    ).catch(function () {
+                        return null;
+                    });
+                });
+            });
+
+            var manifestUrl = params.get('subtitle_json');
+
+            if (manifestUrl) {
+                sequence = sequence.then(function () {
+                    return loadSubtitleManifest(manifestUrl).catch(function () {
+                        setSubtitleStatus('Subtitle manifest could not be loaded.', true);
+                        return null;
+                    });
+                });
+            }
+
+            return sequence.then(function () {
+                renderSubtitleMenu();
+                updateSubtitleButtonState();
+            });
+        }
+
+        function bindSubtitleControls() {
+            renderSubtitleMenu();
+            updateSubtitleButtonState();
+
+            if (subtitleButton) {
+                subtitleButton.addEventListener('click', function () {
+                    showControlsTemporarily();
+
+                    if (subtitlePanelOpen) {
+                        closeSubtitlePanel();
+                        return;
+                    }
+
+                    openSubtitlePanel();
+                });
+            }
+
+            if (subtitleUrlForm) {
+                subtitleUrlForm.addEventListener('submit', function (event) {
+                    event.preventDefault();
+
+                    if (!subtitleUrlInput) {
+                        return;
+                    }
+
+                    var remoteUrl = subtitleUrlInput.value.trim();
+
+                    if (remoteUrl === '') {
+                        setSubtitleStatus('Subtitle URL is required.', true);
+                        return;
+                    }
+
+                    loadSubtitleFromUrl(remoteUrl, '', '', true).then(function () {
+                        subtitleUrlInput.value = '';
+                        subtitleUrlForm.hidden = true;
+                    }).catch(function (error) {
+                        setSubtitleStatus(error && error.message ? error.message : 'Subtitle URL could not be loaded.', true);
+                    });
+                });
+            }
+
+            if (subtitleFileInput) {
+                subtitleFileInput.addEventListener('change', function () {
+                    var file = subtitleFileInput.files && subtitleFileInput.files[0] ? subtitleFileInput.files[0] : null;
+
+                    if (!file) {
+                        return;
+                    }
+
+                    var reader = new FileReader();
+
+                    reader.onload = function () {
+                        addSubtitleFromText(
+                            String(reader.result || ''),
+                            file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' '),
+                            '',
+                            true
+                        ).catch(function (error) {
+                            setSubtitleStatus(error && error.message ? error.message : 'Subtitle file could not be read.', true);
+                        });
+                    };
+
+                    reader.onerror = function () {
+                        setSubtitleStatus('Subtitle file could not be read.', true);
+                    };
+
+                    reader.readAsText(file);
+                    subtitleFileInput.value = '';
+                });
+            }
+
+            document.addEventListener('click', function (event) {
+                if (!subtitlePanelOpen || !subtitlePanel || !subtitleButton) {
+                    return;
+                }
+
+                if (subtitlePanel.contains(event.target) || subtitleButton.contains(event.target)) {
+                    return;
+                }
+
+                closeSubtitlePanel();
+            });
+
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape' && subtitlePanelOpen) {
+                    closeSubtitlePanel();
+                }
+            });
+        }
+
+        function seekBy(deltaSeconds) {
+            if (!video) {
+                return;
+            }
+
+            if (!streamActivated) {
+                ensureSourceLoaded();
+            }
+
+            var duration = Number(video.duration || 0);
+            var nextTime = Number(video.currentTime || 0) + Number(deltaSeconds || 0);
+
+            if (Number.isFinite(duration) && duration > 0) {
+                nextTime = Math.min(duration, nextTime);
+            }
+
+            video.currentTime = Math.max(0, nextTime);
+            updatePositionDisplay();
+
+            if (hls) {
+                syncManagedLoading();
+            }
+        }
+
+        function bindSkipButtons() {
+            if (skipBackButton) {
+                skipBackButton.addEventListener('click', function () {
+                    seekBy(-10);
+                    showControlsTemporarily();
+                });
+            }
+
+            if (skipForwardButton) {
+                skipForwardButton.addEventListener('click', function () {
+                    seekBy(10);
+                    showControlsTemporarily();
+                });
+            }
+        }
+
+        function bootUi() {
+            if (!video || controlsBootstrapped) {
+                return;
+            }
+
+            controlsBootstrapped = true;
+            setControlsActive(true);
+            updatePlaybackUi();
+            updateVolumeUi();
+            updateFullscreenUi();
+            updatePositionDisplay();
+
+            if (playToggleButton) {
+                playToggleButton.addEventListener('click', function () {
+                    showControlsTemporarily();
+
+                    if (video.paused || video.ended) {
+                        video.play();
+                        return;
+                    }
+
+                    video.pause();
+                });
+            }
+
+            if (muteToggleButton) {
+                muteToggleButton.addEventListener('click', function () {
+                    if (!video) {
+                        return;
+                    }
+
+                    video.muted = !video.muted;
+                    updateVolumeUi();
+                    showControlsTemporarily();
+                });
+            }
+
+            if (volumeRange) {
+                ['input', 'change'].forEach(function (eventName) {
+                    volumeRange.addEventListener(eventName, function () {
+                        if (!video) {
+                            return;
+                        }
+
+                        var volumeValue = Math.max(0, Math.min(100, Number(volumeRange.value || 0)));
+                        video.volume = volumeValue / 100;
+                        video.muted = volumeValue <= 0;
+                        updateVolumeUi();
+                        showControlsTemporarily();
+                    });
+                });
+            }
+
+            if (progressHolder) {
+                var handleProgressPointer = function (clientX) {
+                    if (!video) {
+                        return;
+                    }
+
+                    var duration = Number(video.duration || 0);
+
+                    if (!(duration > 0) || !Number.isFinite(duration)) {
+                        return;
+                    }
+
+                    var rect = progressHolder.getBoundingClientRect();
+
+                    if (rect.width <= 0) {
+                        return;
+                    }
+
+                    var ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+                    setProgressPreview(duration * ratio, ratio);
+                };
+
+                progressHolder.addEventListener('mousemove', function (event) {
+                    handleProgressPointer(event.clientX);
+                    showControlsTemporarily();
+                });
+
+                progressHolder.addEventListener('mouseleave', clearProgressPreview);
+
+                progressHolder.addEventListener('click', function (event) {
+                    if (!video) {
+                        return;
+                    }
+
+                    if (!streamActivated) {
+                        ensureSourceLoaded();
+                    }
+
+                    var duration = Number(video.duration || 0);
+
+                    if (!(duration > 0) || !Number.isFinite(duration)) {
+                        return;
+                    }
+
+                    var rect = progressHolder.getBoundingClientRect();
+                    var ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+                    video.currentTime = duration * ratio;
+                    updatePositionDisplay();
+                    showControlsTemporarily();
+
+                    if (hls) {
+                        syncManagedLoading();
+                    }
+                });
+
+                progressHolder.addEventListener('keydown', function (event) {
+                    if (event.key === 'ArrowLeft') {
+                        event.preventDefault();
+                        seekBy(-5);
+                        return;
+                    }
+
+                    if (event.key === 'ArrowRight') {
+                        event.preventDefault();
+                        seekBy(5);
+                    }
+                });
+            }
+
+            if (fullscreenToggleButton) {
+                fullscreenToggleButton.addEventListener('click', function () {
+                    var fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || null;
+
+                    if (stage && fullscreenElement !== stage) {
+                        if (typeof stage.requestFullscreen === 'function') {
+                            stage.requestFullscreen().catch(function () {});
+                        } else if (typeof stage.webkitRequestFullscreen === 'function') {
+                            stage.webkitRequestFullscreen();
+                        }
+                    } else if (typeof document.exitFullscreen === 'function') {
+                        document.exitFullscreen().catch(function () {});
+                    } else if (typeof document.webkitExitFullscreen === 'function') {
+                        document.webkitExitFullscreen();
+                    }
+
+                    showControlsTemporarily();
+                });
+            }
+
+            ['mousemove', 'mouseenter', 'touchstart'].forEach(function (eventName) {
+                stage.addEventListener(eventName, showControlsTemporarily, { passive: true });
+            });
+
+            stage.addEventListener('mouseleave', function () {
+                clearControlsHideTimer();
+
+                if (video && !video.paused && !video.ended) {
+                    setControlsActive(false);
+                }
+            });
+
+            video.addEventListener('volumechange', updateVolumeUi);
+            document.addEventListener('fullscreenchange', updateFullscreenUi);
+            document.addEventListener('webkitfullscreenchange', updateFullscreenUi);
         }
 
         function warmPlaybackRuntime() {
@@ -4948,9 +6308,546 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 return null;
             });
 
+            warmStreamMetadata();
+            schedulePostLoadStreamWarmup();
+            schedulePlaybackSessionRefresh();
+
             if (window.Hls && window.Hls.isSupported()) {
                 ensureHlsPipeline();
             }
+        }
+
+        function updateSessionDebugState() {
+            preloadDebug.sessionTtlSeconds = sessionTtlSeconds;
+            preloadDebug.sessionIssuedAtMs = sessionIssuedAtMs;
+            preloadDebug.sessionRefreshCount = sessionRefreshCount;
+        }
+
+        function clearPlaybackSessionRefresh() {
+            if (sessionRefreshTimer !== null) {
+                window.clearTimeout(sessionRefreshTimer);
+                sessionRefreshTimer = null;
+            }
+        }
+
+        function sessionNeedsRefresh(force) {
+            if (force) {
+                return true;
+            }
+
+            if (!sessionToken || !manifestUrl || !keyUrl) {
+                return true;
+            }
+
+            var ttlMs = Math.max(60000, Number(sessionTtlSeconds || 0) * 1000);
+            var expiresAtMs = Number(sessionIssuedAtMs || 0) + ttlMs;
+
+            if (!Number.isFinite(expiresAtMs) || expiresAtMs <= 0) {
+                return true;
+            }
+
+            return Date.now() + sessionRefreshLeadMs >= expiresAtMs;
+        }
+
+        function schedulePlaybackSessionRefresh() {
+            clearPlaybackSessionRefresh();
+
+            if (streamActivated || sourceFailure || !sessionRefreshUrl) {
+                return;
+            }
+
+            var ttlMs = Math.max(60000, Number(sessionTtlSeconds || 0) * 1000);
+            var expiresAtMs = Number(sessionIssuedAtMs || 0) + ttlMs;
+
+            if (!Number.isFinite(expiresAtMs) || expiresAtMs <= 0) {
+                sessionRefreshTimer = window.setTimeout(function () {
+                    sessionRefreshTimer = null;
+                    refreshPlaybackSession(true).catch(function () {
+                        schedulePlaybackSessionRefresh();
+                    });
+                }, 10000);
+                return;
+            }
+
+            var refreshDelay = Math.max(1000, expiresAtMs - Date.now() - sessionRefreshLeadMs);
+            sessionRefreshTimer = window.setTimeout(function () {
+                sessionRefreshTimer = null;
+                refreshPlaybackSession(true).catch(function () {
+                    sessionRefreshTimer = window.setTimeout(function () {
+                        sessionRefreshTimer = null;
+                        schedulePlaybackSessionRefresh();
+                    }, 10000);
+                });
+            }, refreshDelay);
+        }
+
+        function preloadTextAsset(url) {
+            if (!url) {
+                return Promise.resolve(null);
+            }
+
+            return fetch(url, {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: {
+                    'X-Playback-Session': sessionToken,
+                },
+            }).then(function (response) {
+                if (!response || !response.ok) {
+                    return null;
+                }
+
+                return response.text().catch(function () {
+                    return null;
+                });
+            }).catch(function () {
+                return null;
+            });
+        }
+
+        function preloadBinaryAsset(url, extraHeaders) {
+            if (!url) {
+                return Promise.resolve(null);
+            }
+
+            var headers = {
+                'X-Playback-Session': sessionToken,
+            };
+
+            if (extraHeaders && typeof extraHeaders === 'object') {
+                Object.keys(extraHeaders).forEach(function (key) {
+                    headers[key] = extraHeaders[key];
+                });
+            }
+
+            return fetch(url, {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: headers,
+            }).then(function (response) {
+                if (!response || !response.ok) {
+                    return null;
+                }
+
+                return response.arrayBuffer().catch(function () {
+                    return null;
+                });
+            });
+        }
+
+        function revokePreparedObjectUrl(url) {
+            if (!url || !window.URL || typeof window.URL.revokeObjectURL !== 'function') {
+                return;
+            }
+
+            try {
+                window.URL.revokeObjectURL(url);
+            } catch (error) {}
+        }
+
+        function cleanupPreparedStreamSources() {
+            revokePreparedObjectUrl(preparedManifestUrl);
+            revokePreparedObjectUrl(preparedKeyBlobUrl);
+            revokePreparedObjectUrl(preparedStartupSegmentBlobUrl);
+            preparedManifestUrl = '';
+            preparedKeyBlobUrl = '';
+            preparedStartupSegmentBlobUrl = '';
+            preloadDebug.preparedManifestUrl = '';
+            preloadDebug.preparedKeyUrl = '';
+            preloadDebug.preparedStartupSegmentUrl = '';
+        }
+
+        function resetPreparedStreamState() {
+            cleanupPreparedStreamSources();
+            preloadManifestPromise = null;
+            preloadKeyPromise = null;
+            preloadStartupSegmentPromise = null;
+            preloadedManifestText = '';
+            preloadedKeyBytes = null;
+            preloadedStartupSegmentBytes = null;
+            preparedManifestPromise = null;
+            hlsSourceLoadPromise = null;
+            preloadStartupSegmentUrl = '';
+            startupPartReady = false;
+            postLoadWarmupScheduled = false;
+            previewMetadataPromise = null;
+            previewCues = [];
+            preloadDebug.manifestPreloaded = false;
+            preloadDebug.startupSegmentPreloaded = false;
+            preloadDebug.startupSegmentUrl = '';
+            preloadDebug.keyPreloaded = false;
+
+            if (!streamActivated) {
+                hlsSourceLoaded = false;
+                pendingSourceLoad = false;
+            }
+        }
+
+        function applyPlaybackSessionPayload(payload) {
+            if (!payload || typeof payload !== 'object') {
+                return false;
+            }
+
+            var nextSessionToken = String(payload.session_token || '').trim();
+            var nextManifestUrl = String(payload.manifest_url || '').trim();
+            var nextKeyUrl = String(payload.key_url || '').trim();
+
+            if (!nextSessionToken || !nextManifestUrl || !nextKeyUrl) {
+                return false;
+            }
+
+            sessionToken = nextSessionToken;
+            manifestUrl = nextManifestUrl;
+            keyUrl = nextKeyUrl;
+            previewUrl = String(payload.preview_url || '').trim();
+            playbackToken = String(payload.playback_token || playbackToken || '').trim();
+            playbackClientToken = String(payload.pulse_client_token || playbackClientToken || '').trim();
+            playbackServerToken = String(payload.pulse_server_token || playbackServerToken || '').trim();
+            clientProofKey = String(payload.client_proof_key || clientProofKey || '').trim();
+            playbackSequence = Number.isFinite(Number(payload.pulse_sequence))
+                ? Math.max(0, Number(payload.pulse_sequence))
+                : playbackSequence;
+            sessionTtlSeconds = Math.max(60, Number(payload.session_ttl_seconds || sessionTtlSeconds || 0));
+            sessionIssuedAtMs = Number.isFinite(Number(payload.issued_at_ms))
+                ? Math.max(0, Number(payload.issued_at_ms))
+                : Date.now();
+            proofKeyPromise = null;
+            streamResourceVersion += 1;
+            resetPreparedStreamState();
+            updateSessionDebugState();
+            schedulePlaybackSessionRefresh();
+
+            if (pageLoaded && !streamActivated) {
+                warmStreamMetadata();
+                warmStartupSegmentWhenIdle();
+            }
+
+            return true;
+        }
+
+        function refreshPlaybackSession(force) {
+            if (!sessionRefreshUrl) {
+                return Promise.reject(new Error('Playback session refresh is unavailable.'));
+            }
+
+            if (!force && !sessionNeedsRefresh(false)) {
+                return Promise.resolve(false);
+            }
+
+            if (sessionRefreshPromise !== null) {
+                return sessionRefreshPromise;
+            }
+
+            sessionRefreshPromise = fetch(sessionRefreshUrl, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    Accept: 'application/json',
+                },
+            }).then(function (response) {
+                return response.json().catch(function () {
+                    return {};
+                }).then(function (payload) {
+                    if (!response || !response.ok || !payload || payload.status !== 'ok' || !payload.session) {
+                        throw new Error('Playback session refresh failed.');
+                    }
+
+                    if (!applyPlaybackSessionPayload(payload.session)) {
+                        throw new Error('Playback session refresh returned incomplete data.');
+                    }
+
+                    sessionRefreshCount += 1;
+                    updateSessionDebugState();
+                    return payload.session;
+                });
+            }).finally(function () {
+                sessionRefreshPromise = null;
+            });
+
+            return sessionRefreshPromise;
+        }
+
+        preloadDebug.refreshSession = function (force) {
+            return refreshPlaybackSession(Boolean(force));
+        };
+        preloadDebug.expireSessionForTest = function () {
+            sessionIssuedAtMs = Date.now() - (Math.max(60, Number(sessionTtlSeconds || 0)) * 1000) - 1000;
+            updateSessionDebugState();
+        };
+        updateSessionDebugState();
+
+        function resolveStartupSegmentUrl(manifestText) {
+            if (!manifestText) {
+                return '';
+            }
+
+            var lines = String(manifestText).split(/\\r\\n|\\r|\\n/);
+
+            for (var index = 0; index < lines.length; index += 1) {
+                var line = String(lines[index] || '').trim();
+
+                if (line === '' || line.charAt(0) === '#') {
+                    continue;
+                }
+
+                try {
+                    return new URL(line, manifestUrl).toString();
+                } catch (error) {
+                    return '';
+                }
+            }
+
+            return '';
+        }
+
+        function preloadStartupSegment(url) {
+            if (!url) {
+                return Promise.resolve(null);
+            }
+
+            var resourceVersion = streamResourceVersion;
+
+            return preloadBinaryAsset(url, {
+                'X-Playback-Prefetch': '1',
+            }).then(function (bytes) {
+                if (!bytes || resourceVersion !== streamResourceVersion) {
+                    return null;
+                }
+
+                preloadedStartupSegmentBytes = bytes;
+                startupPartReady = true;
+                preloadDebug.startupSegmentPreloaded = true;
+                return bytes;
+            }).catch(function () {
+                return null;
+            });
+        }
+
+        function warmStreamMetadata() {
+            if (preloadManifestPromise === null) {
+                var manifestResourceVersion = streamResourceVersion;
+                preloadManifestPromise = preloadTextAsset(manifestUrl).then(function (manifestText) {
+                    if (manifestResourceVersion !== streamResourceVersion) {
+                        return null;
+                    }
+
+                    preloadedManifestText = typeof manifestText === 'string' ? manifestText : '';
+                    preloadDebug.manifestPreloaded = Boolean(manifestText);
+                    return manifestText;
+                });
+            }
+
+            if (preloadKeyPromise === null) {
+                var keyResourceVersion = streamResourceVersion;
+                preloadKeyPromise = preloadBinaryAsset(keyUrl).then(function (bytes) {
+                    if (keyResourceVersion !== streamResourceVersion) {
+                        return null;
+                    }
+
+                    preloadedKeyBytes = bytes;
+                    preloadDebug.keyPreloaded = Boolean(bytes && bytes.byteLength > 0);
+                    return bytes;
+                });
+            }
+        }
+
+        function warmStartupSegmentWhenIdle() {
+            if (
+                postLoadWarmupScheduled
+                || sourceFailure
+                || streamActivated
+                || playbackStartRequested
+            ) {
+                return;
+            }
+
+            postLoadWarmupScheduled = true;
+
+            var runWarmup = function () {
+                warmStreamMetadata();
+
+                preloadManifestPromise.then(function (manifestText) {
+                    if (
+                        sourceFailure
+                        || streamActivated
+                        || playbackStartRequested
+                        || preloadStartupSegmentPromise !== null
+                    ) {
+                        return false;
+                    }
+
+                    preloadStartupSegmentUrl = resolveStartupSegmentUrl(manifestText);
+                    preloadDebug.startupSegmentUrl = preloadStartupSegmentUrl;
+
+                    if (!preloadStartupSegmentUrl) {
+                        return false;
+                    }
+
+                    preloadStartupSegmentPromise = preloadStartupSegment(preloadStartupSegmentUrl);
+                    return preloadStartupSegmentPromise;
+                }).catch(function () {
+                    return null;
+                });
+            };
+
+            window.setTimeout(runWarmup, 60);
+        }
+
+        function schedulePostLoadStreamWarmup() {
+            if (pageLoaded || document.readyState === 'complete') {
+                pageLoaded = true;
+                preloadDebug.pageLoaded = true;
+                warmStartupSegmentWhenIdle();
+                return;
+            }
+
+            window.addEventListener('load', function () {
+                pageLoaded = true;
+                preloadDebug.pageLoaded = true;
+                warmStartupSegmentWhenIdle();
+            }, { once: true });
+        }
+
+        function buildPreparedManifestUrl() {
+            if (preparedManifestPromise !== null) {
+                return preparedManifestPromise;
+            }
+
+            var resourceVersion = streamResourceVersion;
+            preparedManifestPromise = Promise.resolve().then(function () {
+                warmStreamMetadata();
+                return preloadManifestPromise;
+            }).then(function (manifestText) {
+                if (resourceVersion !== streamResourceVersion) {
+                    return manifestUrl;
+                }
+
+                manifestText = typeof manifestText === 'string' ? manifestText : preloadedManifestText;
+
+                if (!manifestText) {
+                    return manifestUrl;
+                }
+
+                preloadedManifestText = manifestText;
+
+                if (!preloadStartupSegmentUrl) {
+                    preloadStartupSegmentUrl = resolveStartupSegmentUrl(manifestText);
+                    preloadDebug.startupSegmentUrl = preloadStartupSegmentUrl;
+                }
+
+                if (preloadStartupSegmentUrl && preloadStartupSegmentPromise === null) {
+                    preloadStartupSegmentPromise = preloadStartupSegment(preloadStartupSegmentUrl);
+                }
+
+                return Promise.all([
+                    preloadKeyPromise ? preloadKeyPromise.catch(function () { return null; }) : Promise.resolve(null),
+                    preloadStartupSegmentPromise ? preloadStartupSegmentPromise.catch(function () { return null; }) : Promise.resolve(null),
+                ]).then(function (results) {
+                    if (resourceVersion !== streamResourceVersion) {
+                        return manifestUrl;
+                    }
+
+                    var keyBytes = results[0] || preloadedKeyBytes;
+                    var startupBytes = results[1] || preloadedStartupSegmentBytes;
+                    var lines = String(manifestText).split(/\\r\\n|\\r|\\n/);
+                    var rewrittenLines = [];
+                    var replacedStartupSegment = false;
+
+                    cleanupPreparedStreamSources();
+
+                    if (keyBytes && window.URL && typeof window.URL.createObjectURL === 'function') {
+                        preparedKeyBlobUrl = window.URL.createObjectURL(new Blob([keyBytes], { type: 'application/octet-stream' }));
+                    }
+
+                    if (startupBytes && window.URL && typeof window.URL.createObjectURL === 'function') {
+                        preparedStartupSegmentBlobUrl = window.URL.createObjectURL(new Blob([startupBytes], { type: 'video/mp2t' }));
+                    }
+
+                    if (!preparedKeyBlobUrl && !preparedStartupSegmentBlobUrl) {
+                        return manifestUrl;
+                    }
+
+                    for (var index = 0; index < lines.length; index += 1) {
+                        var originalLine = String(lines[index] || '');
+                        var trimmedLine = originalLine.trim();
+
+                        if (trimmedLine === '') {
+                            rewrittenLines.push(originalLine);
+                            continue;
+                        }
+
+                        if (preparedKeyBlobUrl && trimmedLine.indexOf('#EXT-X-KEY:') === 0) {
+                            rewrittenLines.push(originalLine.replace(/URI="[^"]*"/, 'URI="' + preparedKeyBlobUrl + '"'));
+                            continue;
+                        }
+
+                        if (trimmedLine.charAt(0) !== '#') {
+                            var resolvedSegmentUrl = trimmedLine;
+
+                            try {
+                                resolvedSegmentUrl = new URL(trimmedLine, manifestUrl).toString();
+                            } catch (error) {}
+
+                            if (!replacedStartupSegment && preparedStartupSegmentBlobUrl) {
+                                rewrittenLines.push(preparedStartupSegmentBlobUrl);
+                                replacedStartupSegment = true;
+                                continue;
+                            }
+
+                            rewrittenLines.push(resolvedSegmentUrl);
+                            continue;
+                        }
+
+                        rewrittenLines.push(originalLine);
+                    }
+
+                    preparedManifestUrl = window.URL.createObjectURL(new Blob([rewrittenLines.join('\\n')], {
+                        type: 'application/vnd.apple.mpegurl',
+                    }));
+                    preloadDebug.preparedManifestUrl = preparedManifestUrl;
+                    preloadDebug.preparedKeyUrl = preparedKeyBlobUrl;
+                    preloadDebug.preparedStartupSegmentUrl = preparedStartupSegmentBlobUrl;
+
+                    return preparedManifestUrl;
+                });
+            }).catch(function () {
+                return manifestUrl;
+            });
+
+            return preparedManifestPromise;
+        }
+
+        function loadPreparedStreamSource() {
+            if (hlsSourceLoadPromise !== null) {
+                return hlsSourceLoadPromise;
+            }
+
+            hlsSourceLoadPromise = buildPreparedManifestUrl().then(function (sourceUrl) {
+                var finalSourceUrl = sourceUrl || manifestUrl;
+
+                if (hls) {
+                    hls.loadSource(finalSourceUrl);
+                    return finalSourceUrl;
+                }
+
+                if (video && !video.currentSrc) {
+                    video.src = finalSourceUrl;
+                    video.load();
+                }
+
+                return finalSourceUrl;
+            }).catch(function () {
+                if (hls) {
+                    hls.loadSource(manifestUrl);
+                } else if (video && !video.currentSrc) {
+                    video.src = manifestUrl;
+                    video.load();
+                }
+
+                return manifestUrl;
+            });
+
+            return hlsSourceLoadPromise;
         }
 
         function bufferedAheadSeconds() {
@@ -5059,9 +6956,22 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         function failSecurePlayback(message) {
             sourceFailure = true;
             awaitingInitialPlayback = false;
+            setOverlayButtonLoading(false);
+            setLoadingSpinner(false);
             stopHlsLoading(true);
             setOverlayMode('default');
             setState(message, true);
+            updatePlaybackUi();
+        }
+
+        function ensureFreshPlaybackSession(force) {
+            if (streamActivated) {
+                return Promise.resolve(true);
+            }
+
+            return refreshPlaybackSession(Boolean(force)).then(function () {
+                return true;
+            });
         }
 
         function ensureHlsPipeline() {
@@ -5092,7 +7002,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 if (pendingSourceLoad && !hlsSourceLoaded) {
                     pendingSourceLoad = false;
                     hlsSourceLoaded = true;
-                    hls.loadSource(manifestUrl);
+                    loadPreparedStreamSource();
                 }
             });
 
@@ -5122,6 +7032,8 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             hls.on(window.Hls.Events.FRAG_BUFFERED, function () {
                 hlsFragRequestActive = false;
+                startupPartReady = true;
+                setOverlayButtonLoading(false);
 
                 syncManagedLoading();
             });
@@ -5153,6 +7065,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             streamActivated = true;
             playbackBootstrapped = true;
+            clearPlaybackSessionRefresh();
             setOverlayMode('loading');
             setState('Loading encrypted video stream...');
 
@@ -5160,7 +7073,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 if (hlsMediaAttached) {
                     if (!hlsSourceLoaded) {
                         hlsSourceLoaded = true;
-                        hls.loadSource(manifestUrl);
+                        loadPreparedStreamSource();
                     }
                 } else {
                     pendingSourceLoad = true;
@@ -5171,8 +7084,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 if (!video.currentSrc) {
-                    video.src = manifestUrl;
-                    video.load();
+                    loadPreparedStreamSource();
                 }
 
                 return true;
@@ -5189,29 +7101,43 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             playbackStartRequested = true;
             awaitingInitialPlayback = true;
+            startupPartReady = false;
+            setOverlayButtonLoading(true);
+            setOverlayMode('loading');
+            setState('Preparing secure playback...');
 
-            if (!ensureSourceLoaded()) {
-                awaitingInitialPlayback = false;
-                return Promise.resolve(false);
-            }
-
-            if (hls) {
-                syncManagedLoading();
-            }
-
-            if (video.readyState < 2) {
-                return Promise.resolve(true);
-            }
-
-            var playPromise = nativePlay();
-
-            if (playPromise && typeof playPromise.catch === 'function') {
-                return playPromise.catch(function () {
+            return ensureFreshPlaybackSession(false).catch(function () {
+                failSecurePlayback('Playback session could not be refreshed automatically. Try again in a moment.');
+                return false;
+            }).then(function (ready) {
+                if (!ready) {
                     return false;
-                });
-            }
+                }
 
-            return Promise.resolve(true);
+                if (!ensureSourceLoaded()) {
+                    awaitingInitialPlayback = false;
+                    setOverlayButtonLoading(false);
+                    return false;
+                }
+
+                if (hls) {
+                    syncManagedLoading();
+                }
+
+                if (video.readyState < 2) {
+                    return true;
+                }
+
+                var playPromise = nativePlay();
+
+                if (playPromise && typeof playPromise.catch === 'function') {
+                    return playPromise.catch(function () {
+                        return false;
+                    });
+                }
+
+                return true;
+            });
         }
 
         function nowMs() {
@@ -5821,6 +7747,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             if (isPlaybackTrackable() && mediaAdvanced > 0.05) {
                 watchedSeconds += Math.min(elapsedSeconds, mediaAdvanced);
+                updateWatchTimeDisplay();
                 if (watchedSeconds + 0.05 >= nextPulseTargetSeconds) {
                     submitPlaybackPulse(false);
                 }
@@ -5830,6 +7757,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             lastWatchSampleAt = sampleAt;
             lastWatchCurrentTime = currentTime;
+            updatePositionDisplay();
         }
 
         function startWatchAudit() {
@@ -5875,6 +7803,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             video.addEventListener('seeked', function () {
                 resetWatchSample();
+                updatePositionDisplay();
 
                 if (isPlaybackTrackable()) {
                     startWatchAudit();
@@ -5894,6 +7823,8 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
             window.addEventListener('pagehide', function () {
                 stopWatchAudit();
+                clearPlaybackSessionRefresh();
+                cleanupPreparedStreamSources();
                 if (
                     !streamActivated
                     || watchedSeconds <= 0
@@ -5922,7 +7853,13 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             });
         }
 
+        updateWatchTimeDisplay();
+        updatePositionDisplay();
+        bindSkipButtons();
+        bindSubtitleControls();
+        loadInitialSubtitles();
         bindWatchTracking();
+        bootUi();
         if (typeof window.requestAnimationFrame === 'function') {
             window.requestAnimationFrame(function () {
                 window.setTimeout(warmPlaybackRuntime, 0);
@@ -5949,6 +7886,9 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 beginPlayback();
             }
 
+            updatePlaybackUi();
+            showControlsTemporarily();
+
             if (hls) {
                 syncManagedLoading();
             }
@@ -5958,7 +7898,10 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             awaitingInitialPlayback = false;
             bootUi();
             setOverlayMode('hidden');
+            setLoadingSpinner(false);
             setState('');
+            updatePlaybackUi();
+            showControlsTemporarily();
 
             if (hls) {
                 syncManagedLoading();
@@ -5974,12 +7917,17 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
                 setState('');
             }
 
+            updateBufferDisplay();
+
             if (hls) {
                 syncManagedLoading();
             }
         });
 
         video.addEventListener('timeupdate', function () {
+            updatePositionDisplay();
+            updatePlaybackUi();
+
             if (hls) {
                 syncManagedLoading();
             }
@@ -5991,6 +7939,10 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
             }
 
             setState('Buffering secure stream...');
+            if (!overlay || overlay.classList.contains('is-hidden')) {
+                setLoadingSpinner(true);
+            }
+            showControlsTemporarily();
 
             if (hls) {
                 startHlsLoading();
@@ -6005,13 +7957,25 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
 
         ['loadeddata', 'loadedmetadata', 'canplay'].forEach(function (eventName) {
             video.addEventListener(eventName, function () {
+                updatePositionDisplay();
+
                 if (!streamActivated) {
                     return;
                 }
 
+                 if (!startupPartReady && video.readyState >= 2) {
+                    startupPartReady = true;
+                    setOverlayButtonLoading(false);
+                }
+
+                setLoadingSpinner(false);
+
                 if (!video.paused) {
                     setState('');
                 }
+
+                updatePositionDisplay();
+                updatePlaybackUi();
 
                 if (playbackStartRequested && video.paused && typeof nativePlay === 'function') {
                     nativePlay().catch(function () {});
@@ -6022,6 +7986,15 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         ['pause', 'ended'].forEach(function (eventName) {
             video.addEventListener(eventName, function () {
                 awaitingInitialPlayback = false;
+                updatePositionDisplay();
+                updatePlaybackUi();
+                setLoadingSpinner(false);
+                clearControlsHideTimer();
+                setControlsActive(true);
+
+                if (eventName === 'ended') {
+                    setOverlayButtonLoading(false);
+                }
 
                 if (hls && eventName === 'pause') {
                     syncManagedLoading();
@@ -6040,6 +8013,7 @@ function ve_video_secure_player_script(array $session, string $publicId, int $mi
         });
 
         video.addEventListener('error', function () {
+            setLoadingSpinner(false);
             if (!sourceFailure) {
                 failSecurePlayback('Secure playback could not be started in this browser.');
             }
@@ -6125,7 +8099,8 @@ function ve_render_secure_watch_page(string $publicId): void
     $safeSize = ve_h($sizeLabel);
     $safeUploadDate = ve_h($uploadDateLabel !== '' ? $uploadDateLabel : 'Pending');
     $watchPageUrl = ve_h(ve_absolute_url('/d/' . rawurlencode($publicId)));
-    $localEmbedUrl = ve_h(ve_absolute_url('/e/' . rawurlencode($publicId)));
+    $embedQueryString = http_build_query($_GET);
+    $localEmbedUrl = ve_h(ve_absolute_url('/e/' . rawurlencode($publicId) . ($embedQueryString !== '' ? '?' . $embedQueryString : '')));
     $embedWidth = max(240, (int) ($ownerSettings['embed_width'] ?? 600));
     $embedHeight = max(240, (int) ($ownerSettings['embed_height'] ?? 480));
     $iframeCode = ve_h('<iframe width="' . $embedWidth . '" height="' . $embedHeight . '" src="' . ve_absolute_url('/e/' . rawurlencode($publicId)) . '" scrolling="no" frameborder="0" allowfullscreen="true"></iframe>');
@@ -6781,7 +8756,8 @@ HTML);
         $session,
         $publicId,
         (int) ($viewPolicy['minimum_watch_seconds'] ?? 30),
-        $previewVttUrl
+        $previewVttUrl,
+        ((int) ($ownerSettings['auto_subtitle_start'] ?? 0)) === 1
     );
     $playerColour = strtolower(trim((string) ($ownerSettings['player_colour'] ?? 'ff9900')));
 
@@ -6815,7 +8791,6 @@ HTML);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{$title}</title>
     <meta name="robots" content="noindex,nofollow">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/plyr@3/dist/plyr.css">
     <style>
         :root {
             --ve-accent: #{$playerColour};
@@ -6825,7 +8800,7 @@ HTML);
             margin: 0;
             background: #000;
             color: #fff;
-            font-family: Arial, sans-serif;
+            font-family: Arial, Helvetica, sans-serif;
         }
         .ve-embed-shell {
             background: #000;
@@ -6835,6 +8810,15 @@ HTML);
             width: 100%;
             aspect-ratio: 16 / 9;
             background: #000;
+            overflow: hidden;
+            border: 0;
+            border-radius: 0;
+        }
+        .ve-stage::before {
+            content: none;
+        }
+        .ve-stage::after {
+            content: none;
         }
         .ve-stage .plyr,
         .ve-stage video {
@@ -6843,8 +8827,114 @@ HTML);
             display: block;
             background: #000;
         }
+        .ve-stage .plyr {
+            position: relative;
+            z-index: 2;
+        }
         .ve-stage .plyr--full-ui input[type=range] {
             color: var(--ve-accent);
+        }
+        .ve-stage .plyr__control--overlaid,
+        .ve-stage .plyr__captions {
+            display: none !important;
+        }
+        .ve-stage .plyr--video .plyr__controls {
+            padding: 28px 14px 16px;
+            background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.34) 22%, rgba(0, 0, 0, 0.78) 66%, rgba(0, 0, 0, 0.96) 100%);
+            border: 0;
+            border-radius: 0;
+            color: #fff;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+        .ve-stage .plyr--video .plyr__controls::before {
+            content: none;
+        }
+        .ve-stage .plyr__controls .plyr__control,
+        .ve-stage .plyr__controls .plyr__time,
+        .ve-stage .plyr__controls .plyr__volume {
+            min-height: 40px;
+        }
+        .ve-stage .plyr__controls .plyr__control {
+            color: #fff;
+            width: 42px;
+            min-width: 42px;
+            padding: 0;
+            border-radius: 0;
+            background: transparent;
+            transition: opacity .16s ease;
+        }
+        .ve-stage .plyr__controls .plyr__control:hover,
+        .ve-stage .plyr__controls .plyr__control:focus-visible,
+        .ve-stage .plyr__controls .plyr__control[aria-expanded=true] {
+            color: #fff;
+            background: transparent;
+            opacity: 0.82;
+        }
+        .ve-stage .plyr__controls .plyr__time {
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-start;
+            min-width: 74px;
+            padding: 0 0 0 10px;
+            background: transparent;
+            border: 0;
+            color: #fff;
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 0;
+            text-shadow: 0 0 3px rgba(0, 0, 0, 0.85);
+        }
+        .ve-stage .plyr__progress {
+            margin: 0 12px 0 8px;
+        }
+        .ve-stage .plyr__progress__container {
+            margin: 0;
+        }
+        .ve-stage .plyr__progress__buffer {
+            color: rgba(255, 255, 255, 0.22);
+        }
+        .ve-stage .plyr__progress input[type=range] {
+            --range-track-height: 4px;
+            --range-thumb-height: 12px;
+            --range-thumb-active-shadow-width: 0;
+        }
+        .ve-stage .plyr--full-ui.plyr--video input[type=range]::-webkit-slider-runnable-track {
+            background-color: rgba(255, 255, 255, 0.48);
+        }
+        .ve-stage .plyr--full-ui.plyr--video input[type=range]::-moz-range-track {
+            background-color: rgba(255, 255, 255, 0.48);
+        }
+        .ve-stage .plyr--full-ui.plyr--video input[type=range]::-ms-track {
+            background-color: rgba(255, 255, 255, 0.48);
+        }
+        .ve-stage .plyr--full-ui.plyr--video input[type=range]::-webkit-slider-thumb {
+            background: #fff;
+            box-shadow: none;
+        }
+        .ve-stage .plyr--full-ui.plyr--video input[type=range]::-moz-range-thumb {
+            background: #fff;
+            box-shadow: none;
+        }
+        .ve-stage .plyr__menu__container {
+            background: rgba(16, 16, 16, 0.96);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 0;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36);
+            color: #fff;
+        }
+        .ve-stage .plyr__menu__container::after {
+            border-top-color: rgba(16, 16, 16, 0.96);
+        }
+        .ve-stage .plyr__menu__container .plyr__control {
+            color: #f5f5f5;
+            width: 100%;
+        }
+        .ve-stage .plyr__menu__container .plyr__control[role=menuitemradio][aria-checked=true]::before {
+            background: var(--ve-accent);
+        }
+        .ve-stage .plyr__menu__container .plyr__control--back::before {
+            background: rgba(255, 255, 255, 0.12);
+            box-shadow: none;
         }
         .ve-player-overlay {
             position: absolute;
@@ -6854,10 +8944,8 @@ HTML);
             align-items: center;
             justify-content: center;
             overflow: hidden;
-            background:
-                radial-gradient(circle at center, rgba(255,255,255,0.08), rgba(0,0,0,0.78) 62%),
-                linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.68));
-            transition: opacity .18s ease;
+            background: transparent;
+            transition: opacity .22s ease;
         }
         .ve-player-overlay.is-hidden {
             opacity: 0;
@@ -6871,64 +8959,256 @@ HTML);
             inset: 0;
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
+            object-position: center center;
             display: block;
         }
         .ve-player-overlay-button {
-            position: relative;
+            position: absolute;
+            top: 50%;
+            left: 50%;
             z-index: 1;
-            width: 94px;
-            height: 94px;
+            width: 120px;
+            height: 120px;
+            min-width: 120px;
+            min-height: 120px;
+            padding: 0;
             border: 0;
-            border-radius: 999px;
+            border-radius: 9px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            background: rgba(255, 153, 0, 0.96);
-            color: #111;
-            box-shadow: 0 18px 40px rgba(0,0,0,0.42);
-            transition: transform .16s ease, opacity .16s ease, background .16s ease;
+            background: transparent;
+            color: #fff;
+            box-shadow: none;
+            transform: translate(-50%, -50%);
+            transition: opacity .18s ease;
             cursor: pointer;
+            font: inherit;
         }
         .ve-player-overlay-button:hover {
-            transform: scale(1.04);
-            background: rgba(255, 172, 38, 0.98);
-        }
-        .ve-player-overlay.is-loading .ve-player-overlay-button {
+            background: transparent;
             opacity: 0.82;
         }
-        .ve-player-overlay-button::before {
+        .ve-player-overlay.is-loading .ve-player-overlay-button {
+            opacity: 0.92;
+        }
+        .ve-player-overlay-button.is-starting {
+            background: transparent;
+        }
+        .ve-player-overlay-button.is-starting::after {
             content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 42px;
+            height: 42px;
+            margin-top: -21px;
+            margin-left: -21px;
+            border-radius: 999px;
+            border: 3px solid rgba(255, 255, 255, 0.18);
+            border-top-color: rgba(255, 255, 255, 0.92);
+            animation: ve-player-button-spin .8s linear infinite;
+        }
+        .ve-player-overlay-glyph {
+            position: relative;
             display: block;
+            width: 120px;
+            height: 120px;
+            color: #fff;
+        }
+        .ve-player-overlay-glyph::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
             width: 0;
             height: 0;
-            margin-left: 6px;
-            border-top: 17px solid transparent;
-            border-bottom: 17px solid transparent;
-            border-left: 27px solid currentColor;
+            margin-top: -30px;
+            margin-left: -10px;
+            border-top: 30px solid transparent;
+            border-bottom: 30px solid transparent;
+            border-left: 48px solid currentColor;
+            filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.45));
+        }
+        .ve-player-overlay-label {
+            display: none;
+        }
+        .ve-player-overlay-button.is-starting .ve-player-overlay-glyph {
+            opacity: 0;
+        }
+        @keyframes ve-player-button-spin {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
         }
         .ve-logo-badge {
+            display: none;
+        }
+        .ve-stage-hud {
+            display: none;
+        }
+        .ve-stage-action {
+            display: none;
+        }
+        .ve-subtitle-anchor {
             position: absolute;
-            top: 18px;
-            left: 18px;
-            z-index: 5;
-            max-width: min(22%, 150px);
-            max-height: 72px;
-            object-fit: contain;
+            right: 16px;
+            bottom: 64px;
+            z-index: 6;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 10px;
+        }
+        .ve-subtitle-button {
+            min-width: 54px;
+            height: 46px;
+            padding: 0 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.72);
+            color: #fff;
+            font: inherit;
+            font-size: 0.8rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            cursor: pointer;
+            transition: background .16s ease, border-color .16s ease, transform .16s ease, opacity .16s ease;
+            opacity: 0;
             pointer-events: none;
-            filter: drop-shadow(0 10px 22px rgba(0,0,0,0.45));
+        }
+        .ve-subtitle-button.has-subtitle,
+        .ve-subtitle-button:hover,
+        .ve-subtitle-button:focus-visible,
+        .ve-subtitle-button.is-active,
+        .ve-subtitle-button.has-subtitle:hover {
+            background: rgba(255, 255, 255, 0.14);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .ve-subtitle-panel {
+            width: min(240px, calc(100vw - 36px));
+            padding: 12px;
+            background: rgba(10, 12, 18, 0.94);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 18px;
+            backdrop-filter: blur(22px);
+            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
+        }
+        .ve-subtitle-panel-header {
+            margin-bottom: 10px;
+            color: rgba(255, 255, 255, 0.66);
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .ve-subtitle-list {
+            display: grid;
+            gap: 6px;
+        }
+        .ve-subtitle-option {
+            width: 100%;
+            padding: 10px 12px;
+            border: 0;
+            border-radius: 10px;
+            background: transparent;
+            color: #f2f2f2;
+            font: inherit;
+            font-size: 0.95rem;
+            text-align: left;
+            cursor: pointer;
+            transition: background .16s ease, color .16s ease;
+        }
+        .ve-subtitle-option:hover,
+        .ve-subtitle-option:focus-visible {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .ve-subtitle-option.is-active {
+            background: rgba(255, 153, 0, 0.18);
+            color: var(--ve-accent);
+            font-weight: 800;
+        }
+        .ve-subtitle-option.is-secondary {
+            color: rgba(255, 255, 255, 0.84);
+        }
+        .ve-subtitle-url-form {
+            display: grid;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .ve-subtitle-url-form input {
+            width: 100%;
+            min-height: 42px;
+            padding: 0 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            color: #fff;
+            font: inherit;
+        }
+        .ve-subtitle-url-form button {
+            min-height: 42px;
+            border: 0;
+            border-radius: 10px;
+            background: rgba(255, 153, 0, 0.96);
+            color: #111;
+            font: inherit;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .ve-subtitle-status {
+            margin-top: 10px;
+            color: rgba(255, 255, 255, 0.68);
+            font-size: 0.82rem;
+            line-height: 1.4;
+        }
+        .ve-subtitle-status.is-error {
+            color: #ff9b9b;
+        }
+        .ve-caption-overlay {
+            position: absolute;
+            left: 50%;
+            right: auto;
+            bottom: 66px;
+            z-index: 5;
+            display: none;
+            justify-content: center;
+            pointer-events: none;
+            text-align: center;
+            white-space: pre-line;
+            transform: translateX(-50%);
+            max-width: min(92%, 760px);
+            padding: 8px 14px;
+            background: rgba(0, 0, 0, 0.78);
+            border: 0;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 0.98rem;
+            font-weight: 700;
+            line-height: 1.45;
+        }
+        .ve-caption-overlay.is-visible {
+            display: flex;
         }
         .ve-player-state {
             position: absolute;
-            left: 16px;
-            right: 16px;
-            bottom: 16px;
-            padding: 12px 14px;
-            background: rgba(10, 10, 10, 0.82);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 12px;
+            left: 12px;
+            right: auto;
+            bottom: 60px;
+            max-width: calc(100% - 24px);
+            padding: 8px 10px;
+            background: rgba(0, 0, 0, 0.82);
+            border: 0;
+            border-radius: 4px;
             color: #f4f4f4;
-            font-size: 0.92rem;
+            font-size: 0.84rem;
             opacity: 0;
             transform: translateY(8px);
             pointer-events: none;
@@ -6942,25 +9222,1079 @@ HTML);
             border-color: rgba(255, 85, 85, 0.35);
             color: #ff9b9b;
         }
+        @media (max-width: 767px) {
+            .ve-stage {
+                border-radius: 0;
+            }
+            .ve-subtitle-anchor {
+                right: 14px;
+                bottom: 58px;
+            }
+            .ve-stage .plyr--video .plyr__controls {
+                padding: 24px 10px 12px;
+            }
+            .ve-player-state {
+                left: 10px;
+                bottom: 54px;
+            }
+            .ve-caption-overlay {
+                left: 50%;
+                right: auto;
+                bottom: 60px;
+                font-size: 0.92rem;
+            }
+            .ve-player-overlay-button {
+                width: 96px;
+                height: 96px;
+                min-width: 96px;
+                min-height: 96px;
+            }
+            .ve-player-overlay-glyph {
+                width: 96px;
+                height: 96px;
+            }
+            .ve-player-overlay-glyph::before {
+                margin-top: -24px;
+                margin-left: -8px;
+                border-top-width: 24px;
+                border-bottom-width: 24px;
+                border-left-width: 38px;
+            }
+        }
+        .ve-stage.video-js {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            overflow: hidden;
+            border: 0;
+            border-radius: 0;
+            color: #fff;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+        .ve-stage.video-js .vjs-tech {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+            background: #000;
+        }
+        .ve-stage.video-js .ve-player-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 4;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            transition: opacity .18s ease;
+        }
+        .ve-stage.video-js .ve-player-overlay.is-hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .ve-stage.video-js .ve-player-overlay.is-loading {
+            pointer-events: none;
+        }
+        .ve-stage.video-js .ve-player-poster {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            object-position: center center;
+            display: block;
+        }
+        .ve-stage.video-js .vjs-text-track-display {
+            position: absolute;
+            inset: 0;
+            z-index: 5;
+            pointer-events: none;
+        }
+        .ve-stage.video-js .vjs-text-track-display > div {
+            position: absolute;
+            inset: 0;
+            margin: 1.5%;
+        }
+        .ve-stage.video-js .vjs-control-text {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            border: 0;
+            white-space: nowrap;
+        }
+        .ve-stage.video-js .vjs-loading-spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            z-index: 7;
+            width: 42px;
+            height: 42px;
+            margin: -21px 0 0 -21px;
+            border-radius: 999px;
+            border: 3px solid rgba(255, 255, 255, 0.16);
+            border-top-color: rgba(255, 255, 255, 0.92);
+            animation: ve-player-button-spin .8s linear infinite;
+            pointer-events: none;
+        }
+        .ve-stage.video-js .vjs-big-play-button {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 120px;
+            height: 120px;
+            margin: -60px 0 0 -60px;
+            padding: 0;
+            border: 0;
+            border-radius: 9px;
+            background: transparent;
+            color: #fff;
+            cursor: pointer;
+            opacity: 1;
+            transition: opacity .16s ease;
+        }
+        .ve-stage.video-js .vjs-big-play-button:hover {
+            opacity: 0.82;
+        }
+        .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder,
+        .ve-stage.video-js .ve-player-overlay-glyph {
+            position: relative;
+            display: block;
+            width: 120px;
+            height: 120px;
+        }
+        .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before,
+        .ve-stage.video-js .ve-player-overlay-glyph::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            margin-top: -30px;
+            margin-left: -10px;
+            border-top: 30px solid transparent;
+            border-bottom: 30px solid transparent;
+            border-left: 48px solid #fff;
+            filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.45));
+        }
+        .ve-stage.video-js .vjs-big-play-button.is-starting .vjs-icon-placeholder::before,
+        .ve-stage.video-js .ve-player-overlay-button.is-starting .ve-player-overlay-glyph::before {
+            content: "";
+            width: 42px;
+            height: 42px;
+            margin: -21px 0 0 -21px;
+            border: 3px solid rgba(255, 255, 255, 0.16);
+            border-top-color: rgba(255, 255, 255, 0.92);
+            border-radius: 999px;
+            border-left-width: 3px;
+            border-bottom-width: 3px;
+            border-right-width: 3px;
+            animation: ve-player-button-spin .8s linear infinite;
+            filter: none;
+        }
+        .ve-stage.video-js .vjs-big-play-button.is-starting .vjs-icon-placeholder,
+        .ve-stage.video-js .ve-player-overlay-button.is-starting .ve-player-overlay-glyph {
+            opacity: 1;
+        }
+        .ve-stage.video-js .vjs-control-bar {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 6;
+            display: flex;
+            align-items: center;
+            min-height: 64px;
+            padding: 24px 12px 14px;
+            background: linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.28) 24%, rgba(0, 0, 0, 0.76) 72%, rgba(0, 0, 0, 0.94) 100%);
+            transition: opacity .18s ease, transform .18s ease;
+        }
+        .ve-stage.video-js.vjs-user-inactive .vjs-control-bar,
+        .ve-stage.video-js:not(.vjs-has-started) .vjs-control-bar {
+            opacity: 0;
+            transform: translateY(8px);
+            pointer-events: none;
+        }
+        .ve-stage.video-js .vjs-control,
+        .ve-stage.video-js .vjs-button {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: 0;
+            color: inherit;
+            font: inherit;
+            line-height: 1;
+            cursor: pointer;
+            transition: opacity .16s ease;
+            appearance: none;
+        }
+        .ve-stage.video-js .vjs-control:hover,
+        .ve-stage.video-js .vjs-control:focus-visible,
+        .ve-stage.video-js .vjs-button:hover,
+        .ve-stage.video-js .vjs-button:focus-visible {
+            opacity: 0.82;
+            outline: none;
+        }
+        .ve-stage.video-js .vjs-icon-placeholder {
+            position: relative;
+            display: block;
+            width: 36px;
+            height: 36px;
+        }
+        .ve-stage.video-js .vjs-icon-placeholder::before,
+        .ve-stage.video-js .vjs-icon-placeholder::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: contain;
+        }
+        .ve-stage.video-js .vjs-play-control,
+        .ve-stage.video-js .vjs-fullscreen-control,
+        .ve-stage.video-js .vjs-mute-control,
+        .ve-stage.video-js .vjs-seek-button,
+        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
+            width: 44px;
+            height: 40px;
+            padding: 0;
+        }
+        .ve-stage.video-js .vjs-subs-caps-button {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+        .ve-stage.video-js .vjs-play-control.vjs-paused .vjs-icon-placeholder::before {
+            width: 24px;
+            height: 24px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M8 5v14l11-7z'/%3E%3C/svg%3E");
+        }
+        .ve-stage.video-js .vjs-play-control.vjs-playing .vjs-icon-placeholder::before {
+            width: 24px;
+            height: 24px;
+            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 5h4v14H7zm6 0h4v14h-4z'/%3E%3C/svg%3E\");
+        }
+        .ve-stage.video-js .vjs-seek-button .vjs-icon-placeholder::before {
+            width: 22px;
+            height: 22px;
+            top: 46%;
+            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 5V1L5 8l7 7V9c3.3 0 6 2.7 6 6 0 1.2-.4 2.4-1 3.4l1.5 1.5A7.93 7.93 0 0 0 20 15c0-5-3.6-9.1-8-10z'/%3E%3C/svg%3E\");
+        }
+        .ve-stage.video-js .vjs-seek-button.skip-forward .vjs-icon-placeholder::before {
+            transform: translate(-50%, -50%) scaleX(-1);
+        }
+        .ve-stage.video-js .vjs-seek-button .vjs-icon-placeholder::after {
+            content: "10";
+            top: 54%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: none;
+            color: #fff;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+        .ve-stage.video-js .vjs-mute-control .vjs-icon-placeholder::before {
+            width: 24px;
+            height: 24px;
+        }
+        .ve-stage.video-js .vjs-mute-control.vjs-vol-1 .vjs-icon-placeholder::before,
+        .ve-stage.video-js .vjs-mute-control.vjs-vol-2 .vjs-icon-placeholder::before,
+        .ve-stage.video-js .vjs-mute-control.vjs-vol-3 .vjs-icon-placeholder::before {
+            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.8-1-3.3-2.5-4.1v8.2c1.5-.8 2.5-2.3 2.5-4.1zm2.5 0c0 3-1.7 5.6-4.2 6.9l1.2 1.2C19 18.7 21 15.6 21 12s-2-6.7-5-8.1l-1.2 1.2c2.5 1.3 4.2 3.9 4.2 6.9z'/%3E%3C/svg%3E\");
+        }
+        .ve-stage.video-js .vjs-mute-control.vjs-vol-0 .vjs-icon-placeholder::before {
+            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M16.5 12c0-.7-.1-1.4-.4-2l1.5-1.5c.6 1 .9 2.2.9 3.5 0 1.3-.3 2.5-.9 3.5L16.1 14c.3-.6.4-1.3.4-2zm3 0c0-2-.6-3.9-1.7-5.4l1.5-1.5A9.9 9.9 0 0 1 22 12c0 2.7-1 5.1-2.7 6.9l-1.5-1.5c1.1-1.5 1.7-3.4 1.7-5.4zM4.3 3 3 4.3 7.7 9H3v6h4l5 5v-6.7l4.7 4.7 1.3-1.3L4.3 3z'/%3E%3C/svg%3E\");
+        }
+        .ve-stage.video-js .vjs-fullscreen-control .vjs-icon-placeholder::before {
+            width: 22px;
+            height: 22px;
+            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 7h-3v2h5v-5h-2v3zm0-12v3h2V5h-5v2h3z'/%3E%3C/svg%3E\");
+        }
+        .ve-stage.video-js .vjs-fullscreen-control.is-active .vjs-icon-placeholder::before {
+            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M5 16h2v3h3v2H5v-5zm12 3v-3h2v5h-5v-2h3zM7 5v3H5V3h5v2H7zm12 3h-2V5h-3V3h5v5z'/%3E%3C/svg%3E\");
+        }
+        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button .vjs-icon-placeholder::before {
+            content: "CC";
+            background: none;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+        }
+        .ve-stage.video-js .vjs-volume-panel {
+            display: inline-flex;
+            align-items: center;
+            width: auto;
+            margin-right: 2px;
+        }
+        .ve-stage.video-js .vjs-volume-control {
+            display: inline-flex;
+            align-items: center;
+            width: 92px;
+            height: 40px;
+        }
+        .ve-stage.video-js .vjs-volume-bar {
+            width: 100%;
+            height: 4px;
+            margin: 0;
+            accent-color: var(--ve-accent);
+            cursor: pointer;
+        }
+        .ve-stage.video-js .vjs-current-time,
+        .ve-stage.video-js .vjs-duration,
+        .ve-stage.video-js .vjs-time-divider,
+        .ve-stage.video-js .vjs-remaining-time {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 40px;
+            color: #fff;
+            font-size: 0.94rem;
+            font-weight: 600;
+            text-shadow: 0 0 3px rgba(0, 0, 0, 0.85);
+        }
+        .ve-stage.video-js .vjs-current-time,
+        .ve-stage.video-js .vjs-duration {
+            min-width: 52px;
+        }
+        .ve-stage.video-js .vjs-time-divider {
+            width: 14px;
+        }
+        .ve-stage.video-js .vjs-progress-control {
+            position: absolute;
+            top: 8px;
+            left: 12px;
+            right: 92px;
+            height: 12px;
+        }
+        .ve-stage.video-js .vjs-progress-holder {
+            position: relative;
+            display: block;
+            width: 100%;
+            height: 4px;
+            margin-top: 4px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.48);
+            cursor: pointer;
+        }
+        .ve-stage.video-js .vjs-load-progress,
+        .ve-stage.video-js .vjs-play-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 4px;
+            border-radius: 2px;
+        }
+        .ve-stage.video-js .vjs-load-progress {
+            background: rgba(255, 255, 255, 0.22);
+            opacity: 0.65;
+        }
+        .ve-stage.video-js .vjs-play-progress {
+            background: var(--ve-accent);
+        }
+        .ve-stage.video-js .vjs-play-progress::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            right: -7px;
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: #fff;
+            transform: translateY(-50%);
+        }
+        .ve-stage.video-js .vjs-remaining-time {
+            position: absolute;
+            top: -4px;
+            right: 0;
+            height: 20px;
+            font-size: 0.9rem;
+        }
+        .ve-stage.video-js .vjs-custom-control-spacer {
+            flex: 1 1 auto;
+            min-width: 12px;
+        }
+        .ve-stage.video-js .vjs-mouse-display {
+            position: absolute;
+            top: 0;
+            display: none;
+            pointer-events: none;
+        }
+        .ve-stage.video-js .vjs-mouse-display.is-visible {
+            display: block;
+        }
+        .ve-stage.video-js .vjs-time-tooltip {
+            position: absolute;
+            bottom: 18px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 4px 7px;
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            font-size: 0.76rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .ve-stage.video-js .vjs-thumbnail-holder {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            overflow: hidden;
+            border-radius: 5px;
+            background: #000;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.42);
+        }
+        .ve-stage.video-js .vjs-thumbnail {
+            width: 100%;
+            height: 100%;
+            background-repeat: no-repeat;
+            background-color: #000;
+        }
+        .ve-stage.video-js .vjs-thumbnail-text {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 4px 8px;
+            color: #fff;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-align: center;
+            text-shadow: 0 0 3px rgba(0, 0, 0, 0.85);
+        }
+        .ve-stage.video-js .ve-subtitle-panel {
+            position: absolute;
+            right: 0;
+            bottom: 44px;
+            z-index: 8;
+            width: 220px;
+            padding: 10px;
+            background: rgba(18, 18, 18, 0.96);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 4px;
+            box-shadow: 0 16px 30px rgba(0, 0, 0, 0.36);
+        }
+        .ve-stage.video-js .ve-subtitle-panel[hidden] {
+            display: none !important;
+        }
+        .ve-stage.video-js .ve-subtitle-panel.is-visible {
+            display: block;
+        }
+        .ve-stage.video-js .ve-subtitle-panel-header {
+            margin-bottom: 8px;
+            color: rgba(255, 255, 255, 0.66);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .ve-stage.video-js .ve-subtitle-list {
+            display: grid;
+            gap: 4px;
+        }
+        .ve-stage.video-js .ve-subtitle-option {
+            width: 100%;
+            min-height: 34px;
+            padding: 8px 10px;
+            border: 0;
+            border-radius: 2px;
+            background: transparent;
+            color: #f4f4f4;
+            font: inherit;
+            font-size: 0.9rem;
+            text-align: left;
+        }
+        .ve-stage.video-js .ve-subtitle-option:hover,
+        .ve-stage.video-js .ve-subtitle-option:focus-visible {
+            background: rgba(255, 255, 255, 0.08);
+            outline: none;
+        }
+        .ve-stage.video-js .ve-subtitle-option.is-active {
+            color: var(--ve-accent);
+            font-weight: 700;
+        }
+        .ve-stage.video-js .ve-subtitle-url-form {
+            display: grid;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .ve-stage.video-js .ve-subtitle-url-form input {
+            width: 100%;
+            min-height: 34px;
+            padding: 0 10px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.04);
+            color: #fff;
+            font: inherit;
+        }
+        .ve-stage.video-js .ve-subtitle-url-form button {
+            min-height: 34px;
+            border: 0;
+            border-radius: 2px;
+            background: var(--ve-accent);
+            color: #111;
+            font: inherit;
+            font-weight: 700;
+        }
+        .ve-stage.video-js .ve-subtitle-status {
+            margin-top: 8px;
+            color: rgba(255, 255, 255, 0.68);
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+        .ve-stage.video-js .ve-subtitle-status.is-error {
+            color: #ff9b9b;
+        }
+        .ve-stage.video-js .ve-caption-overlay {
+            position: absolute;
+            left: 50%;
+            bottom: 72px;
+            z-index: 5;
+            display: none;
+            max-width: min(92%, 760px);
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.78);
+            border-radius: 4px;
+            color: #fff;
+            font-size: 0.98rem;
+            font-weight: 700;
+            line-height: 1.45;
+            text-align: center;
+            white-space: pre-line;
+            transform: translateX(-50%);
+            pointer-events: none;
+        }
+        .ve-stage.video-js .ve-caption-overlay.is-visible {
+            display: block;
+        }
+        .ve-stage.video-js .ve-player-state {
+            position: absolute;
+            left: 12px;
+            bottom: 68px;
+            z-index: 7;
+            max-width: calc(100% - 24px);
+            padding: 8px 10px;
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.82);
+            color: #f4f4f4;
+            font-size: 0.82rem;
+            opacity: 0;
+            transform: translateY(8px);
+            pointer-events: none;
+            transition: opacity .18s ease, transform .18s ease;
+        }
+        .ve-stage.video-js .ve-player-state.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .ve-stage.video-js .ve-player-state.is-error {
+            color: #ff9b9b;
+        }
+        @media (max-width: 767px) {
+            .ve-stage.video-js .vjs-big-play-button {
+                width: 96px;
+                height: 96px;
+                margin: -48px 0 0 -48px;
+            }
+            .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder,
+            .ve-stage.video-js .ve-player-overlay-glyph {
+                width: 96px;
+                height: 96px;
+            }
+            .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before,
+            .ve-stage.video-js .ve-player-overlay-glyph::before {
+                margin-top: -24px;
+                margin-left: -8px;
+                border-top-width: 24px;
+                border-bottom-width: 24px;
+                border-left-width: 38px;
+            }
+            .ve-stage.video-js .vjs-control-bar {
+                min-height: 58px;
+                padding: 24px 8px 10px;
+            }
+            .ve-stage.video-js .vjs-progress-control {
+                left: 8px;
+                right: 74px;
+            }
+            .ve-stage.video-js .vjs-volume-control {
+                display: none;
+            }
+            .ve-stage.video-js .vjs-current-time,
+            .ve-stage.video-js .vjs-duration,
+            .ve-stage.video-js .vjs-time-divider,
+            .ve-stage.video-js .vjs-remaining-time {
+                font-size: 0.82rem;
+            }
+            .ve-stage.video-js .ve-subtitle-panel {
+                width: min(220px, calc(100vw - 20px));
+                right: -4px;
+            }
+            .ve-stage.video-js .ve-caption-overlay {
+                bottom: 64px;
+                font-size: 0.88rem;
+            }
+            .ve-stage.video-js .ve-player-state {
+                bottom: 60px;
+            }
+        }
+        .ve-stage.video-js {
+            --ve-player-surface: linear-gradient(180deg, rgba(10, 12, 16, 0.18) 0%, rgba(8, 9, 12, 0.82) 100%);
+            --ve-player-panel: rgba(11, 13, 18, 0.68);
+            --ve-player-panel-border: rgba(255, 255, 255, 0.12);
+            --ve-player-panel-shadow: 0 28px 70px rgba(0, 0, 0, 0.46);
+            --ve-player-button-bg: rgba(255, 255, 255, 0.08);
+            --ve-player-button-border: rgba(255, 255, 255, 0.08);
+            --ve-player-track: rgba(255, 255, 255, 0.18);
+            --ve-player-load: rgba(255, 255, 255, 0.22);
+            --ve-player-text: #f7f9fc;
+            --ve-player-muted: rgba(247, 249, 252, 0.72);
+            font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+        }
+        .ve-stage.video-js::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            background:
+                linear-gradient(180deg, rgba(3, 4, 7, 0.08) 0%, rgba(3, 4, 7, 0.08) 52%, rgba(3, 4, 7, 0.68) 100%),
+                radial-gradient(circle at center, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.18) 100%);
+            pointer-events: none;
+        }
+        .ve-stage.video-js .vjs-tech,
+        .ve-stage.video-js .ve-player-poster,
+        .ve-stage.video-js .vjs-text-track-display {
+            z-index: 0;
+        }
+        .ve-stage.video-js .ve-player-overlay {
+            z-index: 4;
+            background: transparent;
+        }
+        .ve-stage.video-js .ve-player-overlay-button,
+        .ve-stage.video-js .vjs-big-play-button {
+            top: 50%;
+            left: 50%;
+            width: 96px;
+            height: 96px;
+            margin: 0;
+            transform: translate(-50%, -50%);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: linear-gradient(180deg, rgba(18, 21, 28, 0.84) 0%, rgba(7, 8, 12, 0.68) 100%);
+            box-shadow: 0 20px 48px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            transition: transform .18s ease, background-color .18s ease, opacity .18s ease, box-shadow .18s ease;
+        }
+        .ve-stage.video-js .ve-player-overlay-button:hover,
+        .ve-stage.video-js .ve-player-overlay-button:focus-visible,
+        .ve-stage.video-js .vjs-big-play-button:hover,
+        .ve-stage.video-js .vjs-big-play-button:focus-visible {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1.03);
+            box-shadow: 0 26px 56px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+        }
+        .ve-stage.video-js .ve-player-overlay-glyph,
+        .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder {
+            width: 96px;
+            height: 96px;
+        }
+        .ve-stage.video-js .ve-player-overlay-glyph::before,
+        .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before {
+            margin-top: -22px;
+            margin-left: -7px;
+            border-top-width: 22px;
+            border-bottom-width: 22px;
+            border-left-width: 34px;
+            filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.32));
+        }
+        .ve-stage.video-js .ve-player-overlay-label {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            border: 0;
+            white-space: nowrap;
+        }
+        .ve-stage.video-js .ve-player-overlay-button.is-starting,
+        .ve-stage.video-js .vjs-big-play-button.is-starting {
+            transform: translate(-50%, -50%);
+        }
+        .ve-stage.video-js .vjs-loading-spinner {
+            z-index: 8;
+            width: 48px;
+            height: 48px;
+            margin: -24px 0 0 -24px;
+            border-width: 3px;
+            border-color: rgba(255, 255, 255, 0.18);
+            border-top-color: rgba(255, 255, 255, 0.96);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
+        }
+        .ve-stage.video-js .vjs-control-bar {
+            left: 16px;
+            right: 16px;
+            bottom: 16px;
+            min-height: 84px;
+            padding: 30px 14px 14px;
+            gap: 6px;
+            border: 1px solid var(--ve-player-panel-border);
+            border-radius: 18px;
+            background: var(--ve-player-panel);
+            box-shadow: var(--ve-player-panel-shadow);
+            backdrop-filter: blur(22px);
+            -webkit-backdrop-filter: blur(22px);
+        }
+        .ve-stage.video-js.vjs-user-inactive .vjs-control-bar,
+        .ve-stage.video-js:not(.vjs-has-started) .vjs-control-bar {
+            opacity: 0;
+            transform: translateY(12px);
+            pointer-events: none;
+        }
+        .ve-stage.video-js .vjs-progress-control {
+            top: 10px;
+            left: 14px;
+            right: 14px;
+            height: 16px;
+        }
+        .ve-stage.video-js .vjs-progress-holder {
+            height: 6px;
+            margin-top: 5px;
+            border-radius: 999px;
+            background: var(--ve-player-track);
+            overflow: visible;
+        }
+        .ve-stage.video-js .vjs-load-progress,
+        .ve-stage.video-js .vjs-play-progress {
+            height: 6px;
+            border-radius: 999px;
+        }
+        .ve-stage.video-js .vjs-load-progress {
+            background: var(--ve-player-load);
+            opacity: 1;
+        }
+        .ve-stage.video-js .vjs-play-progress::before {
+            right: -8px;
+            width: 12px;
+            height: 12px;
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.16), 0 6px 18px rgba(0, 0, 0, 0.34);
+        }
+        .ve-stage.video-js .vjs-control,
+        .ve-stage.video-js .vjs-button {
+            color: var(--ve-player-text);
+        }
+        .ve-stage.video-js .vjs-play-control,
+        .ve-stage.video-js .vjs-fullscreen-control,
+        .ve-stage.video-js .vjs-mute-control,
+        .ve-stage.video-js .vjs-seek-button,
+        .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
+            width: 42px;
+            height: 42px;
+            border: 1px solid var(--ve-player-button-border);
+            border-radius: 999px;
+            background: var(--ve-player-button-bg);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        }
+        .ve-stage.video-js .vjs-control:hover,
+        .ve-stage.video-js .vjs-control:focus-visible,
+        .ve-stage.video-js .vjs-button:hover,
+        .ve-stage.video-js .vjs-button:focus-visible {
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.12);
+        }
+        .ve-stage.video-js .vjs-icon-placeholder {
+            width: 22px;
+            height: 22px;
+        }
+        .ve-stage.video-js .vjs-volume-panel {
+            margin-right: 6px;
+            gap: 8px;
+        }
+        .ve-stage.video-js .vjs-volume-control {
+            width: 84px;
+            height: 42px;
+        }
+        .ve-stage.video-js .vjs-volume-bar {
+            height: 4px;
+            border-radius: 999px;
+            accent-color: var(--ve-accent);
+        }
+        .ve-stage.video-js .vjs-current-time,
+        .ve-stage.video-js .vjs-duration,
+        .ve-stage.video-js .vjs-time-divider,
+        .ve-stage.video-js .vjs-remaining-time {
+            height: 42px;
+            color: var(--ve-player-text);
+            font-size: 0.82rem;
+            font-weight: 600;
+            text-shadow: none;
+        }
+        .ve-stage.video-js .vjs-current-time,
+        .ve-stage.video-js .vjs-duration {
+            min-width: 44px;
+            color: var(--ve-player-muted);
+        }
+        .ve-stage.video-js .vjs-time-divider {
+            width: 10px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+        .ve-stage.video-js .vjs-remaining-time {
+            position: static;
+            width: auto;
+            min-width: 58px;
+            height: 42px;
+            margin-right: 6px;
+            color: var(--ve-player-muted);
+            font-size: 0.8rem;
+        }
+        .ve-stage.video-js .vjs-custom-control-spacer {
+            min-width: 10px;
+        }
+        .ve-stage.video-js .vjs-time-tooltip {
+            bottom: 24px;
+            padding: 5px 8px;
+            border-radius: 999px;
+            background: rgba(9, 11, 14, 0.92);
+            color: var(--ve-player-text);
+            font-size: 0.74rem;
+        }
+        .ve-stage.video-js .vjs-thumbnail-holder {
+            bottom: 36px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.42);
+        }
+        .ve-stage.video-js .ve-subtitle-panel {
+            right: 0;
+            bottom: 58px;
+            width: 240px;
+            padding: 12px;
+            border-radius: 14px;
+            background: rgba(10, 12, 16, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 22px 40px rgba(0, 0, 0, 0.42);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+        }
+        .ve-stage.video-js .ve-subtitle-panel-header {
+            margin-bottom: 10px;
+            color: rgba(255, 255, 255, 0.54);
+            font-size: 0.68rem;
+            letter-spacing: 0.14em;
+        }
+        .ve-stage.video-js .ve-subtitle-option {
+            min-height: 38px;
+            padding: 9px 12px;
+            border-radius: 10px;
+            color: var(--ve-player-text);
+        }
+        .ve-stage.video-js .ve-subtitle-option:hover,
+        .ve-stage.video-js .ve-subtitle-option:focus-visible {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .ve-stage.video-js .ve-caption-overlay {
+            bottom: 118px;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: rgba(4, 5, 8, 0.82);
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+        }
+        .ve-stage.video-js .ve-player-state {
+            left: 16px;
+            bottom: 114px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: rgba(6, 8, 11, 0.86);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+        }
+        @media (max-width: 767px) {
+            .ve-stage.video-js .ve-player-overlay-button,
+            .ve-stage.video-js .vjs-big-play-button {
+                width: 80px;
+                height: 80px;
+            }
+            .ve-stage.video-js .ve-player-overlay-glyph,
+            .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder {
+                width: 80px;
+                height: 80px;
+            }
+            .ve-stage.video-js .ve-player-overlay-glyph::before,
+            .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before {
+                margin-top: -19px;
+                margin-left: -6px;
+                border-top-width: 19px;
+                border-bottom-width: 19px;
+                border-left-width: 30px;
+            }
+            .ve-stage.video-js .vjs-control-bar {
+                left: 10px;
+                right: 10px;
+                bottom: 10px;
+                min-height: 76px;
+                padding: 28px 10px 10px;
+                gap: 4px;
+                border-radius: 16px;
+            }
+            .ve-stage.video-js .vjs-progress-control {
+                left: 10px;
+                right: 10px;
+            }
+            .ve-stage.video-js .vjs-play-control,
+            .ve-stage.video-js .vjs-fullscreen-control,
+            .ve-stage.video-js .vjs-mute-control,
+            .ve-stage.video-js .vjs-seek-button,
+            .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
+                width: 38px;
+                height: 38px;
+            }
+            .ve-stage.video-js .vjs-current-time,
+            .ve-stage.video-js .vjs-duration,
+            .ve-stage.video-js .vjs-time-divider,
+            .ve-stage.video-js .vjs-remaining-time {
+                font-size: 0.74rem;
+            }
+            .ve-stage.video-js .vjs-remaining-time {
+                display: none;
+            }
+            .ve-stage.video-js .vjs-volume-control {
+                display: none;
+            }
+            .ve-stage.video-js .ve-subtitle-panel {
+                right: -2px;
+                bottom: 54px;
+                width: min(240px, calc(100vw - 24px));
+            }
+            .ve-stage.video-js .ve-caption-overlay {
+                bottom: 92px;
+                font-size: 0.88rem;
+            }
+            .ve-stage.video-js .ve-player-state {
+                left: 10px;
+                right: 10px;
+                bottom: 88px;
+                max-width: none;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="ve-embed-shell">
-        <div class="ve-stage">
-            {$logoBadge}
+        <div id="video_player" class="ve-stage video-js vjs-big-play-centered vjs-controls-enabled vjs-touch-enabled vjs-workinghover vjs-v7 vjs-layout-large vjs-seek-buttons vjs-brand vjs-paused vjs-user-active" tabindex="-1" lang="en-us" translate="no" role="region" aria-label="Video Player">
             <div id="ve-player-overlay" class="ve-player-overlay">
                 {$posterOverlay}
-                <button type="button" id="ve-player-overlay-button" class="ve-player-overlay-button" aria-label="Start secure playback"></button>
+                <button type="button" id="ve-player-overlay-button" class="ve-player-overlay-button vjs-big-play-button" title="Play Video" aria-label="Play Video">
+                    <span class="ve-player-overlay-glyph vjs-icon-placeholder" aria-hidden="true"></span>
+                    <span class="ve-player-overlay-label">Play Video</span>
+                </button>
             </div>
             <video
                 id="ve-secure-player"
-                controls
+                class="vjs-tech"
                 playsinline
                 preload="none"
                 controlsList="nodownload noplaybackrate"
                 disablepictureinpicture
                 crossorigin="use-credentials"
             ></video>
+            <div class="vjs-text-track-display" translate="yes" aria-live="off" aria-atomic="true">
+                <div></div>
+            </div>
+            <div id="ve-loading-spinner" class="vjs-loading-spinner" dir="ltr" hidden>
+                <span class="vjs-control-text">Video Player is loading.</span>
+            </div>
+            <div id="ve-caption-overlay" class="ve-caption-overlay" aria-live="polite"></div>
+            <div id="ve-player-controls" class="vjs-control-bar" dir="ltr">
+                <button type="button" id="ve-play-toggle" class="vjs-play-control vjs-control vjs-button vjs-paused" title="Play" aria-label="Play">
+                    <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                    <span class="vjs-control-text" aria-live="polite">Play</span>
+                </button>
+                <button type="button" id="ve-skip-back" class="vjs-seek-button skip-back skip-10 vjs-control vjs-button" title="Seek back 10 seconds" aria-label="Seek back 10 seconds">
+                    <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                    <span class="vjs-control-text" aria-live="polite">Seek back 10 seconds</span>
+                </button>
+                <button type="button" id="ve-skip-forward" class="vjs-seek-button skip-forward skip-10 vjs-control vjs-button" title="Seek forward 10 seconds" aria-label="Seek forward 10 seconds">
+                    <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                    <span class="vjs-control-text" aria-live="polite">Seek forward 10 seconds</span>
+                </button>
+                <div class="vjs-volume-panel vjs-control vjs-volume-panel-horizontal">
+                    <button type="button" id="ve-mute-toggle" class="vjs-mute-control vjs-control vjs-button vjs-vol-3" title="Mute" aria-label="Mute">
+                        <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                        <span class="vjs-control-text" aria-live="polite">Mute</span>
+                    </button>
+                    <div class="vjs-volume-control vjs-control vjs-volume-horizontal">
+                        <input type="range" id="ve-volume-range" class="vjs-volume-bar vjs-slider-bar vjs-slider vjs-slider-horizontal" min="0" max="100" step="1" value="100" aria-label="Volume Level" aria-live="polite" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-valuetext="100%">
+                    </div>
+                </div>
+                <div class="vjs-current-time vjs-time-control vjs-control">
+                    <span class="vjs-control-text" role="presentation">Current Time&nbsp;</span>
+                    <span id="ve-current-time-display" class="vjs-current-time-display" aria-live="off" role="presentation">0:00</span>
+                </div>
+                <div class="vjs-time-control vjs-time-divider" aria-hidden="true">
+                    <div><span>/</span></div>
+                </div>
+                <div class="vjs-duration vjs-time-control vjs-control">
+                    <span class="vjs-control-text" role="presentation">Duration&nbsp;</span>
+                    <span id="ve-duration-display" class="vjs-duration-display" aria-live="off" role="presentation">0:00</span>
+                </div>
+                <div class="vjs-progress-control vjs-control">
+                    <div id="ve-progress-holder" tabindex="0" class="vjs-progress-holder vjs-slider vjs-slider-horizontal" role="slider" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Progress Bar" aria-valuetext="0:00 of 0:00">
+                        <div id="ve-load-progress" class="vjs-load-progress" style="width:0%;"></div>
+                        <div id="ve-mouse-display" class="vjs-mouse-display">
+                            <div id="ve-time-tooltip" class="vjs-time-tooltip" aria-hidden="true">0:00</div>
+                            <div id="ve-thumbnail-holder" class="vjs-thumbnail-holder" hidden>
+                                <div id="ve-thumbnail-image" class="vjs-thumbnail"></div>
+                                <span id="ve-thumbnail-text" class="vjs-thumbnail-text">00:00:00</span>
+                            </div>
+                        </div>
+                        <div id="ve-play-progress" class="vjs-play-progress vjs-slider-bar" aria-hidden="true" style="width:0%;"></div>
+                    </div>
+                </div>
+                <div class="vjs-remaining-time vjs-time-control vjs-control">
+                    <span class="vjs-control-text" role="presentation">Remaining Time&nbsp;</span>
+                    <span aria-hidden="true">-</span>
+                    <span id="ve-remaining-time-display" class="vjs-remaining-time-display" aria-live="off" role="presentation">0:00</span>
+                </div>
+                <div class="vjs-custom-control-spacer vjs-spacer">&nbsp;</div>
+                <div class="vjs-subs-caps-button vjs-menu-button vjs-menu-button-popup vjs-control vjs-button">
+                    <button type="button" id="ve-subtitle-button" class="vjs-subs-caps-button vjs-menu-button vjs-menu-button-popup vjs-button" title="Captions" aria-label="Captions" aria-controls="ve-subtitle-panel" aria-expanded="false">
+                        <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                        <span class="vjs-control-text" aria-live="polite">Captions</span>
+                    </button>
+                    <div id="ve-subtitle-panel" class="ve-subtitle-panel vjs-menu" hidden>
+                        <div class="ve-subtitle-panel-header">Captions Settings</div>
+                        <div id="ve-subtitle-list" class="ve-subtitle-list"></div>
+                        <form id="ve-subtitle-url-form" class="ve-subtitle-url-form" hidden>
+                            <input type="url" id="ve-subtitle-url-input" placeholder="https://example.com/subtitles.vtt" inputmode="url">
+                            <button type="submit">Load</button>
+                        </form>
+                        <div id="ve-subtitle-status" class="ve-subtitle-status" hidden></div>
+                    </div>
+                </div>
+                <button type="button" id="ve-fullscreen-toggle" class="vjs-fullscreen-control vjs-control vjs-button" title="Fullscreen" aria-label="Fullscreen">
+                    <span class="vjs-icon-placeholder" aria-hidden="true"></span>
+                    <span class="vjs-control-text" aria-live="polite">Fullscreen</span>
+                </button>
+            </div>
+            <input type="file" id="ve-subtitle-file-input" accept=".vtt,.srt,text/vtt" hidden>
             <div id="ve-player-state" class="ve-player-state"></div>
         </div>
         {$titleMarkup}
