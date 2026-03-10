@@ -180,7 +180,7 @@ function ve_dispatch_api_routes(string $path): bool
         ve_handle_video_list_api();
     }
 
-    if ($path === '/api/videos/actions') {
+    if ($path === '/api/videos/actions' || $path === '/videos/actions') {
         if (!ve_is_method('GET') && !ve_is_method('POST')) {
             ve_method_not_allowed(['GET', 'POST']);
         }
@@ -220,7 +220,7 @@ function ve_dispatch_api_routes(string $path): bool
         ve_video_playback_session_api($matches[1]);
     }
 
-    if ($path === '/api/videos/upload-target') {
+    if ($path === '/api/videos/upload-target' || $path === '/videos/upload-target') {
         if (!ve_is_method('GET')) {
             ve_method_not_allowed(['GET']);
         }
@@ -228,7 +228,7 @@ function ve_dispatch_api_routes(string $path): bool
         ve_handle_legacy_upload_get_server();
     }
 
-    if ($path === '/api/uploads/check') {
+    if ($path === '/api/uploads/check' || $path === '/videos/check') {
         if (!ve_is_method('GET') && !ve_is_method('POST')) {
             ve_method_not_allowed(['GET', 'POST']);
         }
@@ -236,7 +236,7 @@ function ve_dispatch_api_routes(string $path): bool
         ve_handle_legacy_pass_file();
     }
 
-    if ($path === '/api/uploads/result') {
+    if ($path === '/api/uploads/result' || $path === '/videos/result') {
         if (!ve_is_method('POST')) {
             ve_method_not_allowed(['POST']);
         }
@@ -244,7 +244,7 @@ function ve_dispatch_api_routes(string $path): bool
         ve_handle_legacy_upload_results();
     }
 
-    if ($path === '/api/videos/subtitles') {
+    if ($path === '/api/videos/subtitles' || $path === '/videos/subtitles') {
         if (!ve_is_method('GET') && !ve_is_method('POST')) {
             ve_method_not_allowed(['GET', 'POST']);
         }
@@ -252,7 +252,7 @@ function ve_dispatch_api_routes(string $path): bool
         ve_handle_legacy_add_srt();
     }
 
-    if ($path === '/api/videos/thumbnail') {
+    if ($path === '/api/videos/thumbnail' || $path === '/videos/thumbnail') {
         if (!ve_is_method('GET')) {
             ve_method_not_allowed(['GET']);
         }
@@ -260,7 +260,7 @@ function ve_dispatch_api_routes(string $path): bool
         ve_handle_legacy_change_thumbnail();
     }
 
-    if ($path === '/api/folders/share') {
+    if ($path === '/api/folders/share' || $path === '/videos/share') {
         if (!ve_is_method('GET')) {
             ve_method_not_allowed(['GET']);
         }
@@ -268,7 +268,7 @@ function ve_dispatch_api_routes(string $path): bool
         ve_handle_legacy_folder_sharing();
     }
 
-    if ($path === '/api/videos/markers') {
+    if ($path === '/api/videos/markers' || $path === '/videos/markers') {
         if (!ve_is_method('GET')) {
             ve_method_not_allowed(['GET']);
         }

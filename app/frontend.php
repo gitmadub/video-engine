@@ -1269,7 +1269,29 @@ function ve_dispatch(): void
         ve_render_dashboard_file(VE_DASHBOARD_PAGES['premium-plans']);
     }
 
+    if ($path === '/dashboard/videos' || $path === '/dashboard/videos.html') {
+        $query = trim((string) ($_SERVER['QUERY_STRING'] ?? ''));
+        ve_redirect('/videos' . ($query !== '' ? '?' . $query : ''));
+    }
+
+    if ($path === '/videos' || $path === '/videos/' || $path === '/videos.html') {
+        ve_require_auth();
+        ve_render_videos_dashboard_page();
+    }
+
+    if (preg_match('#^/videos/shared/([A-Za-z0-9_-]+)$#', $path, $matches) === 1) {
+        if (!ve_is_method('GET')) {
+            ve_method_not_allowed(['GET']);
+        }
+
+        ve_render_public_folder_page($matches[1]);
+    }
+
     foreach (VE_LEGACY_DASHBOARD_ROUTES as $legacy => $target) {
+        if ($legacy === 'videos') {
+            continue;
+        }
+
         if ($path === '/' . $legacy || $path === '/' . $legacy . '.html') {
             $query = trim((string) ($_SERVER['QUERY_STRING'] ?? ''));
             ve_redirect('/dashboard/' . $target . ($query !== '' ? '?' . $query : ''));

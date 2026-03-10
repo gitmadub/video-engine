@@ -1190,6 +1190,116 @@ function ve_video_folder_collect_descendant_ids(int $userId, int $folderId): arr
     return array_values($descendants);
 }
 
+function ve_video_folder_scope_ids(int $userId, int $folderId): array
+{
+    $folderId = ve_video_normalize_folder_id($userId, $folderId);
+
+    if ($folderId <= 0) {
+        return [];
+    }
+
+    $ids = [$folderId];
+
+    foreach (ve_video_folder_collect_descendant_ids($userId, $folderId) as $descendantId) {
+        $ids[] = $descendantId;
+    }
+
+    return $ids;
+}
+
+function ve_video_folder_size_bytes(int $userId, int $folderId): int
+{
+    static $cache = [];
+
+    $cacheKey = $userId . ':' . $folderId;
+
+    if (array_key_exists($cacheKey, $cache)) {
+        return $cache[$cacheKey];
+    }
+
+    $folderIds = ve_video_folder_scope_ids($userId, $folderId);
+
+    if ($folderIds === []) {
+        $cache[$cacheKey] = 0;
+        return 0;
+    }
+
+    $placeholders = implode(', ', array_fill(0, count($folderIds), '?'));
+    $params = array_merge([$userId], $folderIds);
+    $stmt = ve_db()->prepare(
+        'SELECT COALESCE(SUM(CASE WHEN processed_size_bytes > 0 THEN processed_size_bytes ELSE original_size_bytes END), 0)
+         FROM videos
+         WHERE user_id = ? AND deleted_at IS NULL AND folder_id IN (' . $placeholders . ')'
+    );
+    $stmt->execute($params);
+    $cache[$cacheKey] = (int) $stmt->fetchColumn();
+
+    return $cache[$cacheKey];
+}
+
+function ve_video_folder_public_url(string $publicCode): string
+{
+    $publicCode = trim($publicCode);
+
+    if ($publicCode === '') {
+        return '';
+    }
+
+    return ve_absolute_url('/videos/shared/' . rawurlencode($publicCode));
+}
+
+function ve_video_folder_share_url(array $folder): string
+{
+    return ve_video_folder_public_url((string) ($folder['public_code'] ?? ''));
+}
+
+function ve_video_folder_get_by_public_code(string $publicCode): ?array
+{
+    $publicCode = trim($publicCode);
+
+    if ($publicCode === '') {
+        return null;
+    }
+
+    $stmt = ve_db()->prepare(
+        'SELECT * FROM video_folders
+         WHERE public_code = :public_code AND deleted_at IS NULL
+         LIMIT 1'
+    );
+    $stmt->execute([':public_code' => $publicCode]);
+    $folder = $stmt->fetch();
+
+    return is_array($folder) ? $folder : null;
+}
+
+function ve_video_folder_list_public_videos(array $folder): array
+{
+    $folderId = (int) ($folder['id'] ?? 0);
+    $userId = (int) ($folder['user_id'] ?? 0);
+
+    if ($folderId <= 0 || $userId <= 0) {
+        return [];
+    }
+
+    $stmt = ve_db()->prepare(
+        'SELECT * FROM videos
+         WHERE user_id = :user_id
+           AND folder_id = :folder_id
+           AND deleted_at IS NULL
+           AND is_public = 1
+           AND status = :status
+         ORDER BY created_at DESC, id DESC'
+    );
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':folder_id' => $folderId,
+        ':status' => VE_VIDEO_STATUS_READY,
+    ]);
+    $rows = $stmt->fetchAll();
+
+    return is_array($rows) ? $rows : [];
+}
+
 function ve_video_folder_tree_for_user(int $userId, array $excludedFolderIds = []): array
 {
     $excluded = [];
@@ -1356,10 +1466,18 @@ function ve_video_public_thumbnail_url(array $video, string $mode): string
 
 function ve_video_folder_to_legacy_payload(array $folder): array
 {
+    $folderId = (int) ($folder['id'] ?? 0);
+    $userId = (int) ($folder['user_id'] ?? 0);
+    $sizeBytes = ($folderId > 0 && $userId > 0) ? ve_video_folder_size_bytes($userId, $folderId) : 0;
+
     return [
-        'fld_id' => (int) ($folder['id'] ?? 0),
+        'fld_id' => $folderId,
         'fld_code' => (string) ($folder['public_code'] ?? ''),
         'fld_name' => (string) ($folder['name'] ?? ''),
+        'siz' => ve_video_format_bytes($sizeBytes),
+        'siz_bytes' => $sizeBytes,
+        'cre' => ve_video_legacy_date_label((string) ($folder['created_at'] ?? '')),
+        'share_url' => ve_video_folder_share_url($folder),
     ];
 }
 
@@ -2236,6 +2354,7 @@ function ve_handle_legacy_videos_json(): void
         'current_page' => $page,
         'folder_id' => $folderId,
         'fld_parent_id' => is_array($currentFolder) ? (int) ($currentFolder['parent_id'] ?? 0) : 0,
+        'current_folder' => is_array($currentFolder) ? ve_video_folder_to_legacy_payload($currentFolder) : null,
         'folders' => $folders,
         'videos' => array_map('ve_video_to_legacy_payload', $videos),
         'list' => array_map('ve_video_to_legacy_payload', $videos),
@@ -2408,7 +2527,131 @@ function ve_handle_legacy_folder_sharing(): void
     }
 
     $folderName = ve_h((string) ($folder['name'] ?? 'Folder'));
-    ve_html('<p class="mb-2"><strong>' . $folderName . '</strong></p><p class="text-muted mb-0">Folder sharing is not enabled in this build. Share videos through their watch or embed links instead.</p>');
+    $shareUrl = ve_h(ve_video_folder_share_url($folder));
+    $publicCount = count(ve_video_folder_list_public_videos($folder));
+    $shareNotice = $publicCount > 0
+        ? 'Shared visitors can open the public videos in this folder through this link.'
+        : 'This shared folder page is live, but only public videos appear to visitors. Private videos stay hidden until you mark them public.';
+
+    ve_html(
+        '<p class="mb-2"><strong>' . $folderName . '</strong></p>'
+        . '<div class="form-group mb-3"><label>Share link</label><textarea class="form-control" rows="3" onclick="this.focus();this.select()">' . $shareUrl . '</textarea></div>'
+        . '<p class="text-muted mb-0">' . ve_h($shareNotice) . '</p>'
+    );
+}
+
+function ve_render_public_folder_page(string $publicCode): void
+{
+    $folder = ve_video_folder_get_by_public_code($publicCode);
+
+    if (!is_array($folder)) {
+        ve_not_found();
+    }
+
+    $folderName = (string) ($folder['name'] ?? 'Shared folder');
+    $folderId = (int) ($folder['id'] ?? 0);
+    $userId = (int) ($folder['user_id'] ?? 0);
+    $folders = ($folderId > 0 && $userId > 0) ? ve_video_folder_list_children($userId, $folderId) : [];
+    $videos = ve_video_folder_list_public_videos($folder);
+    $pageTitle = ve_h($folderName . ' - Shared Folder');
+    $safeFolderName = ve_h($folderName);
+    $folderSize = ve_h(ve_video_format_bytes(ve_video_folder_size_bytes($userId, $folderId)));
+    $folderCreated = ve_h(ve_video_legacy_date_label((string) ($folder['created_at'] ?? '')));
+    $shareUrl = ve_h(ve_video_folder_share_url($folder));
+    $folderCards = '';
+    $videoCards = '';
+
+    foreach ($folders as $childFolder) {
+        if (!is_array($childFolder)) {
+            continue;
+        }
+
+        $childName = ve_h((string) ($childFolder['name'] ?? 'Folder'));
+        $childUrl = ve_h(ve_video_folder_share_url($childFolder));
+        $childSize = ve_h(ve_video_format_bytes(ve_video_folder_size_bytes($userId, (int) ($childFolder['id'] ?? 0))));
+        $childCreated = ve_h(ve_video_legacy_date_label((string) ($childFolder['created_at'] ?? '')));
+        $folderCards .= '<a class="ve-folder-card" href="' . $childUrl . '"><strong>' . $childName . '</strong><span>' . $childSize . '</span><small>' . $childCreated . '</small></a>';
+    }
+
+    foreach ($videos as $video) {
+        if (!is_array($video)) {
+            continue;
+        }
+
+        $videoTitle = ve_h((string) ($video['title'] ?? 'Untitled video'));
+        $watchUrl = ve_h(ve_absolute_url('/d/' . rawurlencode((string) ($video['public_id'] ?? ''))));
+        $embedUrl = ve_h(ve_absolute_url('/e/' . rawurlencode((string) ($video['public_id'] ?? ''))));
+        $thumbUrl = ve_h(ve_video_public_thumbnail_url($video, 'single'));
+        $videoSize = ve_h(ve_video_format_bytes(ve_video_download_size_bytes($video)));
+        $videoCreated = ve_h(ve_video_legacy_date_label((string) ($video['created_at'] ?? '')));
+        $videoCards .= '<article class="ve-video-card"><img src="' . $thumbUrl . '" alt="' . $videoTitle . '"><div><h2>' . $videoTitle . '</h2><p>' . $videoSize . ' • ' . $videoCreated . '</p><div class="ve-video-actions"><a href="' . $watchUrl . '" target="_blank" rel="noopener">Watch</a><a href="' . $embedUrl . '" target="_blank" rel="noopener">Embed</a></div></div></article>';
+    }
+
+    if ($folderCards === '') {
+        $folderCards = '<p class="ve-empty">No shared subfolders.</p>';
+    }
+
+    if ($videoCards === '') {
+        $videoCards = '<p class="ve-empty">No public videos are available in this folder yet.</p>';
+    }
+
+    ve_html(<<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{$pageTitle}</title>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; background: #f5f6f8; color: #1f2933; }
+        .ve-shell { max-width: 1080px; margin: 0 auto; padding: 32px 20px 56px; }
+        .ve-hero { background: linear-gradient(135deg, #111827, #1f2937); color: #fff; border-radius: 20px; padding: 24px; }
+        .ve-hero h1 { margin: 0 0 8px; font-size: 2rem; }
+        .ve-meta { display: flex; flex-wrap: wrap; gap: 16px; color: rgba(255,255,255,0.75); font-size: 0.95rem; }
+        .ve-share { width: 100%; margin-top: 18px; border: 0; border-radius: 12px; padding: 12px 14px; resize: none; min-height: 76px; }
+        .ve-section { margin-top: 24px; }
+        .ve-section h2 { margin: 0 0 12px; font-size: 1.2rem; }
+        .ve-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+        .ve-folder-card, .ve-video-card { background: #fff; border-radius: 16px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); text-decoration: none; color: inherit; }
+        .ve-folder-card { display: block; padding: 16px; }
+        .ve-folder-card strong { display: block; margin-bottom: 6px; }
+        .ve-folder-card span, .ve-folder-card small { display: block; color: #52606d; }
+        .ve-video-card { display: grid; grid-template-columns: 180px 1fr; overflow: hidden; }
+        .ve-video-card img { width: 100%; height: 100%; min-height: 140px; object-fit: cover; background: #d9e2ec; }
+        .ve-video-card div { padding: 16px; }
+        .ve-video-card h2 { margin: 0 0 8px; font-size: 1.1rem; }
+        .ve-video-card p { margin: 0 0 12px; color: #52606d; }
+        .ve-video-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+        .ve-video-actions a { text-decoration: none; padding: 10px 14px; border-radius: 10px; background: #111827; color: #fff; }
+        .ve-empty { margin: 0; padding: 18px; background: #fff; border-radius: 16px; color: #52606d; }
+        @media (max-width: 720px) {
+            .ve-video-card { grid-template-columns: 1fr; }
+            .ve-video-card img { min-height: 180px; }
+        }
+    </style>
+</head>
+<body>
+    <main class="ve-shell">
+        <section class="ve-hero">
+            <h1>{$safeFolderName}</h1>
+            <div class="ve-meta">
+                <span>Folder size: {$folderSize}</span>
+                <span>Created: {$folderCreated}</span>
+            </div>
+            <textarea class="ve-share" onclick="this.focus();this.select()" readonly>{$shareUrl}</textarea>
+        </section>
+        <section class="ve-section">
+            <h2>Folders</h2>
+            <div class="ve-grid">{$folderCards}</div>
+        </section>
+        <section class="ve-section">
+            <h2>Videos</h2>
+            <div class="ve-grid">{$videoCards}</div>
+        </section>
+    </main>
+</body>
+</html>
+HTML);
 }
 
 function ve_handle_legacy_marker(): void
@@ -5438,6 +5681,9 @@ function ve_video_secure_player_script(
 
                 if (!activeCue || !activeCue.imageUrl || !activeCue.width || !activeCue.height) {
                     thumbnailHolder.hidden = true;
+                    if (timeTooltip) {
+                        timeTooltip.style.display = '';
+                    }
                     return;
                 }
 
@@ -5446,6 +5692,9 @@ function ve_video_secure_player_script(
                 var height = Math.round(activeCue.height * scale);
 
                 thumbnailHolder.hidden = false;
+                if (timeTooltip) {
+                    timeTooltip.style.display = 'none';
+                }
                 thumbnailHolder.style.width = width + 'px';
                 thumbnailHolder.style.height = height + 'px';
                 thumbnailImage.style.backgroundImage = 'url("' + activeCue.imageUrl + '")';
@@ -5458,6 +5707,10 @@ function ve_video_secure_player_script(
         function clearProgressPreview() {
             if (mouseDisplay) {
                 mouseDisplay.classList.remove('is-visible');
+            }
+
+            if (timeTooltip) {
+                timeTooltip.style.display = '';
             }
 
             if (thumbnailHolder) {
@@ -5656,6 +5909,7 @@ function ve_video_secure_player_script(
             }
 
             closeSpeedPanel();
+            toggleSubtitleUrlForm(false);
             subtitlePanel.hidden = false;
             subtitlePanel.classList.add('is-visible');
             subtitleButton.classList.add('is-active');
@@ -5712,16 +5966,19 @@ function ve_video_secure_player_script(
             }
 
             appendOption('Captions Off', activeSubtitleId === null, function () {
+                toggleSubtitleUrlForm(false);
                 selectSubtitle(null);
             });
 
             subtitleEntries.forEach(function (entry) {
                 appendOption(entry.label, activeSubtitleId === entry.id, function () {
+                    toggleSubtitleUrlForm(false);
                     selectSubtitle(entry.id);
                 });
             });
 
             appendOption('Upload From PC', false, function () {
+                toggleSubtitleUrlForm(false);
                 if (subtitleFileInput) {
                     subtitleFileInput.click();
                 }
@@ -6098,7 +6355,7 @@ function ve_video_secure_player_script(
                 });
             }
 
-            document.addEventListener('click', function (event) {
+            document.addEventListener('pointerdown', function (event) {
                 if (!subtitlePanelOpen || !subtitlePanel || !subtitleButton) {
                     return;
                 }
@@ -6378,16 +6635,32 @@ function ve_video_secure_player_script(
                     }
                 }
 
-                if (speedPanelOpen && speedPanel) {
-                    speedPanelOpen = false;
-                    speedPanel.hidden = true;
-                    if (speedButton) {
-                        speedButton.setAttribute('aria-expanded', 'false');
-                    }
+                if (speedPanelOpen) {
+                    closeSpeedPanel();
+                }
+
+                if (subtitlePanelOpen) {
+                    closeSubtitlePanel();
                 }
 
                 showControlsTemporarily();
                 togglePlaybackFromSurface();
+            });
+
+            document.addEventListener('pointerdown', function (event) {
+                var target = event.target;
+
+                if (!target || typeof target.closest !== 'function') {
+                    return;
+                }
+
+                if (speedPanelOpen && !target.closest('#ve-speed-panel') && !target.closest('#ve-speed-button')) {
+                    closeSpeedPanel();
+                }
+
+                if (subtitlePanelOpen && !target.closest('#ve-subtitle-panel') && !target.closest('#ve-subtitle-button')) {
+                    closeSubtitlePanel();
+                }
             });
 
             stage.addEventListener('mouseleave', function () {
@@ -7167,7 +7440,7 @@ function ve_video_secure_player_script(
             playbackBootstrapped = true;
             clearPlaybackSessionRefresh();
             setOverlayMode('loading');
-            setState('Loading encrypted video stream...');
+            setState('');
 
             if (ensureHlsPipeline()) {
                 if (hlsMediaAttached) {
@@ -7204,7 +7477,7 @@ function ve_video_secure_player_script(
             startupPartReady = false;
             setOverlayButtonLoading(true);
             setOverlayMode('loading');
-            setState('Preparing secure playback...');
+            setState('');
 
             return ensureFreshPlaybackSession(false).catch(function () {
                 failSecurePlayback('Playback session could not be refreshed automatically. Try again in a moment.');
@@ -8038,7 +8311,7 @@ function ve_video_secure_player_script(
                 return;
             }
 
-            setState('Buffering secure stream...');
+            setState('');
             if (!overlay || overlay.classList.contains('is-hidden')) {
                 setLoadingSpinner(true);
             }
@@ -9361,7 +9634,7 @@ HTML);
                 border-left-width: 38px;
             }
         }
-        /* ── Netflix-inspired premium player chrome ── */
+        /* ── Premium player chrome ── */
         .ve-stage.video-js {
             position: relative;
             width: 100%;
@@ -9371,15 +9644,19 @@ HTML);
             border: 0;
             border-radius: 0;
             color: #fff;
-            font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+            font-family: Averta, "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
             --ve-glow: rgba(229, 9, 20, 0.35);
             --ve-surface: rgba(20, 20, 20, 0.92);
-            --ve-surface-hover: rgba(255, 255, 255, 0.08);
+            --ve-surface-hover: rgba(255, 255, 255, 0.1);
             --ve-text: #f4f4f4;
             --ve-muted: rgba(255, 255, 255, 0.55);
             --ve-border: rgba(255, 255, 255, 0.06);
             --ve-track: rgba(255, 255, 255, 0.18);
             --ve-load: rgba(255, 255, 255, 0.3);
+            --ve-selected: rgba(255, 255, 255, 0.14);
+            --ve-selected-text: #fff;
+            --ve-title-font: Averta, "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+            --ve-control-size: 56px;
         }
         .ve-stage.video-js .vjs-tech {
             position: absolute;
@@ -9442,9 +9719,10 @@ HTML);
             top: 50%;
             left: 50%;
             z-index: 8;
-            width: 48px;
-            height: 48px;
-            margin: -24px 0 0 -24px;
+            width: 40px;
+            height: 40px;
+            margin: 0;
+            transform: translate(-50%, -50%);
             border-radius: 999px;
             border: 3px solid rgba(255, 255, 255, 0.12);
             border-top-color: #fff;
@@ -9457,20 +9735,20 @@ HTML);
             position: relative;
             top: auto;
             left: auto;
-            width: 80px;
-            height: 80px;
+            width: 92px;
+            height: 92px;
             margin: 0;
             transform: none;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             border-radius: 999px;
-            border: 2px solid rgba(255, 255, 255, 0.12);
-            background: rgba(0, 0, 0, 0.55);
+            border: 0;
+            background: rgba(0, 0, 0, 0.45);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-            transition: transform .2s ease, background .2s ease, border-color .2s ease, box-shadow .2s ease;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            transition: transform .2s ease, background .2s ease, box-shadow .2s ease;
             cursor: pointer;
             color: #fff;
             padding: 0;
@@ -9480,25 +9758,24 @@ HTML);
         .ve-stage.video-js .ve-player-overlay-button:hover,
         .ve-stage.video-js .ve-player-overlay-button:focus-visible {
             opacity: 1;
-            transform: scale(1.08);
-            background: rgba(229, 9, 20, 0.85);
-            border-color: rgba(229, 9, 20, 0.6);
-            box-shadow: 0 0 0 6px rgba(229, 9, 20, 0.15), 0 16px 48px rgba(0, 0, 0, 0.55);
+            transform: scale(1.06);
+            background: var(--ve-accent);
+            box-shadow: 0 0 0 5px rgba(0, 0, 0, 0.15), 0 12px 40px rgba(0, 0, 0, 0.45);
         }
         .ve-stage.video-js .ve-player-overlay-glyph,
         .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder {
             position: relative;
             display: block;
-            width: 80px;
-            height: 80px;
+            width: 92px;
+            height: 92px;
         }
         .ve-stage.video-js .ve-player-overlay-glyph::before,
         .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before {
             content: "";
             position: absolute;
             inset: 0;
-            width: 36px;
-            height: 36px;
+            width: 40px;
+            height: 40px;
             margin: auto;
             border: 0;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M8 5v14l11-7z'/%3E%3C/svg%3E");
@@ -9506,7 +9783,7 @@ HTML);
             background-position: center;
             background-size: contain;
             transform: none;
-            filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.25));
         }
         .ve-stage.video-js .ve-player-overlay-label {
             position: absolute;
@@ -9521,8 +9798,8 @@ HTML);
         .ve-stage.video-js .vjs-big-play-button.is-starting .vjs-icon-placeholder::before,
         .ve-stage.video-js .ve-player-overlay-button.is-starting .ve-player-overlay-glyph::before {
             content: "";
-            width: 36px;
-            height: 36px;
+            width: 40px;
+            height: 40px;
             margin: auto;
             border: 3px solid rgba(255, 255, 255, 0.16);
             border-top-color: #fff;
@@ -9539,9 +9816,9 @@ HTML);
             content: "";
             position: absolute;
             left: 0; right: 0; bottom: 0;
-            height: 45%;
+            height: 50%;
             z-index: 1;
-            background: linear-gradient(0deg, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.45) 40%, transparent 100%);
+            background: linear-gradient(0deg, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.4) 45%, transparent 100%);
             pointer-events: none;
             transition: opacity .25s ease;
         }
@@ -9562,7 +9839,7 @@ HTML);
             z-index: 6;
             display: flex;
             flex-direction: column;
-            padding: 0 16px 12px;
+            padding: 0 16px 14px;
             background: transparent;
             transition: opacity .25s ease, transform .25s ease;
         }
@@ -9578,30 +9855,53 @@ HTML);
             display: flex;
             align-items: center;
             width: 100%;
-            height: 24px;
-            margin-bottom: 6px;
+            height: 28px;
+            margin-bottom: 4px;
         }
         .ve-stage.video-js .vjs-progress-holder {
             position: relative;
             display: block;
             flex: 1 1 auto;
             height: 4px;
-            border-radius: 999px;
-            background: var(--ve-track);
+            padding: 10px 0;
+            margin: -10px 0;
+            border-radius: 0;
+            background: transparent;
             cursor: pointer;
             overflow: visible;
-            transition: height .15s ease;
+            background-clip: content-box;
         }
-        .ve-stage.video-js .vjs-progress-holder:hover {
+        .ve-stage.video-js .vjs-progress-holder::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 50%;
+            height: 4px;
+            margin-top: -2px;
+            border-radius: 999px;
+            background: var(--ve-track);
+            transition: height .15s ease, margin-top .15s ease;
+        }
+        .ve-stage.video-js .vjs-progress-holder:hover::after {
             height: 6px;
+            margin-top: -3px;
         }
         .ve-stage.video-js .vjs-load-progress,
         .ve-stage.video-js .vjs-play-progress {
             position: absolute;
-            top: 0;
+            top: 50%;
             left: 0;
-            height: inherit;
+            height: 4px;
+            margin-top: -2px;
             border-radius: 999px;
+            z-index: 1;
+            transition: height .15s ease, margin-top .15s ease;
+        }
+        .ve-stage.video-js .vjs-progress-holder:hover .vjs-load-progress,
+        .ve-stage.video-js .vjs-progress-holder:hover .vjs-play-progress {
+            height: 6px;
+            margin-top: -3px;
         }
         .ve-stage.video-js .vjs-load-progress {
             background: var(--ve-load);
@@ -9621,6 +9921,7 @@ HTML);
             transform: translateY(-50%) scale(0);
             box-shadow: 0 0 0 3px var(--ve-glow);
             transition: transform .15s ease;
+            z-index: 2;
         }
         .ve-stage.video-js .vjs-progress-holder:hover .vjs-play-progress::before {
             transform: translateY(-50%) scale(1);
@@ -9630,21 +9931,22 @@ HTML);
             align-items: center;
             justify-content: flex-end;
             flex: 0 0 auto;
-            height: 24px;
-            min-width: 52px;
-            padding-left: 12px;
+            height: 32px;
+            min-width: 64px;
+            padding-left: 18px;
             color: var(--ve-muted);
-            font-size: 0.78rem;
-            font-weight: 600;
+            font-size: 0.92rem;
+            font-weight: 500;
             font-variant-numeric: tabular-nums;
             letter-spacing: 0.01em;
             white-space: nowrap;
+            font-family: var(--ve-title-font);
         }
         /* ── Buttons row ── */
         .ve-stage.video-js .vjs-buttons-row {
             display: flex;
             align-items: center;
-            gap: 4px;
+            gap: 6px;
             width: 100%;
         }
         .ve-stage.video-js .vjs-control,
@@ -9659,7 +9961,7 @@ HTML);
             font: inherit;
             line-height: 1;
             cursor: pointer;
-            transition: background .15s ease, transform .12s ease, opacity .12s ease;
+            transition: background .15s ease, transform .12s ease, opacity .15s ease;
             appearance: none;
             text-decoration: none;
         }
@@ -9669,12 +9971,15 @@ HTML);
         .ve-stage.video-js .vjs-button:focus-visible {
             opacity: 1;
             outline: none;
+            background: transparent;
         }
         .ve-stage.video-js .vjs-icon-placeholder {
             position: relative;
-            display: block;
-            width: 24px;
-            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 34px;
+            height: 34px;
         }
         .ve-stage.video-js .vjs-icon-placeholder::before,
         .ve-stage.video-js .vjs-icon-placeholder::after {
@@ -9694,12 +9999,12 @@ HTML);
         .ve-stage.video-js .vjs-home-link,
         .ve-stage.video-js .vjs-speed-toggle,
         .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
-            width: 40px;
-            height: 40px;
+            width: 56px;
+            height: 56px;
             padding: 0;
-            border-radius: 8px;
+            border-radius: 50%;
             background: transparent;
-            transition: background .15s ease, transform .12s ease;
+            transition: background .15s ease, opacity .15s ease;
         }
         .ve-stage.video-js .vjs-play-control:hover,
         .ve-stage.video-js .vjs-fullscreen-control:hover,
@@ -9708,91 +10013,113 @@ HTML);
         .ve-stage.video-js .vjs-home-link:hover,
         .ve-stage.video-js .vjs-speed-toggle:hover,
         .ve-stage.video-js .vjs-subs-caps-button > .vjs-button:hover {
-            background: var(--ve-surface-hover);
+            background: transparent;
         }
         /* Play/Pause icons */
         .ve-stage.video-js .vjs-play-control.vjs-paused .vjs-icon-placeholder::before {
-            width: 24px;
-            height: 24px;
+            width: 36px;
+            height: 36px;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M8 5v14l11-7z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-play-control.vjs-playing .vjs-icon-placeholder::before {
-            width: 24px;
-            height: 24px;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 5h4v14H7zm6 0h4v14h-4z'/%3E%3C/svg%3E");
+            width: 36px;
+            height: 36px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M6 19h4V5H6v14zm8-14v14h4V5h-4z'/%3E%3C/svg%3E");
         }
-        /* Skip buttons */
+        /* Skip buttons - chevron style */
+        .ve-stage.video-js .vjs-seek-button {
+            width: 82px;
+            border-radius: 999px;
+        }
+        .ve-stage.video-js .vjs-seek-button .vjs-icon-placeholder {
+            width: 54px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
         .ve-stage.video-js .vjs-seek-button .vjs-icon-placeholder::before {
+            position: static;
             width: 22px;
             height: 22px;
-            top: 44%;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 5V1L5 8l7 7V9c3.3 0 6 2.7 6 6 0 1.2-.4 2.4-1 3.4l1.5 1.5A7.93 7.93 0 0 0 20 15c0-5-3.6-9.1-8-10z'/%3E%3C/svg%3E");
+            transform: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-seek-button.skip-forward .vjs-icon-placeholder::before {
-            transform: translate(-50%, -50%) scaleX(-1);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M8.59 16.59 13.17 12 8.59 7.41 10 6l6 6-6 6z'/%3E%3C/svg%3E");
+            order: 2;
         }
         .ve-stage.video-js .vjs-seek-button .vjs-icon-placeholder::after {
             content: "10";
-            top: 54%;
-            left: 50%;
-            transform: translate(-50%, -50%);
+            position: static;
+            transform: none;
             background: none;
             color: #fff;
-            font-size: 8px;
-            font-weight: 700;
+            font-size: 13px;
+            line-height: 1;
+            font-weight: 800;
+            font-family: var(--ve-title-font);
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0;
+        }
+        .ve-stage.video-js .vjs-seek-button.skip-forward .vjs-icon-placeholder::after {
+            order: 1;
         }
         /* Volume */
         .ve-stage.video-js .vjs-mute-control .vjs-icon-placeholder::before {
-            width: 22px;
-            height: 22px;
+            width: 28px;
+            height: 28px;
         }
         .ve-stage.video-js .vjs-mute-control.vjs-vol-1 .vjs-icon-placeholder::before,
         .ve-stage.video-js .vjs-mute-control.vjs-vol-2 .vjs-icon-placeholder::before,
         .ve-stage.video-js .vjs-mute-control.vjs-vol-3 .vjs-icon-placeholder::before {
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.8-1-3.3-2.5-4.1v8.2c1.5-.8 2.5-2.3 2.5-4.1zm2.5 0c0 3-1.7 5.6-4.2 6.9l1.2 1.2C19 18.7 21 15.6 21 12s-2-6.7-5-8.1l-1.2 1.2c2.5 1.3 4.2 3.9 4.2 6.9z'/%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-mute-control.vjs-vol-0 .vjs-icon-placeholder::before {
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M16.5 12c0-.7-.1-1.4-.4-2l1.5-1.5c.6 1 .9 2.2.9 3.5 0 1.3-.3 2.5-.9 3.5L16.1 14c.3-.6.4-1.3.4-2zm3 0c0-2-.6-3.9-1.7-5.4l1.5-1.5A9.9 9.9 0 0 1 22 12c0 2.7-1 5.1-2.7 6.9l-1.5-1.5c1.1-1.5 1.7-3.4 1.7-5.4zM4.3 3 3 4.3 7.7 9H3v6h4l5 5v-6.7l4.7 4.7 1.3-1.3L4.3 3z'/%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-volume-panel {
             display: inline-flex;
             align-items: center;
             width: auto;
-            gap: 2px;
+            gap: 10px;
         }
         .ve-stage.video-js .vjs-volume-control {
             display: inline-flex;
             align-items: center;
-            width: 80px;
-            height: 40px;
+            width: 112px;
+            height: 56px;
+            padding: 16px 0;
+            cursor: pointer;
         }
         .ve-stage.video-js .vjs-volume-bar {
             width: 100%;
-            height: 4px;
+            height: 24px;
             margin: 0;
             accent-color: var(--ve-accent);
             cursor: pointer;
             border-radius: 999px;
+            background: transparent;
         }
         /* Home link icon */
         .ve-stage.video-js .vjs-home-link .vjs-icon-placeholder::before {
-            width: 20px;
-            height: 20px;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M3.01 11.22V21a1 1 0 0 0 1 1h5v-6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v6h5a1 1 0 0 0 1-1v-9.78l-9-7.15z'/%3E%3Cpath d='M12 1.48 0 11h3V9.52l9-7.15 9 7.15V11h3z'/%3E%3C/svg%3E");
+            width: 28px;
+            height: 28px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z'/%3E%3C/svg%3E");
         }
-        /* Captions button */
+        /* Captions button - subtitle icon */
         .ve-stage.video-js .vjs-subs-caps-button {
             position: relative;
             display: inline-flex;
             align-items: center;
         }
         .ve-stage.video-js .vjs-subs-caps-button > .vjs-button .vjs-icon-placeholder::before {
-            content: "CC";
-            background: none;
-            color: #fff;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.06em;
+            width: 28px;
+            height: 28px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h16v12zM6 10h2v2H6zm0 4h8v2H6zm10 0h2v2h-2zm-6-4h8v2h-8z'/%3E%3C/svg%3E");
+            color: transparent;
+            font-size: 0;
         }
         /* Speed button */
         .ve-stage.video-js .vjs-speed-button {
@@ -9809,23 +10136,24 @@ HTML);
             width: auto;
             height: auto;
             color: #fff;
-            font-size: 0.82rem;
+            font-size: 1.02rem;
             font-weight: 700;
             letter-spacing: 0;
+            font-family: var(--ve-title-font);
         }
         .ve-stage.video-js .vjs-speed-toggle .vjs-icon-placeholder::before {
             content: none;
         }
-        /* Fullscreen icon */
+        /* Fullscreen icon - rounded */
         .ve-stage.video-js .vjs-fullscreen-control .vjs-icon-placeholder::before {
-            width: 20px;
-            height: 20px;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 7h-3v2h5v-5h-2v3zm0-12v3h2V5h-5v2h3z'/%3E%3C/svg%3E");
+            width: 28px;
+            height: 28px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M5 5h5V3H3v7h2V5zm9-2v2h5v5h2V3h-7zM5 14H3v7h7v-2H5v-5zm14 5h-5v2h7v-7h-2v5z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-fullscreen-control.is-active .vjs-icon-placeholder::before {
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M5 16h2v3h3v2H5v-5zm12 3v-3h2v5h-5v-2h3zM7 5v3H5V3h5v2H7zm12 3h-2V5h-3V3h5v5z'/%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z'/%3E%3C/svg%3E");
         }
-        /* Spacer pushes right controls */
+        /* Spacer */
         .ve-stage.video-js .vjs-custom-control-spacer {
             flex: 1 1 auto;
             min-width: 4px;
@@ -9842,16 +10170,17 @@ HTML);
         }
         .ve-stage.video-js .vjs-time-tooltip {
             position: absolute;
-            bottom: 16px;
+            bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
             padding: 4px 8px;
             border-radius: 4px;
             background: rgba(0, 0, 0, 0.92);
             color: #fff;
-            font-size: 0.74rem;
+            font-size: 0.76rem;
             font-weight: 600;
             white-space: nowrap;
+            font-family: inherit;
         }
         .ve-stage.video-js .vjs-thumbnail-holder {
             position: absolute;
@@ -9881,6 +10210,7 @@ HTML);
             font-weight: 600;
             text-align: center;
             text-shadow: 0 0 3px rgba(0, 0, 0, 0.85);
+            font-family: inherit;
         }
         /* ── Speed panel ── */
         .ve-stage.video-js .ve-speed-panel {
@@ -9908,6 +10238,7 @@ HTML);
             font-weight: 700;
             letter-spacing: 0.1em;
             text-transform: uppercase;
+            font-family: inherit;
         }
         .ve-stage.video-js .ve-speed-list {
             display: grid;
@@ -9933,9 +10264,9 @@ HTML);
             outline: none;
         }
         .ve-stage.video-js .ve-speed-option.is-active {
-            color: var(--ve-accent);
+            color: var(--ve-selected-text);
             font-weight: 700;
-            background: rgba(229, 9, 20, 0.1);
+            background: var(--ve-selected);
         }
         /* ── Subtitle panel ── */
         .ve-stage.video-js .ve-subtitle-panel {
@@ -9943,7 +10274,8 @@ HTML);
             right: 0;
             bottom: 48px;
             z-index: 8;
-            width: 220px;
+            width: 240px;
+            max-width: calc(100vw - 32px);
             padding: 10px;
             background: rgba(18, 18, 18, 0.96);
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -9951,6 +10283,7 @@ HTML);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
         }
         .ve-stage.video-js .ve-subtitle-panel[hidden] {
             display: none !important;
@@ -9963,6 +10296,7 @@ HTML);
             font-weight: 700;
             letter-spacing: 0.1em;
             text-transform: uppercase;
+            font-family: inherit;
         }
         .ve-stage.video-js .ve-subtitle-list {
             display: grid;
@@ -9988,9 +10322,12 @@ HTML);
             outline: none;
         }
         .ve-stage.video-js .ve-subtitle-option.is-active {
-            color: var(--ve-accent);
+            color: var(--ve-selected-text);
             font-weight: 700;
-            background: rgba(229, 9, 20, 0.1);
+            background: var(--ve-selected);
+        }
+        .ve-stage.video-js .ve-subtitle-url-form[hidden] {
+            display: none !important;
         }
         .ve-stage.video-js .ve-subtitle-url-form {
             display: grid;
@@ -9999,6 +10336,7 @@ HTML);
         }
         .ve-stage.video-js .ve-subtitle-url-form input {
             width: 100%;
+            min-width: 0;
             min-height: 34px;
             padding: 0 10px;
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -10006,6 +10344,8 @@ HTML);
             background: rgba(255, 255, 255, 0.04);
             color: #fff;
             font: inherit;
+            font-size: 0.82rem;
+            box-sizing: border-box;
         }
         .ve-stage.video-js .ve-subtitle-url-form button {
             min-height: 34px;
@@ -10078,24 +10418,24 @@ HTML);
         @media (max-width: 767px) {
             .ve-stage.video-js .vjs-big-play-button,
             .ve-stage.video-js .ve-player-overlay-button {
-                width: 64px;
-                height: 64px;
+                width: 72px;
+                height: 72px;
             }
             .ve-stage.video-js .ve-player-overlay-glyph,
             .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder {
-                width: 64px;
-                height: 64px;
+                width: 72px;
+                height: 72px;
             }
             .ve-stage.video-js .ve-player-overlay-glyph::before,
             .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before {
-                width: 28px;
-                height: 28px;
+                width: 32px;
+                height: 32px;
             }
             .ve-stage.video-js .vjs-control-bar {
                 padding: 0 10px 8px;
             }
             .ve-stage.video-js .vjs-buttons-row {
-                gap: 2px;
+                gap: 1px;
             }
             .ve-stage.video-js .vjs-play-control,
             .ve-stage.video-js .vjs-fullscreen-control,
@@ -10104,8 +10444,8 @@ HTML);
             .ve-stage.video-js .vjs-home-link,
             .ve-stage.video-js .vjs-speed-toggle,
             .ve-stage.video-js .vjs-subs-caps-button > .vjs-button {
-                width: 36px;
-                height: 36px;
+                width: 46px;
+                height: 46px;
             }
             .ve-stage.video-js .vjs-volume-control {
                 display: none;
@@ -10170,7 +10510,6 @@ HTML);
                     </div>
                     <div class="vjs-remaining-time vjs-time-control vjs-control">
                         <span class="vjs-control-text" role="presentation">Remaining Time&nbsp;</span>
-                        <span aria-hidden="true">-</span>
                         <span id="ve-remaining-time-display" class="vjs-remaining-time-display" aria-live="off" role="presentation">0:00</span>
                     </div>
                 </div>
@@ -10273,7 +10612,7 @@ function ve_video_dashboard_assets(): string
 function ve_video_home_panel(?array $user): string
 {
     $auth = $user === null ? '0' : '1';
-    $dashboardUrl = ve_url('/dashboard/videos');
+    $dashboardUrl = ve_url('/videos');
 
     return <<<HTML
 <section class="ve-home-panel">
@@ -10499,7 +10838,7 @@ function ve_render_videos_dashboard_page(): void
 
     $html = (string) file_get_contents(ve_root_path('dashboard', 'index.html'));
     $html = str_replace('<title>Dashboard - DoodStream</title>', '<title>My Videos - DoodStream</title>', $html);
-    $html = str_replace('href="/videos"', 'href="/dashboard/videos"', $html);
+    $html = str_replace('href="/dashboard/videos"', 'href="/videos"', $html);
 
     $headAssets = <<<'HTML'
 <style type="text/css">.vue-simple-context-menu{top:0;left:0;margin:0;padding:0;display:none;list-style:none;position:absolute;z-index:1000000;background-color:#ecf0f1;border-bottom-width:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,"Fira Sans","Droid Sans","Helvetica Neue",sans-serif;box-shadow:0 3px 6px 0 rgba(51,51,51,.2);border-radius:4px}.vue-simple-context-menu--active{display:block}.vue-simple-context-menu__item{display:flex;color:#333;cursor:pointer;padding:5px 15px;align-items:center}.vue-simple-context-menu__item:hover{background-color:#007aff;color:#fff}.vue-simple-context-menu li:first-of-type{margin-top:4px}.vue-simple-context-menu li:last-of-type{margin-bottom:4px}.text-orange{color:#f90;}@media (max-width: 768px){ .container-fluid{ padding-right:0px; padding-left:0px; } .file_manager { border-radius:0px !important; padding: 5px !important; } .file_manager .title_wrap { padding: 0px !important; margin-bottom:0px !important; }}.my-premium .bandwidth-plans .payments .selection, .my-premium .premium-plans .payments .selection { width: 100% !important;}.my-premium .bandwidth-plans .payments .selection .custom-control.p-plan:nth-of-type(3n), .my-premium .premium-plans .payments .selection .custom-control.p-plan:nth-of-type(3n) { margin-right: 20px !important;}@media (min-width: 1200px){ .my-premium .bandwidth-plans .payments .selection .custom-control:not(.p-plan):nth-of-type(5n+1), .my-premium .premium-plans .payments .selection .custom-control:not(.p-plan):nth-of-type(5n+1) { clear: both; margin-left: 20px !important; }}.my-premium .bandwidth-plans .payments .btn, .my-premium .premium-plans .payments .btn { margin-left: 20px;}.remote-list small{ display: block; color: #ea8c00;}.remote-list .fa-external-link{ font-size: 10px; margin: 2px;}.remote-list .badge{ padding: 7px;}@media (min-width: 1350px){ .container-mp { max-width: 1350px !important; }} </style>

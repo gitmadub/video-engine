@@ -265,12 +265,15 @@ try {
     ]));
     videos_actions_assert(($login['status'] ?? null) === 'redirect', 'Login should succeed for the videos actions test user.');
 
-    $dashboardPage = $client->request('GET', '/dashboard/videos');
-    videos_actions_assert($dashboardPage['status'] === 200, 'Dashboard videos page should load.');
-    videos_actions_assert(str_contains($dashboardPage['body'], '<video-manager'), 'Dashboard videos page should render the legacy video manager component.');
-    videos_actions_assert(str_contains($dashboardPage['body'], '/assets/js/video_dashboard_legacy.js'), 'Dashboard videos page should load the legacy patch script.');
+    $legacyDashboardPage = $client->request('GET', '/dashboard/videos');
+    videos_actions_assert($legacyDashboardPage['status'] === 302, 'Legacy dashboard videos route should redirect to /videos.');
 
-    $initialActions = videos_actions_json($client->request('GET', '/api/videos/actions', [
+    $dashboardPage = $client->request('GET', '/videos');
+    videos_actions_assert($dashboardPage['status'] === 200, 'Videos page should load.');
+    videos_actions_assert(str_contains($dashboardPage['body'], '<video-manager'), 'Videos page should render the legacy video manager component.');
+    videos_actions_assert(str_contains($dashboardPage['body'], '/assets/js/video_dashboard_legacy.js'), 'Videos page should load the legacy patch script.');
+
+    $initialActions = videos_actions_json($client->request('GET', '/videos/actions', [
         'query' => [
             'page' => 1,
             'fld_id' => 0,
@@ -281,13 +284,15 @@ try {
     videos_actions_assert(($initialActions['status'] ?? null) === 'ok', 'Initial videos actions request should succeed.');
     videos_actions_assert(count((array) ($initialActions['folders'] ?? [])) === 1, 'Initial videos actions request should expose the seeded folder.');
     videos_actions_assert(count((array) ($initialActions['videos'] ?? [])) === 2, 'Initial videos actions request should expose both seeded videos.');
+    videos_actions_assert((string) (($initialActions['folders'][0]['siz'] ?? '')) === '0 B', 'Folder payload should include a formatted size.');
+    videos_actions_assert((string) (($initialActions['folders'][0]['cre'] ?? '')) !== '', 'Folder payload should include a created date.');
+    videos_actions_assert(str_contains((string) (($initialActions['folders'][0]['share_url'] ?? '')), '/videos/shared/'), 'Folder payload should include a public share URL.');
 
     $pageToken = (string) ($initialActions['token'] ?? '');
     videos_actions_assert($pageToken !== '', 'Videos actions response should expose a CSRF token.');
 
-    $createFolderA = videos_actions_json($client->request('POST', '/', [
+    $createFolderA = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'fld_id' => 0,
             'create_new_folder' => 'QA Folder A',
@@ -296,9 +301,8 @@ try {
     videos_actions_assert(isset($createFolderA[0]['fld_id']), 'Legacy create folder should return a folder payload.');
     $folderAId = (int) $createFolderA[0]['fld_id'];
 
-    $createFolderB = videos_actions_json($client->request('POST', '/', [
+    $createFolderB = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'fld_id' => 0,
             'create_new_folder' => 'QA Folder B',
@@ -307,9 +311,8 @@ try {
     videos_actions_assert(isset($createFolderB[0]['fld_id']), 'Second legacy create folder should return a folder payload.');
     $folderBId = (int) $createFolderB[0]['fld_id'];
 
-    $renameFolder = videos_actions_json($client->request('POST', '/', [
+    $renameFolder = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'fld_id' => $folderAId,
             'rename' => 'QA Folder Alpha',
@@ -317,9 +320,8 @@ try {
     ]));
     videos_actions_assert(($renameFolder[0]['fn'] ?? null) === 'QA Folder Alpha', 'Legacy folder rename should return the new folder name.');
 
-    $renameVideo = videos_actions_json($client->request('POST', '/', [
+    $renameVideo = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'file_id' => $rootVideoId,
             'rename' => 'Root Video Renamed',
@@ -327,9 +329,8 @@ try {
     ]));
     videos_actions_assert(($renameVideo[0]['ft'] ?? null) === 'Root Video Renamed', 'Legacy video rename should return the new video title.');
 
-    $exportLinks = videos_actions_json($client->request('POST', '/', [
+    $exportLinks = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'file_export' => '1',
             'file_id' => [$rootVideoId, $bulkVideoId],
         ],
@@ -337,9 +338,8 @@ try {
     videos_actions_assert(count($exportLinks) === 2, 'Legacy export should return both selected videos.');
     videos_actions_assert(str_contains((string) ($exportLinks[0]['dl'] ?? ''), '/d/rootvideo01'), 'Legacy export should include the root video download URL.');
 
-    $folderTree = videos_actions_json($client->request('POST', '/', [
+    $folderTree = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'fld_select' => '1',
             'parent_id' => 0,
             'not_in' => [],
@@ -347,9 +347,8 @@ try {
     ]));
     videos_actions_assert(count($folderTree) >= 3, 'Legacy folder selection tree should include the seeded and created folders.');
 
-    $moveVideo = videos_actions_json($client->request('POST', '/', [
+    $moveVideo = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'file_move' => '1',
             'to_folder' => $folderAId,
@@ -358,9 +357,8 @@ try {
     ]));
     videos_actions_assert(($moveVideo['status'] ?? null) === 'ok', 'Legacy file move should succeed.');
 
-    $moveFolder = videos_actions_json($client->request('POST', '/', [
+    $moveFolder = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'folder_move' => '1',
             'to_folder_fld' => $folderAId,
@@ -370,7 +368,7 @@ try {
     ]));
     videos_actions_assert(($moveFolder['status'] ?? null) === 'ok', 'Legacy folder move should succeed.');
 
-    $folderActions = videos_actions_json($client->request('GET', '/api/videos/actions', [
+    $folderActions = videos_actions_json($client->request('GET', '/videos/actions', [
         'query' => [
             'page' => 1,
             'fld_id' => $folderAId,
@@ -380,10 +378,10 @@ try {
     ]));
     videos_actions_assert(count((array) ($folderActions['videos'] ?? [])) === 1, 'Target folder should contain the moved video.');
     videos_actions_assert((string) (($folderActions['videos'][0]['fid'] ?? '')) === 'rootvideo01', 'Moved video should appear in the target folder list.');
+    videos_actions_assert((string) (($folderActions['current_folder']['siz'] ?? '')) === '150.00 MB', 'Current folder payload should include the recursive folder size.');
 
-    $nestedTree = videos_actions_json($client->request('POST', '/', [
+    $nestedTree = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'fld_select' => '1',
             'parent_id' => 0,
             'not_in' => [],
@@ -401,9 +399,8 @@ try {
     videos_actions_assert(is_array($alphaTree), 'Nested folder tree should include the renamed parent folder.');
     videos_actions_assert(count((array) ($alphaTree['sub_folders'] ?? [])) === 1, 'Nested folder tree should show the moved sub-folder under the parent folder.');
 
-    $setPrivate = videos_actions_json($client->request('POST', '/', [
+    $setPrivate = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'set_private' => '1',
             'file_id' => [$rootVideoId],
@@ -411,7 +408,7 @@ try {
     ]));
     videos_actions_assert(($setPrivate['status'] ?? null) === 'ok', 'Legacy set_private should succeed.');
 
-    $privateActions = videos_actions_json($client->request('GET', '/api/videos/actions', [
+    $privateActions = videos_actions_json($client->request('GET', '/videos/actions', [
         'query' => [
             'page' => 1,
             'fld_id' => $folderAId,
@@ -421,9 +418,8 @@ try {
     ]));
     videos_actions_assert((int) (($privateActions['videos'][0]['pub'] ?? 1)) === 0, 'Legacy set_private should update the video visibility flag.');
 
-    $setPublic = videos_actions_json($client->request('POST', '/', [
+    $setPublic = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'set_public' => '1',
             'file_id' => [$rootVideoId],
@@ -431,7 +427,7 @@ try {
     ]));
     videos_actions_assert(($setPublic['status'] ?? null) === 'ok', 'Legacy set_public should succeed.');
 
-    $publicActions = videos_actions_json($client->request('GET', '/api/videos/actions', [
+    $publicActions = videos_actions_json($client->request('GET', '/videos/actions', [
         'query' => [
             'page' => 1,
             'fld_id' => $folderAId,
@@ -441,18 +437,16 @@ try {
     ]));
     videos_actions_assert((int) (($publicActions['videos'][0]['pub'] ?? 0)) === 1, 'Legacy set_public should restore the video visibility flag.');
 
-    $subtitleList = videos_actions_json($client->request('POST', '/', [
+    $subtitleList = videos_actions_json($client->request('POST', '/videos/subtitles', [
         'form' => [
-            'op' => 'add_srt',
             'token' => $pageToken,
             'file_code' => 'rootvideo01',
         ],
     ]));
     videos_actions_assert(($subtitleList['status'] ?? null) === 'ok', 'Legacy subtitle list should succeed.');
 
-    $subtitleUpload = videos_actions_json($client->request('POST', '/', [
+    $subtitleUpload = videos_actions_json($client->request('POST', '/videos/subtitles', [
         'form' => [
-            'op' => 'add_srt',
             'token' => $pageToken,
             'file_code' => 'rootvideo01',
             'srt_lang' => 'English',
@@ -463,9 +457,8 @@ try {
     ]));
     videos_actions_assert(($subtitleUpload['status'] ?? null) === 'fail', 'Legacy subtitle upload should fail gracefully in this build.');
 
-    $uploadResults = videos_actions_json($client->request('POST', '/', [
+    $uploadResults = videos_actions_json($client->request('POST', '/videos/result', [
         'form' => [
-            'op' => 'upload_results_json',
             'fn' => 'rootvideo01',
             'st' => 'OK',
             'is_xhr' => '1',
@@ -474,24 +467,29 @@ try {
     videos_actions_assert(($uploadResults['status'] ?? null) === 'ok', 'Legacy upload results handoff should succeed.');
     videos_actions_assert((string) (($uploadResults['links'][0]['fid'] ?? '')) === 'rootvideo01', 'Legacy upload results handoff should return the moved video payload.');
 
-    $thumbnail = $client->request('GET', '/api/videos/thumbnail', [
+    $thumbnail = $client->request('GET', '/videos/thumbnail', [
         'query' => ['file_id' => $rootVideoId],
     ]);
     videos_actions_assert($thumbnail['status'] === 200 && str_contains($thumbnail['body'], 'Poster and splash images are generated automatically'), 'Thumbnail modal endpoint should render the expected helper copy.');
 
-    $marker = $client->request('GET', '/api/videos/markers', [
+    $marker = $client->request('GET', '/videos/markers', [
         'query' => ['file_id' => $rootVideoId],
     ]);
     videos_actions_assert($marker['status'] === 200 && str_contains($marker['body'], 'hover-preview sprite'), 'Markers modal endpoint should render the expected helper copy.');
 
-    $sharing = $client->request('GET', '/api/folders/share', [
+    $sharing = $client->request('GET', '/videos/share', [
         'query' => ['folder_id' => $folderAId],
     ]);
-    videos_actions_assert($sharing['status'] === 200 && str_contains($sharing['body'], 'Folder sharing is not enabled'), 'Folder sharing modal endpoint should render the expected helper copy.');
+    videos_actions_assert($sharing['status'] === 200 && str_contains($sharing['body'], 'Share link'), 'Folder sharing modal endpoint should render the share helper UI.');
+    videos_actions_assert(str_contains($sharing['body'], '/videos/shared/'), 'Folder sharing modal endpoint should expose the public folder URL.');
 
-    $bulkDelete = videos_actions_json($client->request('POST', '/', [
+    $publicFolderPath = (string) parse_url((string) ($folderActions['current_folder']['share_url'] ?? ''), PHP_URL_PATH);
+    videos_actions_assert($publicFolderPath !== '', 'Folder sharing payload should expose a valid share path.');
+    $publicFolder = $client->request('GET', $publicFolderPath);
+    videos_actions_assert($publicFolder['status'] === 200 && str_contains($publicFolder['body'], 'Root Video Renamed'), 'Public folder page should render the public video listing.');
+
+    $bulkDelete = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'del_selected' => '1',
             'file_id' => [$bulkVideoId],
@@ -499,9 +497,8 @@ try {
     ]));
     videos_actions_assert(($bulkDelete['status'] ?? null) === 'ok', 'Legacy bulk delete should succeed.');
 
-    $deleteMovedVideo = videos_actions_json($client->request('POST', '/', [
+    $deleteMovedVideo = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'fld_id' => $folderAId,
             'del_code' => 'rootvideo01',
@@ -509,9 +506,8 @@ try {
     ]));
     videos_actions_assert(($deleteMovedVideo['status'] ?? null) === 'ok', 'Legacy direct delete should succeed.');
 
-    $deleteFolder = videos_actions_json($client->request('POST', '/', [
+    $deleteFolder = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
-            'op' => 'videos_json',
             'token' => $pageToken,
             'fld_id' => 0,
             'del_selected_fld' => '1',
@@ -520,7 +516,7 @@ try {
     ]));
     videos_actions_assert(($deleteFolder['status'] ?? null) === 'ok', 'Legacy folder delete should succeed.');
 
-    $finalRoot = videos_actions_json($client->request('GET', '/api/videos/actions', [
+    $finalRoot = videos_actions_json($client->request('GET', '/videos/actions', [
         'query' => [
             'page' => 1,
             'fld_id' => 0,
