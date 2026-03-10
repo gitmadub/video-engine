@@ -146,11 +146,21 @@ function ve_request_path(): string
 
     if ($pathInfo !== '' && $pathInfo[0] === '/') {
         $pathInfo = rawurldecode($pathInfo);
+        $normalizedPathInfo = $pathInfo;
+        $pathInfoRemainder = $pathInfo;
 
-        if ($scriptPrefix !== '' && ($path === '/' || $path === $pathInfo)) {
-            $path = $scriptPrefix . ($pathInfo === '/' ? '' : $pathInfo);
-        } elseif ($path === '/') {
-            $path = $pathInfo;
+        if ($scriptPrefix !== '') {
+            if ($pathInfo !== $scriptPrefix && !str_starts_with($pathInfo, $scriptPrefix . '/')) {
+                $normalizedPathInfo = $scriptPrefix . ($pathInfo === '/' ? '' : $pathInfo);
+            }
+
+            if ($normalizedPathInfo === $scriptPrefix || str_starts_with($normalizedPathInfo, $scriptPrefix . '/')) {
+                $pathInfoRemainder = substr($normalizedPathInfo, strlen($scriptPrefix)) ?: '/';
+            }
+        }
+
+        if ($path === '/' || $path === $pathInfo || $path === $pathInfoRemainder) {
+            $path = $normalizedPathInfo;
         }
     }
 
