@@ -100,13 +100,7 @@ function ve_url(string $path = '/'): string
 
 function ve_request_path(): string
 {
-    $pathInfo = (string) ($_SERVER['PATH_INFO'] ?? '');
-
-    if ($pathInfo !== '' && $pathInfo[0] === '/') {
-        $path = rawurldecode($pathInfo);
-    } else {
-        $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
-    }
+    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 
     if (!is_string($path) || $path === '') {
         return '/';
@@ -120,6 +114,7 @@ function ve_request_path(): string
     }
 
     $scriptPath = parse_url((string) ($_SERVER['SCRIPT_NAME'] ?? ''), PHP_URL_PATH);
+    $scriptPrefix = '';
 
     if (is_string($scriptPath) && $scriptPath !== '') {
         $scriptPath = rawurldecode($scriptPath);
@@ -128,12 +123,34 @@ function ve_request_path(): string
             $scriptPath = substr($scriptPath, strlen($basePath)) ?: '/';
         }
 
-        if ($scriptPath !== '/' && $scriptPath !== '') {
+        if ($scriptPath !== '/' && $scriptPath !== '' && str_ends_with($scriptPath, '.php')) {
+            $scriptPrefix = str_ends_with($scriptPath, '.php')
+                ? rtrim(str_replace('\\', '/', dirname($scriptPath)), '/.')
+                : $scriptPath;
+
+            if ($scriptPrefix === '\\' || $scriptPrefix === '.') {
+                $scriptPrefix = '';
+            }
+        }
+
+        if ($scriptPath !== '/' && $scriptPath !== '' && str_ends_with($scriptPath, '.php')) {
             if ($path === $scriptPath) {
                 $path = '/';
             } elseif (str_starts_with($path, $scriptPath . '/')) {
                 $path = substr($path, strlen($scriptPath)) ?: '/';
             }
+        }
+    }
+
+    $pathInfo = (string) ($_SERVER['PATH_INFO'] ?? '');
+
+    if ($pathInfo !== '' && $pathInfo[0] === '/') {
+        $pathInfo = rawurldecode($pathInfo);
+
+        if ($scriptPrefix !== '' && ($path === '/' || $path === $pathInfo)) {
+            $path = $scriptPrefix . ($pathInfo === '/' ? '' : $pathInfo);
+        } elseif ($path === '/') {
+            $path = $pathInfo;
         }
     }
 

@@ -9886,12 +9886,13 @@ HTML);
         }
         .ve-stage.video-js .ve-player-overlay-button,
         .ve-stage.video-js .vjs-big-play-button {
-            top: 50%;
-            left: 50%;
+            position: relative;
+            top: auto;
+            left: auto;
             width: 96px;
             height: 96px;
             margin: 0;
-            transform: translate(-50%, -50%);
+            transform: none;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -9908,7 +9909,7 @@ HTML);
         .ve-stage.video-js .vjs-big-play-button:hover,
         .ve-stage.video-js .vjs-big-play-button:focus-visible {
             opacity: 1;
-            transform: translate(-50%, -50%) scale(1.03);
+            transform: scale(1.03);
             box-shadow: 0 26px 56px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.14);
         }
         .ve-stage.video-js .ve-player-overlay-glyph,
@@ -9938,7 +9939,7 @@ HTML);
         }
         .ve-stage.video-js .ve-player-overlay-button.is-starting,
         .ve-stage.video-js .vjs-big-play-button.is-starting {
-            transform: translate(-50%, -50%);
+            transform: none;
         }
         .ve-stage.video-js .vjs-loading-spinner {
             z-index: 8;

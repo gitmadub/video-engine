@@ -439,6 +439,8 @@ async function elementDocumentBox(page, selector) {
     let postPlayKeyRequests = 0;
     let replayedStartupSegmentRequests = 0;
     let warmedStartupSegmentUrl = '';
+    const malformedStreamRequests = [];
+    const manifestResponseContentTypes = [];
     embedPage.on('request', (request) => {
       const url = request.url();
 
@@ -459,6 +461,10 @@ async function elementDocumentBox(page, selector) {
         const params = new URLSearchParams(body);
         pulsePlaybackTokens.push(params.get('playback_token') || '');
         return;
+      }
+
+      if (/%3C!doctype/i.test(url)) {
+        malformedStreamRequests.push(url);
       }
 
       const isPrePlay = playbackTriggeredAt === 0;
@@ -516,6 +522,18 @@ async function elementDocumentBox(page, selector) {
         if (!isPrePlay && warmedStartupSegmentUrl && url === warmedStartupSegmentUrl) {
           replayedStartupSegmentRequests += 1;
         }
+      }
+    });
+    embedPage.on('response', async (response) => {
+      const url = response.url();
+
+      if (!url.includes('/stream/')) {
+        return;
+      }
+
+      if (url.includes('/manifest.m3u8')) {
+        const headers = await response.allHeaders().catch(() => ({}));
+        manifestResponseContentTypes.push(String(headers['content-type'] || ''));
       }
     });
     await embedPage.goto(embedUrl, { waitUntil: 'domcontentloaded' });
@@ -602,6 +620,14 @@ async function elementDocumentBox(page, selector) {
 
     if (!String(embedWarmupState.startupSegmentUrl || '').includes('/segment/')) {
       throw new Error(`Secure embed warmup state should expose the prefetched startup segment URL. Received: ${JSON.stringify(embedWarmupState)}`);
+    }
+
+    if (malformedStreamRequests.length > 0) {
+      throw new Error(`Secure playback must never request a malformed encoded HTML stream path. Observed: ${JSON.stringify(malformedStreamRequests)}.`);
+    }
+
+    if (!manifestResponseContentTypes.some((value) => /application\/vnd\.apple\.mpegurl/i.test(value))) {
+      throw new Error(`Secure playback manifest responses must be served as M3U8. Observed content types: ${JSON.stringify(manifestResponseContentTypes)}.`);
     }
 
     if (prePlayPlaybackCalls.length !== 0) {
