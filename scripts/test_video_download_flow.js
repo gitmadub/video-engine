@@ -684,6 +684,28 @@ async function elementDocumentBox(page, selector) {
       return Boolean(video && !video.paused);
     }, null, { timeout: 15000 });
 
+    await embedPage.locator('#video_player').click({
+      position: {
+        x: Math.round(playerBox.width / 2),
+        y: Math.round(playerBox.height * 0.3),
+      },
+    });
+    await embedPage.waitForFunction(() => {
+      const video = document.getElementById('ve-secure-player');
+      return Boolean(video && video.paused);
+    }, null, { timeout: 10000 });
+
+    await embedPage.locator('#video_player').click({
+      position: {
+        x: Math.round(playerBox.width / 2),
+        y: Math.round(playerBox.height * 0.3),
+      },
+    });
+    await embedPage.waitForFunction(() => {
+      const video = document.getElementById('ve-secure-player');
+      return Boolean(video && !video.paused);
+    }, null, { timeout: 10000 });
+
     const firstQualifiedView = await (await firstQualifiedViewPromise).json();
 
     if (firstQualifiedView.status !== 'ok' || firstQualifiedView.payable !== true || firstQualifiedView.counted !== true) {

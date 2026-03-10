@@ -6144,6 +6144,19 @@ function ve_video_secure_player_script(
             }
         }
 
+        function togglePlaybackFromSurface() {
+            if (!video) {
+                return;
+            }
+
+            if (video.paused || video.ended) {
+                video.play();
+                return;
+            }
+
+            video.pause();
+        }
+
         function bootUi() {
             if (!video || controlsBootstrapped) {
                 return;
@@ -6288,6 +6301,29 @@ function ve_video_secure_player_script(
 
             ['mousemove', 'mouseenter', 'touchstart'].forEach(function (eventName) {
                 stage.addEventListener(eventName, showControlsTemporarily, { passive: true });
+            });
+
+            stage.addEventListener('click', function (event) {
+                if (!video || !stage || event.defaultPrevented) {
+                    return;
+                }
+
+                var target = event.target;
+
+                if (target && typeof target.closest === 'function') {
+                    if (
+                        target.closest('#ve-player-controls')
+                        || target.closest('#ve-subtitle-panel')
+                        || target.closest('#ve-subtitle-button')
+                        || target.closest('#ve-player-overlay-button')
+                        || target.closest('a, button, input, label, form')
+                    ) {
+                        return;
+                    }
+                }
+
+                showControlsTemporarily();
+                togglePlaybackFromSurface();
             });
 
             stage.addEventListener('mouseleave', function () {
@@ -9482,13 +9518,13 @@ HTML);
         .ve-stage.video-js .vjs-play-control.vjs-playing .vjs-icon-placeholder::before {
             width: 24px;
             height: 24px;
-            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 5h4v14H7zm6 0h4v14h-4z'/%3E%3C/svg%3E\");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 5h4v14H7zm6 0h4v14h-4z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-seek-button .vjs-icon-placeholder::before {
             width: 22px;
             height: 22px;
             top: 46%;
-            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 5V1L5 8l7 7V9c3.3 0 6 2.7 6 6 0 1.2-.4 2.4-1 3.4l1.5 1.5A7.93 7.93 0 0 0 20 15c0-5-3.6-9.1-8-10z'/%3E%3C/svg%3E\");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 5V1L5 8l7 7V9c3.3 0 6 2.7 6 6 0 1.2-.4 2.4-1 3.4l1.5 1.5A7.93 7.93 0 0 0 20 15c0-5-3.6-9.1-8-10z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-seek-button.skip-forward .vjs-icon-placeholder::before {
             transform: translate(-50%, -50%) scaleX(-1);
@@ -9511,18 +9547,18 @@ HTML);
         .ve-stage.video-js .vjs-mute-control.vjs-vol-1 .vjs-icon-placeholder::before,
         .ve-stage.video-js .vjs-mute-control.vjs-vol-2 .vjs-icon-placeholder::before,
         .ve-stage.video-js .vjs-mute-control.vjs-vol-3 .vjs-icon-placeholder::before {
-            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.8-1-3.3-2.5-4.1v8.2c1.5-.8 2.5-2.3 2.5-4.1zm2.5 0c0 3-1.7 5.6-4.2 6.9l1.2 1.2C19 18.7 21 15.6 21 12s-2-6.7-5-8.1l-1.2 1.2c2.5 1.3 4.2 3.9 4.2 6.9z'/%3E%3C/svg%3E\");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.8-1-3.3-2.5-4.1v8.2c1.5-.8 2.5-2.3 2.5-4.1zm2.5 0c0 3-1.7 5.6-4.2 6.9l1.2 1.2C19 18.7 21 15.6 21 12s-2-6.7-5-8.1l-1.2 1.2c2.5 1.3 4.2 3.9 4.2 6.9z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-mute-control.vjs-vol-0 .vjs-icon-placeholder::before {
-            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M16.5 12c0-.7-.1-1.4-.4-2l1.5-1.5c.6 1 .9 2.2.9 3.5 0 1.3-.3 2.5-.9 3.5L16.1 14c.3-.6.4-1.3.4-2zm3 0c0-2-.6-3.9-1.7-5.4l1.5-1.5A9.9 9.9 0 0 1 22 12c0 2.7-1 5.1-2.7 6.9l-1.5-1.5c1.1-1.5 1.7-3.4 1.7-5.4zM4.3 3 3 4.3 7.7 9H3v6h4l5 5v-6.7l4.7 4.7 1.3-1.3L4.3 3z'/%3E%3C/svg%3E\");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M16.5 12c0-.7-.1-1.4-.4-2l1.5-1.5c.6 1 .9 2.2.9 3.5 0 1.3-.3 2.5-.9 3.5L16.1 14c.3-.6.4-1.3.4-2zm3 0c0-2-.6-3.9-1.7-5.4l1.5-1.5A9.9 9.9 0 0 1 22 12c0 2.7-1 5.1-2.7 6.9l-1.5-1.5c1.1-1.5 1.7-3.4 1.7-5.4zM4.3 3 3 4.3 7.7 9H3v6h4l5 5v-6.7l4.7 4.7 1.3-1.3L4.3 3z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-fullscreen-control .vjs-icon-placeholder::before {
             width: 22px;
             height: 22px;
-            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 7h-3v2h5v-5h-2v3zm0-12v3h2V5h-5v2h3z'/%3E%3C/svg%3E\");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 14H5v5h5v-2H7v-3zm0-4h2V7h3V5H5v5zm10 7h-3v2h5v-5h-2v3zm0-12v3h2V5h-5v2h3z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-fullscreen-control.is-active .vjs-icon-placeholder::before {
-            background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M5 16h2v3h3v2H5v-5zm12 3v-3h2v5h-5v-2h3zM7 5v3H5V3h5v2H7zm12 3h-2V5h-3V3h5v5z'/%3E%3C/svg%3E\");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M5 16h2v3h3v2H5v-5zm12 3v-3h2v5h-5v-2h3zM7 5v3H5V3h5v2H7zm12 3h-2V5h-3V3h5v5z'/%3E%3C/svg%3E");
         }
         .ve-stage.video-js .vjs-subs-caps-button > .vjs-button .vjs-icon-placeholder::before {
             content: "CC";
@@ -9853,17 +9889,17 @@ HTML);
             }
         }
         .ve-stage.video-js {
-            --ve-player-surface: linear-gradient(180deg, rgba(10, 12, 16, 0.18) 0%, rgba(8, 9, 12, 0.82) 100%);
-            --ve-player-panel: rgba(11, 13, 18, 0.68);
-            --ve-player-panel-border: rgba(255, 255, 255, 0.12);
-            --ve-player-panel-shadow: 0 28px 70px rgba(0, 0, 0, 0.46);
-            --ve-player-button-bg: rgba(255, 255, 255, 0.08);
+            --ve-player-surface: linear-gradient(180deg, rgba(11, 11, 11, 0.06) 0%, rgba(8, 8, 8, 0.84) 100%);
+            --ve-player-panel: linear-gradient(180deg, rgba(30, 30, 30, 0.94) 0%, rgba(15, 15, 15, 0.98) 100%);
+            --ve-player-panel-border: rgba(255, 153, 0, 0.14);
+            --ve-player-panel-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
+            --ve-player-button-bg: linear-gradient(180deg, rgba(39, 39, 39, 0.96) 0%, rgba(20, 20, 20, 0.98) 100%);
             --ve-player-button-border: rgba(255, 255, 255, 0.08);
-            --ve-player-track: rgba(255, 255, 255, 0.18);
-            --ve-player-load: rgba(255, 255, 255, 0.22);
-            --ve-player-text: #f7f9fc;
-            --ve-player-muted: rgba(247, 249, 252, 0.72);
-            font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+            --ve-player-track: rgba(255, 255, 255, 0.16);
+            --ve-player-load: rgba(255, 255, 255, 0.26);
+            --ve-player-text: #f4f4f4;
+            --ve-player-muted: rgba(222, 222, 222, 0.74);
+            font-family: Arial, Helvetica, sans-serif;
         }
         .ve-stage.video-js::before {
             content: "";
@@ -9871,8 +9907,17 @@ HTML);
             inset: 0;
             z-index: 1;
             background:
-                linear-gradient(180deg, rgba(3, 4, 7, 0.08) 0%, rgba(3, 4, 7, 0.08) 52%, rgba(3, 4, 7, 0.68) 100%),
-                radial-gradient(circle at center, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.18) 100%);
+                linear-gradient(180deg, rgba(8, 8, 8, 0) 0%, rgba(8, 8, 8, 0.1) 42%, rgba(5, 5, 5, 0.68) 100%),
+                radial-gradient(circle at 50% 58%, rgba(255, 153, 0, 0.04) 0%, rgba(255, 153, 0, 0) 30%, rgba(0, 0, 0, 0.18) 100%);
+            pointer-events: none;
+        }
+        .ve-stage.video-js::after {
+            content: "";
+            position: absolute;
+            inset: auto 0 0 0;
+            height: 34%;
+            z-index: 1;
+            background: linear-gradient(180deg, rgba(255, 153, 0, 0) 0%, rgba(255, 153, 0, 0.03) 16%, rgba(8, 8, 8, 0.84) 100%);
             pointer-events: none;
         }
         .ve-stage.video-js .vjs-tech,
@@ -9889,42 +9934,49 @@ HTML);
             position: relative;
             top: auto;
             left: auto;
-            width: 96px;
-            height: 96px;
+            width: 112px;
+            height: 112px;
             margin: 0;
             transform: none;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             border-radius: 999px;
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            background: linear-gradient(180deg, rgba(18, 21, 28, 0.84) 0%, rgba(7, 8, 12, 0.68) 100%);
-            box-shadow: 0 20px 48px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
-            transition: transform .18s ease, background-color .18s ease, opacity .18s ease, box-shadow .18s ease;
+            border: 1px solid rgba(255, 153, 0, 0.22);
+            background:
+                radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 34%),
+                linear-gradient(180deg, rgba(36, 36, 36, 0.98) 0%, rgba(16, 16, 16, 0.98) 100%);
+            box-shadow: 0 20px 54px rgba(0, 0, 0, 0.46), 0 0 0 7px rgba(255, 153, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            transition: transform .22s ease, background-color .22s ease, opacity .18s ease, box-shadow .22s ease, border-color .22s ease, filter .22s ease;
         }
         .ve-stage.video-js .ve-player-overlay-button:hover,
         .ve-stage.video-js .ve-player-overlay-button:focus-visible,
         .ve-stage.video-js .vjs-big-play-button:hover,
         .ve-stage.video-js .vjs-big-play-button:focus-visible {
             opacity: 1;
-            transform: scale(1.03);
-            box-shadow: 0 26px 56px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+            transform: translateY(-2px) scale(1.03);
+            border-color: rgba(255, 153, 0, 0.38);
+            box-shadow: 0 30px 64px rgba(0, 0, 0, 0.5), 0 0 0 9px rgba(255, 153, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+            filter: saturate(1.04);
         }
         .ve-stage.video-js .ve-player-overlay-glyph,
         .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder {
-            width: 96px;
-            height: 96px;
+            width: 112px;
+            height: 112px;
         }
         .ve-stage.video-js .ve-player-overlay-glyph::before,
         .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before {
-            margin-top: -22px;
-            margin-left: -7px;
-            border-top-width: 22px;
-            border-bottom-width: 22px;
-            border-left-width: 34px;
-            filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.32));
+            inset: 0;
+            width: 40px;
+            height: 40px;
+            margin: auto;
+            border: 0;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Cpath fill='%23ffffff' d='M15 11.5 31 22 15 32.5z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: contain;
+            transform: none;
+            filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.28));
         }
         .ve-stage.video-js .ve-player-overlay-label {
             position: absolute;
@@ -9952,18 +10004,28 @@ HTML);
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
         }
         .ve-stage.video-js .vjs-control-bar {
-            left: 16px;
-            right: 16px;
-            bottom: 16px;
+            left: 14px;
+            right: 14px;
+            bottom: 14px;
             min-height: 84px;
             padding: 30px 14px 14px;
-            gap: 6px;
+            gap: 8px;
             border: 1px solid var(--ve-player-panel-border);
             border-radius: 18px;
             background: var(--ve-player-panel);
             box-shadow: var(--ve-player-panel-shadow);
-            backdrop-filter: blur(22px);
-            -webkit-backdrop-filter: blur(22px);
+            transition: opacity .22s ease, transform .22s ease, box-shadow .22s ease;
+        }
+        .ve-stage.video-js .vjs-control-bar::before {
+            content: "";
+            position: absolute;
+            left: 14px;
+            right: 14px;
+            top: 0;
+            height: 1px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, rgba(255, 153, 0, 0) 0%, rgba(255, 153, 0, 0.76) 24%, rgba(255, 184, 77, 0.98) 50%, rgba(255, 153, 0, 0.76) 76%, rgba(255, 153, 0, 0) 100%);
+            opacity: 0.9;
         }
         .ve-stage.video-js.vjs-user-inactive .vjs-control-bar,
         .ve-stage.video-js:not(.vjs-has-started) .vjs-control-bar {
@@ -9972,21 +10034,26 @@ HTML);
             pointer-events: none;
         }
         .ve-stage.video-js .vjs-progress-control {
-            top: 10px;
+            top: 9px;
             left: 14px;
             right: 14px;
             height: 16px;
         }
         .ve-stage.video-js .vjs-progress-holder {
-            height: 6px;
+            height: 5px;
             margin-top: 5px;
             border-radius: 999px;
             background: var(--ve-player-track);
             overflow: visible;
+            transition: height .18s ease, transform .18s ease;
+        }
+        .ve-stage.video-js .vjs-progress-holder:hover {
+            height: 7px;
+            transform: translateY(-1px);
         }
         .ve-stage.video-js .vjs-load-progress,
         .ve-stage.video-js .vjs-play-progress {
-            height: 6px;
+            height: 5px;
             border-radius: 999px;
         }
         .ve-stage.video-js .vjs-load-progress {
@@ -9997,7 +10064,12 @@ HTML);
             right: -8px;
             width: 12px;
             height: 12px;
-            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.16), 0 6px 18px rgba(0, 0, 0, 0.34);
+            box-shadow: 0 0 0 3px rgba(255, 153, 0, 0.22), 0 6px 18px rgba(0, 0, 0, 0.34);
+            transition: transform .18s ease, box-shadow .18s ease;
+        }
+        .ve-stage.video-js .vjs-progress-holder:hover .vjs-play-progress::before {
+            transform: translateY(-50%) scale(1.1);
+            box-shadow: 0 0 0 4px rgba(255, 153, 0, 0.28), 0 8px 24px rgba(0, 0, 0, 0.36);
         }
         .ve-stage.video-js .vjs-control,
         .ve-stage.video-js .vjs-button {
@@ -10011,16 +10083,24 @@ HTML);
             width: 42px;
             height: 42px;
             border: 1px solid var(--ve-player-button-border);
-            border-radius: 999px;
+            border-radius: 14px;
             background: var(--ve-player-button-bg);
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            transition: transform .18s ease, background-color .18s ease, border-color .18s ease, box-shadow .18s ease;
+        }
+        .ve-stage.video-js .vjs-play-control {
+            border-color: rgba(255, 153, 0, 0.22);
+            background: linear-gradient(180deg, rgba(255, 153, 0, 0.2) 0%, rgba(255, 153, 0, 0.08) 100%), var(--ve-player-button-bg);
         }
         .ve-stage.video-js .vjs-control:hover,
         .ve-stage.video-js .vjs-control:focus-visible,
         .ve-stage.video-js .vjs-button:hover,
         .ve-stage.video-js .vjs-button:focus-visible {
             opacity: 1;
-            background: rgba(255, 255, 255, 0.12);
+            background: linear-gradient(180deg, rgba(255, 172, 51, 0.16) 0%, rgba(255, 153, 0, 0.06) 100%), var(--ve-player-button-bg);
+            border-color: rgba(255, 172, 51, 0.28);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.26), 0 0 0 1px rgba(255, 153, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            transform: translateY(-1px);
         }
         .ve-stage.video-js .vjs-icon-placeholder {
             width: 22px;
@@ -10045,8 +10125,8 @@ HTML);
         .ve-stage.video-js .vjs-remaining-time {
             height: 42px;
             color: var(--ve-player-text);
-            font-size: 0.82rem;
-            font-weight: 600;
+            font-size: 0.8rem;
+            font-weight: 700;
             text-shadow: none;
         }
         .ve-stage.video-js .vjs-current-time,
@@ -10056,7 +10136,7 @@ HTML);
         }
         .ve-stage.video-js .vjs-time-divider {
             width: 10px;
-            color: rgba(255, 255, 255, 0.4);
+            color: rgba(255, 255, 255, 0.36);
         }
         .ve-stage.video-js .vjs-remaining-time {
             position: static;
@@ -10067,22 +10147,27 @@ HTML);
             color: var(--ve-player-muted);
             font-size: 0.8rem;
         }
+        .ve-stage.video-js .vjs-current-time-display,
+        .ve-stage.video-js .vjs-duration-display,
+        .ve-stage.video-js .vjs-remaining-time-display {
+            letter-spacing: 0.01em;
+        }
         .ve-stage.video-js .vjs-custom-control-spacer {
             min-width: 10px;
         }
         .ve-stage.video-js .vjs-time-tooltip {
-            bottom: 24px;
+            bottom: 22px;
             padding: 5px 8px;
             border-radius: 999px;
-            background: rgba(9, 11, 14, 0.92);
+            background: rgba(19, 19, 19, 0.94);
             color: var(--ve-player-text);
             font-size: 0.74rem;
         }
         .ve-stage.video-js .vjs-thumbnail-holder {
             bottom: 36px;
-            border-radius: 10px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.42);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 153, 0, 0.12);
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.46);
         }
         .ve-stage.video-js .ve-subtitle-panel {
             right: 0;
@@ -10090,11 +10175,9 @@ HTML);
             width: 240px;
             padding: 12px;
             border-radius: 14px;
-            background: rgba(10, 12, 16, 0.92);
-            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: linear-gradient(180deg, rgba(29, 29, 29, 0.98) 0%, rgba(15, 15, 15, 0.98) 100%);
+            border: 1px solid rgba(255, 153, 0, 0.14);
             box-shadow: 0 22px 40px rgba(0, 0, 0, 0.42);
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
         }
         .ve-stage.video-js .ve-subtitle-panel-header {
             margin-bottom: 10px;
@@ -10107,16 +10190,18 @@ HTML);
             padding: 9px 12px;
             border-radius: 10px;
             color: var(--ve-player-text);
+            transition: background-color .18s ease, transform .18s ease, color .18s ease;
         }
         .ve-stage.video-js .ve-subtitle-option:hover,
         .ve-stage.video-js .ve-subtitle-option:focus-visible {
-            background: rgba(255, 255, 255, 0.08);
+            background: rgba(255, 153, 0, 0.12);
+            transform: translateX(2px);
         }
         .ve-stage.video-js .ve-caption-overlay {
             bottom: 118px;
             padding: 10px 14px;
             border-radius: 12px;
-            background: rgba(4, 5, 8, 0.82);
+            background: rgba(12, 12, 12, 0.88);
             box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
         }
         .ve-stage.video-js .ve-player-state {
@@ -10124,27 +10209,24 @@ HTML);
             bottom: 114px;
             padding: 10px 12px;
             border-radius: 12px;
-            background: rgba(6, 8, 11, 0.86);
+            background: rgba(12, 12, 12, 0.88);
             box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
         }
         @media (max-width: 767px) {
             .ve-stage.video-js .ve-player-overlay-button,
             .ve-stage.video-js .vjs-big-play-button {
-                width: 80px;
-                height: 80px;
+                width: 92px;
+                height: 92px;
             }
             .ve-stage.video-js .ve-player-overlay-glyph,
             .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder {
-                width: 80px;
-                height: 80px;
+                width: 92px;
+                height: 92px;
             }
             .ve-stage.video-js .ve-player-overlay-glyph::before,
             .ve-stage.video-js .vjs-big-play-button .vjs-icon-placeholder::before {
-                margin-top: -19px;
-                margin-left: -6px;
-                border-top-width: 19px;
-                border-bottom-width: 19px;
-                border-left-width: 30px;
+                width: 34px;
+                height: 34px;
             }
             .ve-stage.video-js .vjs-control-bar {
                 left: 10px;
@@ -10153,7 +10235,7 @@ HTML);
                 min-height: 76px;
                 padding: 28px 10px 10px;
                 gap: 4px;
-                border-radius: 16px;
+                border-radius: 18px;
             }
             .ve-stage.video-js .vjs-progress-control {
                 left: 10px;
