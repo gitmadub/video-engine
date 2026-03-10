@@ -1063,46 +1063,103 @@ function ve_admin_request_page(): int
     return max(1, $page);
 }
 
-function ve_admin_backend_subview_catalog(): array
+function ve_admin_backend_view_definitions(): array
 {
     return [
-        'overview-service' => ['section' => 'overview'],
-        'overview-users' => ['section' => 'overview'],
-        'overview-usage' => ['section' => 'overview'],
-        'overview-traffic' => ['section' => 'overview'],
-        'users-directory' => ['section' => 'users'],
-        'users-segments' => ['section' => 'users'],
-        'users-operations' => ['section' => 'users'],
-        'users-profile' => ['section' => 'users'],
-        'users-activity' => ['section' => 'users'],
-        'users-access' => ['section' => 'users'],
-        'users-related' => ['section' => 'users'],
-        'users-charts' => ['section' => 'users'],
-        'users-sessions' => ['section' => 'users'],
-        'users-billing' => ['section' => 'users'],
-        'videos-library' => ['section' => 'videos'],
-        'videos-detail' => ['section' => 'videos'],
-        'remote-uploads-queue' => ['section' => 'remote-uploads'],
-        'remote-uploads-detail' => ['section' => 'remote-uploads'],
-        'dmca-queue' => ['section' => 'dmca'],
-        'dmca-detail' => ['section' => 'dmca'],
-        'dmca-events' => ['section' => 'dmca'],
-        'payouts-queue' => ['section' => 'payouts'],
-        'payouts-detail' => ['section' => 'payouts'],
-        'payouts-transfer' => ['section' => 'payouts'],
-        'domains-directory' => ['section' => 'domains'],
-        'domains-detail' => ['section' => 'domains'],
-        'app-general' => ['section' => 'app'],
-        'app-roles' => ['section' => 'app'],
-        'app-permissions' => ['section' => 'app'],
-        'infra-nodes' => ['section' => 'infrastructure'],
-        'infra-volumes' => ['section' => 'infrastructure'],
-        'infra-endpoints' => ['section' => 'infrastructure'],
-        'infra-delivery' => ['section' => 'infrastructure'],
-        'infra-maintenance' => ['section' => 'infrastructure'],
-        'audit-feed' => ['section' => 'audit'],
-        'audit-detail' => ['section' => 'audit'],
+        'overview' => [
+            ['slug' => 'overview-service', 'label' => 'Service totals', 'icon' => 'fa-th-large', 'kind' => 'sidebar'],
+            ['slug' => 'overview-users', 'label' => 'User trends', 'icon' => 'fa-users', 'kind' => 'sidebar'],
+            ['slug' => 'overview-usage', 'label' => 'Usage trends', 'icon' => 'fa-play-circle', 'kind' => 'sidebar'],
+            ['slug' => 'overview-traffic', 'label' => 'Traffic trends', 'icon' => 'fa-chart-line', 'kind' => 'sidebar'],
+        ],
+        'users' => [
+            ['slug' => 'users-directory', 'label' => 'Directory', 'icon' => 'fa-address-book', 'kind' => 'sidebar'],
+            ['slug' => 'users-segments', 'label' => 'Segments', 'icon' => 'fa-layer-group', 'kind' => 'sidebar'],
+            ['slug' => 'users-operations', 'label' => 'Operations', 'icon' => 'fa-user-clock', 'kind' => 'sidebar'],
+            ['slug' => 'users-profile', 'label' => 'Profile', 'icon' => 'fa-id-card', 'kind' => 'detail'],
+            ['slug' => 'users-activity', 'label' => 'Activity', 'icon' => 'fa-chart-line', 'kind' => 'detail'],
+            ['slug' => 'users-access', 'label' => 'Access & Billing', 'icon' => 'fa-wallet', 'kind' => 'detail'],
+            ['slug' => 'users-related', 'label' => 'Related', 'icon' => 'fa-link', 'kind' => 'detail'],
+        ],
+        'videos' => [
+            ['slug' => 'videos-library', 'label' => 'Library', 'icon' => 'fa-folder-open', 'kind' => 'sidebar'],
+            ['slug' => 'videos-detail', 'label' => 'File detail', 'icon' => 'fa-file-video', 'kind' => 'detail'],
+        ],
+        'remote-uploads' => [
+            ['slug' => 'remote-uploads-queue', 'label' => 'Queue', 'icon' => 'fa-tasks', 'kind' => 'sidebar'],
+            ['slug' => 'remote-uploads-detail', 'label' => 'Job detail', 'icon' => 'fa-cloud-download', 'kind' => 'detail'],
+        ],
+        'dmca' => [
+            ['slug' => 'dmca-queue', 'label' => 'Case queue', 'icon' => 'fa-balance-scale', 'kind' => 'sidebar'],
+            ['slug' => 'dmca-detail', 'label' => 'Case detail', 'icon' => 'fa-file-certificate', 'kind' => 'detail'],
+            ['slug' => 'dmca-events', 'label' => 'Case events', 'icon' => 'fa-stream', 'kind' => 'detail'],
+        ],
+        'payouts' => [
+            ['slug' => 'payouts-queue', 'label' => 'Queue', 'icon' => 'fa-wallet', 'kind' => 'sidebar'],
+            ['slug' => 'payouts-detail', 'label' => 'Request detail', 'icon' => 'fa-receipt', 'kind' => 'detail'],
+            ['slug' => 'payouts-transfer', 'label' => 'Transfer tracking', 'icon' => 'fa-exchange-alt', 'kind' => 'detail'],
+        ],
+        'domains' => [
+            ['slug' => 'domains-directory', 'label' => 'Directory', 'icon' => 'fa-globe', 'kind' => 'sidebar'],
+            ['slug' => 'domains-detail', 'label' => 'Domain detail', 'icon' => 'fa-browser', 'kind' => 'detail'],
+        ],
+        'app' => [
+            ['slug' => 'app-general', 'label' => 'General', 'icon' => 'fa-sliders-h', 'kind' => 'sidebar'],
+            ['slug' => 'app-roles', 'label' => 'Roles', 'icon' => 'fa-user-shield', 'kind' => 'sidebar'],
+            ['slug' => 'app-permissions', 'label' => 'Permissions', 'icon' => 'fa-key', 'kind' => 'sidebar'],
+        ],
+        'infrastructure' => [
+            ['slug' => 'infra-nodes', 'label' => 'Nodes', 'icon' => 'fa-server', 'kind' => 'sidebar'],
+            ['slug' => 'infra-volumes', 'label' => 'Volumes', 'icon' => 'fa-hdd', 'kind' => 'sidebar'],
+            ['slug' => 'infra-endpoints', 'label' => 'Upload endpoints', 'icon' => 'fa-upload', 'kind' => 'sidebar'],
+            ['slug' => 'infra-delivery', 'label' => 'Delivery domains', 'icon' => 'fa-broadcast-tower', 'kind' => 'sidebar'],
+            ['slug' => 'infra-maintenance', 'label' => 'Maintenance', 'icon' => 'fa-tools', 'kind' => 'sidebar'],
+        ],
+        'audit' => [
+            ['slug' => 'audit-feed', 'label' => 'Log feed', 'icon' => 'fa-clipboard-list', 'kind' => 'sidebar'],
+            ['slug' => 'audit-detail', 'label' => 'Audit detail', 'icon' => 'fa-search', 'kind' => 'detail'],
+        ],
     ];
+}
+
+function ve_admin_backend_subview_catalog(): array
+{
+    $catalog = [];
+
+    foreach (ve_admin_backend_view_definitions() as $section => $definitions) {
+        foreach ($definitions as $definition) {
+            $slug = trim((string) ($definition['slug'] ?? ''));
+
+            if ($slug === '') {
+                continue;
+            }
+
+            $catalog[$slug] = [
+                'section' => $section,
+                'kind' => (string) ($definition['kind'] ?? 'sidebar'),
+                'label' => (string) ($definition['label'] ?? $slug),
+                'icon' => (string) ($definition['icon'] ?? 'fa-circle'),
+            ];
+        }
+    }
+
+    $catalog['users-charts'] = ['section' => 'users', 'kind' => 'alias', 'canonical' => 'users-activity'];
+    $catalog['users-sessions'] = ['section' => 'users', 'kind' => 'alias', 'canonical' => 'users-access'];
+    $catalog['users-billing'] = ['section' => 'users', 'kind' => 'alias', 'canonical' => 'users-access'];
+
+    return $catalog;
+}
+
+function ve_admin_canonical_subview(string $slug): string
+{
+    $catalog = ve_admin_backend_subview_catalog();
+    $entry = $catalog[$slug] ?? null;
+
+    if (is_array($entry) && isset($entry['canonical']) && is_string($entry['canonical']) && $entry['canonical'] !== '') {
+        return (string) $entry['canonical'];
+    }
+
+    return $slug;
 }
 
 function ve_admin_default_subview(string $section, int $resourceId = 0): string
@@ -1196,7 +1253,7 @@ function ve_admin_current_subview_slug(?string $section = null): string
     $pathInfo = ve_admin_request_path_info();
     $resourceId = ve_admin_current_resource_id();
     $currentSection = (string) ($pathInfo['section'] ?? 'overview');
-    $subsection = trim((string) ($pathInfo['subsection'] ?? ''));
+    $subsection = ve_admin_canonical_subview(trim((string) ($pathInfo['subsection'] ?? '')));
 
     if ($section !== null && $section !== '' && $section !== $currentSection) {
         return ve_admin_default_subview($section, $resourceId);
@@ -2809,11 +2866,10 @@ HTML;
 function ve_admin_dashboard_shell(
     array $currentUser,
     string $title,
-    string $sidebarIntroHtml,
-    string $menuHtml,
+    string $sidebarHtml,
     string $contentHtml,
     string $widgetsHtml = '',
-    string $extraStyles = ''
+    string $extraHeadHtml = ''
 ): string {
     $username = ve_h((string) ($currentUser['username'] ?? 'videoengine'));
     $runtimeScript = ve_runtime_script_tag();
@@ -2943,9 +2999,6 @@ function ve_admin_dashboard_shell(
             max-width: none !important;
             flex: 1 1 auto;
         }
-        .admin-shell .settings_data > .data {
-            display: block !important;
-        }
         .admin-shell .admin-sidebar-eyebrow {
             display: inline-block;
             color: #ff9900;
@@ -2978,8 +3031,116 @@ function ve_admin_dashboard_shell(
         .admin-shell .settings_menu a.active { background: rgba(255, 153, 0, 0.13); color: #ffb347; }
         .admin-shell .settings_menu a.active span,
         .admin-shell .settings_menu a.active i { color: inherit; }
+        .admin-shell .admin-sidebar-set {
+            display: none;
+        }
+        .admin-shell .admin-sidebar-set.active {
+            display: block;
+        }
         .admin-shell .settings-panel-title { font-size: 1.2857142857rem; font-weight: 700; margin-bottom: 8px; }
         .admin-shell .settings-panel-subtitle { color: #7f7f7f; margin-bottom: 24px; }
+        .admin-shell .admin-panel-stack {
+            width: 100%;
+        }
+        .admin-shell .admin-view-panel {
+            display: none;
+        }
+        .admin-shell .admin-view-panel.is-active {
+            display: block;
+        }
+        .admin-shell .admin-view-panel[data-admin-loaded="0"] [data-admin-content] {
+            visibility: hidden;
+        }
+        .admin-shell .admin-view-panel.is-loading [data-admin-skeleton] {
+            display: block;
+        }
+        .admin-shell .admin-view-panel.is-loading [data-admin-content] {
+            visibility: hidden;
+        }
+        .admin-shell [data-admin-skeleton] {
+            display: none;
+            margin-top: 8px;
+        }
+        .admin-shell .admin-skeleton-row,
+        .admin-shell .admin-skeleton-card,
+        .admin-shell .admin-skeleton-chip {
+            position: relative;
+            overflow: hidden;
+            background: #191919;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .admin-shell .admin-skeleton-row::after,
+        .admin-shell .admin-skeleton-card::after,
+        .admin-shell .admin-skeleton-chip::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            transform: translateX(-100%);
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+            animation: adminShimmer 1.15s linear infinite;
+        }
+        .admin-shell .admin-skeleton-title {
+            width: clamp(180px, 24vw, 320px);
+            height: 16px;
+            margin-bottom: 10px;
+        }
+        .admin-shell .admin-skeleton-copy {
+            width: min(100%, 560px);
+            height: 12px;
+            margin-bottom: 18px;
+        }
+        .admin-shell .admin-skeleton-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        .admin-shell .admin-skeleton-card {
+            min-height: 96px;
+        }
+        .admin-shell .admin-skeleton-table {
+            display: grid;
+            gap: 10px;
+        }
+        .admin-shell .admin-skeleton-row {
+            height: 54px;
+        }
+        .admin-shell .admin-skeleton-chip {
+            width: 128px;
+            height: 36px;
+        }
+        .admin-shell .admin-section-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+        .admin-shell .admin-render-block + .admin-render-block {
+            margin-top: 18px;
+        }
+        .admin-shell .admin-panel-feedback:empty {
+            display: none;
+        }
+        .admin-shell .admin-panel-feedback {
+            margin-bottom: 18px;
+        }
+        .admin-shell .admin-chart-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 240px;
+            background: #171717;
+            border: 1px solid rgba(255,255,255,0.05);
+            color: #8a8a8a;
+        }
+        .admin-shell .admin-chart-frame.is-loading .admin-chart-tooltip {
+            display: none;
+        }
+        @keyframes adminShimmer {
+            100% {
+                transform: translateX(100%);
+            }
+        }
         .admin-shell .settings-table-wrap {
             padding: 0;
             background: #171717;
@@ -3384,7 +3545,7 @@ CSS;
     <link rel="stylesheet" type="text/css" href="{$currentUser['panel_css']}">
     {$runtimeScript}
     {$baseStyles}
-    {$extraStyles}
+    {$extraHeadHtml}
 </head>
 <body>
     <div class="modal fade" id="notifications" tabindex="-1" role="dialog" aria-labelledby="notificationsLabel" aria-hidden="true">
@@ -3447,11 +3608,7 @@ CSS;
         {$impersonationBanner}
         {$flashHtml}
         <div class="d-flex justify-content-between flex-wrap the_box">
-            <div class="sidebar settings-page">
-                {$sidebarIntroHtml}
-                <hr>
-                <div class="menu settings_menu"><ul class="p-0 m-0 mb-4">{$menuHtml}</ul></div>
-            </div>
+            {$sidebarHtml}
             <div class="details settings_data">{$contentHtml}</div>
         </div>
     </div>
@@ -3612,8 +3769,7 @@ HTML;
     ve_html(ve_rewrite_html_paths(ve_admin_dashboard_shell(
         $context,
         'Request payout - Video Engine',
-        $sidebarIntroHtml,
-        $menuHtml,
+        '<div class="sidebar settings-page">' . $sidebarIntroHtml . '<hr><div class="menu settings_menu"><ul class="p-0 m-0 mb-4">' . $menuHtml . '</ul></div></div>',
         $contentHtml
     )));
 }
@@ -3653,53 +3809,7 @@ function ve_admin_backend_sidebar_menu_html(array $actorUser, string $activeSect
 
     $activeSubview = ve_admin_sidebar_active_subview($activeSection, ve_admin_current_subview_slug($activeSection));
     $items = [];
-
-    $definitions = match ($activeSection) {
-        'overview' => [
-            ['label' => 'Service totals', 'icon' => 'fa-th-large', 'slug' => 'overview-service'],
-            ['label' => 'User trends', 'icon' => 'fa-users', 'slug' => 'overview-users'],
-            ['label' => 'Usage trends', 'icon' => 'fa-play-circle', 'slug' => 'overview-usage'],
-            ['label' => 'Traffic trends', 'icon' => 'fa-chart-line', 'slug' => 'overview-traffic'],
-        ],
-        'users' => [
-            ['label' => 'Directory', 'icon' => 'fa-address-book', 'slug' => 'users-directory'],
-            ['label' => 'Segments', 'icon' => 'fa-layer-group', 'slug' => 'users-segments'],
-            ['label' => 'Operations', 'icon' => 'fa-user-clock', 'slug' => 'users-operations'],
-        ],
-        'videos' => [
-            ['label' => 'Library', 'icon' => 'fa-folder-open', 'slug' => 'videos-library'],
-        ],
-        'remote-uploads' => [
-            ['label' => 'Queue', 'icon' => 'fa-tasks', 'slug' => 'remote-uploads-queue'],
-        ],
-        'dmca' => [
-            ['label' => 'Case queue', 'icon' => 'fa-balance-scale', 'slug' => 'dmca-queue'],
-        ],
-        'payouts' => [
-            ['label' => 'Queue', 'icon' => 'fa-wallet', 'slug' => 'payouts-queue'],
-        ],
-        'domains' => [
-            ['label' => 'Directory', 'icon' => 'fa-globe', 'slug' => 'domains-directory'],
-        ],
-        'app' => [
-            ['label' => 'General', 'icon' => 'fa-sliders-h', 'slug' => 'app-general'],
-            ['label' => 'Roles', 'icon' => 'fa-user-shield', 'slug' => 'app-roles'],
-            ['label' => 'Permissions', 'icon' => 'fa-key', 'slug' => 'app-permissions'],
-        ],
-        'infrastructure' => [
-            ['label' => 'Nodes', 'icon' => 'fa-server', 'slug' => 'infra-nodes'],
-            ['label' => 'Volumes', 'icon' => 'fa-hdd', 'slug' => 'infra-volumes'],
-            ['label' => 'Upload endpoints', 'icon' => 'fa-upload', 'slug' => 'infra-endpoints'],
-            ['label' => 'Delivery domains', 'icon' => 'fa-broadcast-tower', 'slug' => 'infra-delivery'],
-            ['label' => 'Maintenance', 'icon' => 'fa-tools', 'slug' => 'infra-maintenance'],
-        ],
-        'audit' => [
-            ['label' => 'Log feed', 'icon' => 'fa-clipboard-list', 'slug' => 'audit-feed'],
-        ],
-        default => [
-            ['label' => 'Section', 'icon' => 'fa-circle', 'slug' => ve_admin_default_subview($activeSection)],
-        ],
-    };
+    $definitions = ve_admin_backend_sidebar_definitions($activeSection);
 
     foreach ($definitions as $definition) {
         $slug = trim((string) ($definition['slug'] ?? ''));
@@ -3711,6 +3821,173 @@ function ve_admin_backend_sidebar_menu_html(array $actorUser, string $activeSect
     }
 
     return implode('', $items);
+}
+
+function ve_admin_backend_sidebar_definitions(string $activeSection): array
+{
+    $definitions = [];
+
+    foreach ((array) (ve_admin_backend_view_definitions()[$activeSection] ?? []) as $definition) {
+        if ((string) ($definition['kind'] ?? 'sidebar') !== 'sidebar') {
+            continue;
+        }
+
+        $definitions[] = $definition;
+    }
+
+    return $definitions !== []
+        ? $definitions
+        : [['label' => 'Section', 'icon' => 'fa-circle', 'slug' => ve_admin_default_subview($activeSection)]];
+}
+
+function ve_admin_backend_allowed_view_definitions(array $actorUser): array
+{
+    $allowedSections = ve_admin_allowed_sections_for_user($actorUser);
+    $allowed = [];
+
+    foreach (ve_admin_backend_view_definitions() as $section => $definitions) {
+        if (!isset($allowedSections[$section])) {
+            continue;
+        }
+
+        $allowed[$section] = $definitions;
+    }
+
+    return $allowed;
+}
+
+function ve_admin_backend_sidebar_set_html(array $actorUser, string $section, bool $isActive = false): string
+{
+    $activeClass = $isActive ? ' active' : '';
+    $sidebarIntroHtml = ve_admin_backend_sidebar_intro_html($actorUser, $section);
+    $menuHtml = ve_admin_backend_sidebar_menu_html($actorUser, $section);
+
+    return '<div class="admin-sidebar-set' . $activeClass . '" data-admin-sidebar-section="' . ve_h($section) . '">'
+        . $sidebarIntroHtml
+        . '<hr>'
+        . '<div class="menu settings_menu"><ul class="p-0 m-0 mb-4">' . $menuHtml . '</ul></div>'
+        . '</div>';
+}
+
+function ve_admin_backend_sidebar_collection_html(array $actorUser, string $activeSection): string
+{
+    $html = '';
+
+    foreach (ve_admin_backend_allowed_view_definitions($actorUser) as $section => $definitions) {
+        unset($definitions);
+        $html .= ve_admin_backend_sidebar_set_html($actorUser, $section, $section === $activeSection);
+    }
+
+    return '<div class="sidebar settings-page" data-admin-sidebar-container="1">' . $html . '</div>';
+}
+
+function ve_admin_backend_panel_shell_html(string $section, string $slug, bool $isActive = false): string
+{
+    $activeClass = $isActive ? ' is-active' : '';
+
+    return <<<HTML
+<section class="data settings-panel admin-view-panel{$activeClass}" data-admin-section="{$section}" data-admin-view="{$slug}" data-admin-loaded="0" data-admin-loading="0">
+    <div data-admin-skeleton="1">
+        <div class="admin-skeleton-row admin-skeleton-title"></div>
+        <div class="admin-skeleton-row admin-skeleton-copy"></div>
+        <div class="admin-skeleton-metrics">
+            <div class="admin-skeleton-card"></div>
+            <div class="admin-skeleton-card"></div>
+            <div class="admin-skeleton-card"></div>
+            <div class="admin-skeleton-card"></div>
+        </div>
+        <div class="admin-skeleton-table">
+            <div class="admin-skeleton-chip"></div>
+            <div class="admin-skeleton-row"></div>
+            <div class="admin-skeleton-row"></div>
+            <div class="admin-skeleton-row"></div>
+        </div>
+    </div>
+    <div data-admin-content="1">
+        <div class="admin-panel-feedback" data-admin-feedback></div>
+        <div class="settings-panel-title" data-admin-title></div>
+        <p class="settings-panel-subtitle" data-admin-subtitle></p>
+        <div class="admin-section-actions" data-admin-actions></div>
+        <div class="admin-panel-metrics" data-admin-metrics></div>
+        <div class="admin-panel-body" data-admin-body></div>
+    </div>
+</section>
+HTML;
+}
+
+function ve_admin_backend_content_shell_html(array $actorUser, string $activeSubview): string
+{
+    $html = '<div class="admin-panel-stack" data-admin-panel-stack="1">';
+
+    foreach (ve_admin_backend_allowed_view_definitions($actorUser) as $section => $definitions) {
+        foreach ($definitions as $definition) {
+            $slug = trim((string) ($definition['slug'] ?? ''));
+
+            if ($slug === '') {
+                continue;
+            }
+
+            $html .= ve_admin_backend_panel_shell_html($section, $slug, $slug === $activeSubview);
+        }
+    }
+
+    return $html . '</div>';
+}
+
+function ve_admin_backend_boot_script_html(array $bootConfig): string
+{
+    $json = json_encode($bootConfig, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+    return is_string($json)
+        ? '<script type="application/json" id="admin-backend-config">' . $json . '</script>'
+        : '';
+}
+
+function ve_admin_backend_boot_config(array $actorUser, string $activeSection, string $activeSubview): array
+{
+    $sections = [];
+    $allowedSections = ve_admin_allowed_sections_for_user($actorUser);
+
+    foreach (ve_admin_backend_allowed_view_definitions($actorUser) as $section => $definitions) {
+        $sidebarViews = [];
+        $detailViews = [];
+
+        foreach ($definitions as $definition) {
+            $entry = [
+                'slug' => (string) ($definition['slug'] ?? ''),
+                'label' => (string) ($definition['label'] ?? ''),
+                'icon' => (string) ($definition['icon'] ?? 'fa-circle'),
+            ];
+
+            if ((string) ($definition['kind'] ?? 'sidebar') === 'detail') {
+                $detailViews[] = $entry;
+                continue;
+            }
+
+            $sidebarViews[] = $entry;
+        }
+
+        $sections[$section] = [
+            'label' => (string) (($allowedSections[$section]['label'] ?? ucfirst($section))),
+            'default_list' => ve_admin_default_subview($section, 0),
+            'default_detail' => ve_admin_default_subview($section, 1),
+            'sidebar_views' => $sidebarViews,
+            'detail_views' => $detailViews,
+        ];
+    }
+
+    return [
+        'base_path' => ve_url('/backend'),
+        'sections' => $sections,
+        'catalog' => ve_admin_backend_subview_catalog(),
+        'current' => [
+            'section' => $activeSection,
+            'subview' => $activeSubview,
+            'resource' => ve_admin_current_resource_token(),
+            'query' => $_GET,
+            'url' => (string) ($_SERVER['REQUEST_URI'] ?? ve_url('/backend')),
+        ],
+    ];
 }
 
 function ve_admin_backend_widgets_html(array $snapshot): string
@@ -7211,9 +7488,1451 @@ function ve_admin_section_content_html(string $section): string
     };
 }
 
+function ve_admin_request_wants_json(): bool
+{
+    $accept = strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? ''));
+    return ve_admin_request_is_partial() || str_contains($accept, 'application/json');
+}
+
+function ve_admin_action_link_payload(string $label, string $href, string $tone = 'secondary', string $icon = '', bool $adminNav = true): array
+{
+    return [
+        'type' => 'link',
+        'label' => $label,
+        'href' => $href,
+        'tone' => $tone,
+        'icon' => $icon,
+        'admin_nav' => $adminNav,
+    ];
+}
+
+function ve_admin_action_form_payload(string $label, string $action, string $tone, array $hidden = [], string $icon = '', string $confirm = ''): array
+{
+    return [
+        'type' => 'form',
+        'label' => $label,
+        'action' => $action,
+        'method' => 'POST',
+        'tone' => $tone,
+        'icon' => $icon,
+        'confirm' => $confirm,
+        'hidden' => $hidden,
+    ];
+}
+
+function ve_admin_form_hidden_inputs(array $pairs): array
+{
+    $fields = [];
+
+    foreach ($pairs as $name => $value) {
+        $fields[] = [
+            'type' => 'hidden',
+            'name' => (string) $name,
+            'value' => is_scalar($value) || $value === null ? (string) $value : '',
+        ];
+    }
+
+    return $fields;
+}
+
+function ve_admin_status_payload(string $status): array
+{
+    $tone = match ($status) {
+        'active', 'ready', 'complete', 'paid', 'healthy', VE_DMCA_NOTICE_STATUS_RESTORED => 'success',
+        'suspended', 'error', 'rejected', 'withdrawn', 'lookup_failed', 'offline', 'disabled' => 'danger',
+        'pending', 'approved', 'pending_dns', VE_DMCA_NOTICE_STATUS_PENDING_REVIEW, VE_DMCA_NOTICE_STATUS_COUNTER_SUBMITTED => 'warning',
+        'downloading', 'importing', 'resolving', 'degraded', 'draining', VE_DMCA_NOTICE_STATUS_CONTENT_DISABLED, VE_DMCA_NOTICE_STATUS_RESPONSE_SUBMITTED => 'info',
+        default => 'secondary',
+    };
+
+    return [
+        'label' => str_replace('_', ' ', $status),
+        'tone' => $tone,
+    ];
+}
+
+function ve_admin_table_pagination_payload(int $page, int $totalRows, int $pageSize, string $subsection, string|int|null $resource = null, array $params = []): array
+{
+    $totalPages = (int) max(1, ceil($totalRows / max(1, $pageSize)));
+
+    if ($totalPages <= 1) {
+        return [];
+    }
+
+    $start = max(1, $page - 2);
+    $end = min($totalPages, $page + 2);
+    $items = [];
+
+    $items[] = [
+        'label' => 'Previous',
+        'href' => ve_admin_subsection_url($subsection, $resource, $params + ['page' => max(1, $page - 1)], false),
+        'disabled' => $page <= 1,
+    ];
+
+    for ($index = $start; $index <= $end; $index++) {
+        $items[] = [
+            'label' => (string) $index,
+            'href' => ve_admin_subsection_url($subsection, $resource, $params + ['page' => $index], false),
+            'active' => $index === $page,
+        ];
+    }
+
+    $items[] = [
+        'label' => 'Next',
+        'href' => ve_admin_subsection_url($subsection, $resource, $params + ['page' => min($totalPages, $page + 1)], false),
+        'disabled' => $page >= $totalPages,
+    ];
+
+    return $items;
+}
+
+function ve_admin_period_switch_payload(array $options, int $currentDays, string $subsection, string|int|null $resource = null): array
+{
+    $items = [];
+
+    foreach ($options as $days) {
+        $items[] = [
+            'label' => (string) $days . ' days',
+            'href' => ve_admin_subsection_url($subsection, $resource, ['days' => $days], false),
+            'tone' => $days === $currentDays ? 'primary' : 'secondary',
+            'admin_nav' => true,
+            'active' => $days === $currentDays,
+        ];
+    }
+
+    return $items;
+}
+
+function ve_admin_chart_payload(array $points, array $seriesDefinitions): array
+{
+    $series = [];
+
+    foreach ($seriesDefinitions as $definition) {
+        $series[] = [
+            'key' => (string) ($definition['key'] ?? ''),
+            'label' => (string) ($definition['label'] ?? ''),
+            'stroke' => (string) ($definition['stroke'] ?? '#ff9900'),
+            'fill' => (string) ($definition['fill'] ?? 'none'),
+            'format' => (string) ($definition['format'] ?? 'number'),
+        ];
+    }
+
+    return [
+        'points' => array_values($points),
+        'series' => $series,
+    ];
+}
+
+function ve_admin_user_detail_subnav_payload(int $userId, string $activeSubview): array
+{
+    $items = [];
+
+    foreach ([
+        ['slug' => 'users-profile', 'label' => 'Profile', 'icon' => 'fa-id-card'],
+        ['slug' => 'users-activity', 'label' => 'Activity', 'icon' => 'fa-chart-line'],
+        ['slug' => 'users-access', 'label' => 'Access & Billing', 'icon' => 'fa-wallet'],
+        ['slug' => 'users-related', 'label' => 'Related', 'icon' => 'fa-link'],
+    ] as $item) {
+        $items[] = [
+            'label' => (string) $item['label'],
+            'href' => ve_admin_subsection_url((string) $item['slug'], $userId, [], true),
+            'icon' => (string) $item['icon'],
+            'active' => $activeSubview === (string) $item['slug'],
+            'admin_nav' => true,
+        ];
+    }
+
+    return $items;
+}
+
+function ve_admin_view_base_payload(string $title, string $subtitle, array $metrics = [], array $actions = [], array $blocks = []): array
+{
+    return [
+        'title' => $title,
+        'subtitle' => $subtitle,
+        'metrics' => $metrics,
+        'actions' => $actions,
+        'blocks' => $blocks,
+    ];
+}
+
+function ve_admin_metric_payload(string $label, string $value, string $meta = ''): array
+{
+    return [
+        'label' => $label,
+        'value' => $value,
+        'meta' => $meta,
+    ];
+}
+
+function ve_admin_text_cell(string $primary, string $secondary = ''): array
+{
+    return [
+        'type' => 'text',
+        'primary' => $primary,
+        'secondary' => $secondary,
+    ];
+}
+
+function ve_admin_link_cell(string $label, string $href, string $secondary = ''): array
+{
+    return [
+        'type' => 'link',
+        'label' => $label,
+        'href' => $href,
+        'secondary' => $secondary,
+        'admin_nav' => str_contains($href, '/backend'),
+    ];
+}
+
+function ve_admin_status_cell(string $status): array
+{
+    return ['type' => 'status'] + ve_admin_status_payload($status);
+}
+
+function ve_admin_code_cell(string $value, string $secondary = ''): array
+{
+    return [
+        'type' => 'code',
+        'primary' => $value,
+        'secondary' => $secondary,
+    ];
+}
+
+function ve_admin_actions_cell(array $actions): array
+{
+    return [
+        'type' => 'actions',
+        'actions' => $actions,
+    ];
+}
+
+function ve_admin_form_field(string $type, string $name, string $label = '', string $value = '', array $extra = []): array
+{
+    return array_merge([
+        'type' => $type,
+        'name' => $name,
+        'label' => $label,
+        'value' => $value,
+    ], $extra);
+}
+
 function ve_admin_request_is_partial(): bool
 {
     return strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+}
+
+function ve_admin_backend_overview_view_payload(string $activeSubview): array
+{
+    $snapshot = ve_admin_overview_snapshot();
+    $rangeDays = ve_admin_request_range_days();
+    $trend = ve_admin_service_trend_snapshot($rangeDays);
+    $points = (array) ($trend['points'] ?? []);
+    $range = (array) ($trend['range'] ?? []);
+    $rangeLabel = gmdate('M j', strtotime(((string) ($range['from'] ?? gmdate('Y-m-d'))) . ' 00:00:00 UTC'))
+        . ' to '
+        . gmdate('M j', strtotime(((string) ($range['to'] ?? gmdate('Y-m-d'))) . ' 00:00:00 UTC'));
+    $storageLabel = ve_human_bytes((int) ($snapshot['videos']['storage_bytes'] ?? 0));
+    $trafficLabel = ve_human_bytes((int) ($trend['traffic_total_bytes'] ?? 0));
+    $premiumTrafficLabel = ve_human_bytes((int) ($trend['premium_traffic_total_bytes'] ?? 0));
+    $revenueLabel = ve_dashboard_format_currency_micro_usd((int) ($trend['earned_total_micro_usd'] ?? 0));
+    $payoutDemandLabel = ve_dashboard_format_currency_micro_usd((int) ($trend['payout_amount_total_micro_usd'] ?? 0));
+    $uploadedBytesLabel = ve_human_bytes((int) ($trend['uploaded_bytes_total'] ?? 0));
+    $chartUsers = ve_admin_chart_payload($points, [
+        ['key' => 'new_users', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'New users', 'format' => 'number'],
+        ['key' => 'active_users', 'stroke' => '#d6d6d6', 'label' => 'Active users', 'format' => 'number'],
+    ]);
+    $chartUsage = ve_admin_chart_payload($points, [
+        ['key' => 'views', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'Views', 'format' => 'number'],
+        ['key' => 'uploads', 'stroke' => '#8f8f8f', 'label' => 'Uploads', 'format' => 'number'],
+    ]);
+    $chartTraffic = ve_admin_chart_payload($points, [
+        ['key' => 'bandwidth_bytes', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'Traffic', 'format' => 'bytes'],
+        ['key' => 'premium_bandwidth_bytes', 'stroke' => '#8ad0ff', 'label' => 'Premium traffic', 'format' => 'bytes'],
+    ]);
+    $metrics = [
+        ve_admin_metric_payload('Accounts', (string) ($snapshot['users']['total_users'] ?? 0), (string) ($snapshot['users']['active_users'] ?? 0) . ' active'),
+        ve_admin_metric_payload('Stored media', $storageLabel, (string) ($snapshot['videos']['ready_videos'] ?? 0) . ' ready files'),
+        ve_admin_metric_payload('Traffic window', $trafficLabel, $rangeDays . ' day window'),
+        ve_admin_metric_payload('Revenue window', $revenueLabel, $payoutDemandLabel . ' payout demand'),
+    ];
+    $period = ve_admin_period_switch_payload([7, 14, 30, 90], $rangeDays, $activeSubview);
+
+    if ($activeSubview === 'overview-users') {
+        return ve_admin_view_base_payload('Daily users', 'Account creation and active uploader behavior across ' . $rangeLabel . '.', $metrics, [], [[
+            'type' => 'chart_cards',
+            'period' => $period,
+            'cards' => [[
+                'title' => 'User movement',
+                'subtitle' => 'New accounts vs active accounts per day.',
+                'chart' => $chartUsers,
+                'legend' => [
+                    ['label' => 'New users avg/day', 'value' => ve_admin_number_label(ve_admin_series_average($points, 'new_users'), 1), 'color' => '#ff9900'],
+                    ['label' => 'Peak active users', 'value' => (string) ve_admin_series_peak($points, 'active_users'), 'color' => '#d6d6d6'],
+                ],
+            ]],
+        ]]);
+    }
+
+    if ($activeSubview === 'overview-usage') {
+        return ve_admin_view_base_payload('Usage trends', 'Views and new uploads served across ' . $rangeLabel . '.', $metrics, [], [[
+            'type' => 'chart_cards',
+            'period' => $period,
+            'cards' => [[
+                'title' => 'Views and uploads',
+                'subtitle' => 'Daily watch demand and files entering the library.',
+                'chart' => $chartUsage,
+                'legend' => [
+                    ['label' => 'Average views/day', 'value' => ve_admin_number_label(ve_admin_series_average($points, 'views'), 0), 'color' => '#ff9900'],
+                    ['label' => 'Uploads in window', 'value' => (string) ve_admin_series_total($points, 'uploads'), 'color' => '#8f8f8f'],
+                ],
+            ]],
+        ]]);
+    }
+
+    if ($activeSubview === 'overview-traffic') {
+        return ve_admin_view_base_payload('Traffic trends', 'Delivery load across ' . $rangeLabel . ', including premium-served bandwidth.', $metrics, [], [[
+            'type' => 'chart_cards',
+            'period' => $period,
+            'cards' => [[
+                'title' => 'Bandwidth served',
+                'subtitle' => 'Combined traffic split by standard and premium delivery.',
+                'chart' => $chartTraffic,
+                'legend' => [
+                    ['label' => 'Traffic total', 'value' => $trafficLabel, 'color' => '#ff9900'],
+                    ['label' => 'Premium total', 'value' => $premiumTrafficLabel, 'color' => '#8ad0ff'],
+                ],
+            ]],
+        ]]);
+    }
+
+    return ve_admin_view_base_payload('Service overview', 'Stable service totals and time-window movement grouped by operator concern.', $metrics, [], [
+        [
+            'type' => 'group_grid',
+            'cards' => [
+                ['title' => 'Accounts', 'description' => 'Current account mix and moderation demand.', 'items' => [
+                    ['label' => 'Total accounts', 'value' => (string) ($snapshot['users']['total_users'] ?? 0)],
+                    ['label' => 'Active accounts', 'value' => (string) ($snapshot['users']['active_users'] ?? 0)],
+                    ['label' => 'Suspended accounts', 'value' => (string) ($snapshot['users']['suspended_users'] ?? 0)],
+                    ['label' => 'Created today', 'value' => (string) ($snapshot['users']['users_today'] ?? 0)],
+                ]],
+                ['title' => 'Content & storage', 'description' => 'Library size and incoming media in the current window.', 'items' => [
+                    ['label' => 'Stored files', 'value' => (string) ($snapshot['videos']['total_videos'] ?? 0)],
+                    ['label' => 'Ready files', 'value' => (string) ($snapshot['videos']['ready_videos'] ?? 0)],
+                    ['label' => 'Stored media', 'value' => $storageLabel],
+                    ['label' => 'Uploaded in window', 'value' => $uploadedBytesLabel],
+                ]],
+                ['title' => 'Traffic & delivery', 'description' => 'Demand and current service pressure on the delivery plane.', 'items' => [
+                    ['label' => 'Views served', 'value' => (string) ($trend['views_total'] ?? 0)],
+                    ['label' => 'Traffic served', 'value' => $trafficLabel],
+                    ['label' => 'Live watchers', 'value' => (string) ($trend['live_watchers'] ?? 0)],
+                    ['label' => 'Active sessions', 'value' => (string) ($trend['active_sessions'] ?? 0)],
+                ]],
+                ['title' => 'Revenue & risk', 'description' => 'Financial and compliance queues that create operator load.', 'items' => [
+                    ['label' => 'Revenue generated', 'value' => $revenueLabel],
+                    ['label' => 'Payout demand', 'value' => $payoutDemandLabel],
+                    ['label' => 'Open payouts', 'value' => (string) ($snapshot['payouts']['open_payouts'] ?? 0)],
+                    ['label' => 'Open DMCA', 'value' => (string) ($snapshot['dmca']['open_notices'] ?? 0)],
+                ]],
+                ['title' => 'Infrastructure', 'description' => 'Capacity currently backing ingest and playback.', 'items' => [
+                    ['label' => 'Storage nodes', 'value' => (string) ($snapshot['infrastructure']['storage_nodes'] ?? 0)],
+                    ['label' => 'Upload endpoints', 'value' => (string) ($snapshot['infrastructure']['active_upload_endpoints'] ?? 0)],
+                    ['label' => 'Delivery domains', 'value' => (string) ($snapshot['infrastructure']['active_delivery_domains'] ?? 0)],
+                    ['label' => 'Premium traffic', 'value' => $premiumTrafficLabel],
+                ]],
+            ],
+        ],
+        [
+            'type' => 'chart_cards',
+            'title' => 'Time-window trends',
+            'subtitle' => 'Rolling activity across ' . $rangeLabel . '.',
+            'period' => $period,
+            'columns' => 2,
+            'cards' => [
+                ['title' => 'Daily users', 'subtitle' => 'New accounts and active accounts.', 'chart' => $chartUsers, 'legend' => [
+                    ['label' => 'Avg new users/day', 'value' => ve_admin_number_label(ve_admin_series_average($points, 'new_users'), 1), 'color' => '#ff9900'],
+                    ['label' => 'Peak active users', 'value' => (string) ve_admin_series_peak($points, 'active_users'), 'color' => '#d6d6d6'],
+                ]],
+                ['title' => 'Daily traffic', 'subtitle' => 'Total and premium-served bandwidth.', 'chart' => $chartTraffic, 'legend' => [
+                    ['label' => 'Traffic total', 'value' => $trafficLabel, 'color' => '#ff9900'],
+                    ['label' => 'Peak daily traffic', 'value' => ve_human_bytes((int) ($trend['traffic_peak_bytes'] ?? 0)), 'color' => '#8ad0ff'],
+                ]],
+            ],
+        ],
+    ]);
+}
+
+function ve_admin_backend_user_detail_view_payload(array $actorUser, string $activeSubview, int $selectedUserId): array
+{
+    if ($selectedUserId <= 0) {
+        return ve_admin_view_base_payload(
+            'User detail',
+            'Select a user from the directory to inspect a full operator profile.',
+            [],
+            [],
+            [['type' => 'notice', 'message' => 'Choose a user from Directory or use a direct /backend/users-profile/{id} route.']]
+        );
+    }
+
+    $profile = ve_admin_user_profile_snapshot($selectedUserId);
+
+    if (!is_array($profile)) {
+        return ve_admin_view_base_payload(
+            'User detail',
+            'The selected user could not be found.',
+            [],
+            [],
+            [['type' => 'notice', 'tone' => 'warning', 'message' => 'The selected user could not be found.']]
+        );
+    }
+
+    $detail = (array) ($profile['detail'] ?? []);
+    $settings = (array) ($profile['settings'] ?? []);
+    $counts = (array) ($profile['counts'] ?? []);
+    $reports = (array) ($profile['reports'] ?? []);
+    $apiUsage = (array) ($profile['api_usage'] ?? []);
+    $token = ve_csrf_token();
+    $returnTo = ve_admin_subsection_url($activeSubview, $selectedUserId, [], true);
+    $actionUrl = ve_admin_subsection_url('users-profile', $selectedUserId, [], false);
+    $actions = [];
+
+    if (ve_user_has_permission($actorUser, 'admin.users.impersonate')) {
+        $actions[] = ve_admin_action_form_payload('Impersonate user', $actionUrl, 'secondary', ve_admin_form_hidden_inputs([
+            'token' => $token,
+            'action' => 'impersonate_user',
+            'user_id' => $selectedUserId,
+            'return_to' => $returnTo,
+        ]), 'fa-user-secret');
+    }
+
+    if (ve_user_has_permission($actorUser, 'admin.users.delete') && (int) ($actorUser['id'] ?? 0) !== $selectedUserId) {
+        $actions[] = ve_admin_action_form_payload('Delete user', $actionUrl, 'danger', ve_admin_form_hidden_inputs([
+            'token' => $token,
+            'action' => 'delete_user',
+            'user_id' => $selectedUserId,
+            'return_to' => ve_admin_subsection_url('users-directory'),
+        ]), 'fa-trash', 'Delete this user permanently?');
+    }
+
+    $metrics = [
+        ve_admin_metric_payload('User ID', '#' . $selectedUserId, (string) ($detail['email'] ?? '')),
+        ve_admin_metric_payload('Plan', (string) ($detail['plan_code'] ?? 'free'), ve_admin_role_label((string) ($detail['primary_role_code'] ?? 'user'))),
+        ve_admin_metric_payload('Balance', ve_dashboard_format_currency_micro_usd((int) ($detail['balance_micro_usd'] ?? 0)), (string) ($counts['payout_open_total'] ?? 0) . ' open payouts'),
+        ve_admin_metric_payload('Storage', ve_human_bytes((int) ($profile['storage_bytes'] ?? 0)), (string) ($counts['videos_total'] ?? 0) . ' files'),
+    ];
+
+    if ($activeSubview === 'users-activity') {
+        $chartPoints = array_values((array) ($reports['chart'] ?? []));
+
+        return ve_admin_view_base_payload('User activity', 'Traffic, views, and earnings for ' . (string) ($detail['username'] ?? 'user') . '.', $metrics, $actions, [
+            ['type' => 'subnav', 'items' => ve_admin_user_detail_subnav_payload($selectedUserId, $activeSubview)],
+            [
+                'type' => 'chart_cards',
+                'cards' => [[
+                    'title' => 'Daily performance',
+                    'subtitle' => 'Views, traffic, and direct earnings.',
+                    'chart' => ve_admin_chart_payload($chartPoints, [
+                        ['key' => 'views', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'Views', 'format' => 'number'],
+                        ['key' => 'bandwidth_bytes', 'stroke' => '#8ad0ff', 'label' => 'Traffic', 'format' => 'bytes'],
+                        ['key' => 'earned_micro_usd', 'stroke' => '#d6d6d6', 'label' => 'Earnings', 'format' => 'currency'],
+                    ]),
+                    'legend' => [
+                        ['label' => 'Views', 'value' => (string) (($reports['totals']['views'] ?? 0)), 'color' => '#ff9900'],
+                        ['label' => 'Traffic', 'value' => (string) (($reports['totals']['traffic'] ?? '0 B')), 'color' => '#8ad0ff'],
+                        ['label' => 'Profit', 'value' => (string) (($reports['totals']['profit'] ?? '$0.00')), 'color' => '#d6d6d6'],
+                    ],
+                ]],
+            ],
+        ]);
+    }
+
+    if ($activeSubview === 'users-access') {
+        $ledgerRows = [];
+        foreach ((array) ($profile['ledger_entries'] ?? []) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $ledgerRows[] = ['cells' => [
+                ve_admin_text_cell((string) ($row['entry_type'] ?? 'entry')),
+                ve_admin_text_cell(ve_dashboard_format_currency_micro_usd((int) ($row['amount_micro_usd'] ?? 0))),
+                ve_admin_text_cell(ve_format_datetime_label((string) ($row['created_at'] ?? ''))),
+            ]];
+        }
+
+        return ve_admin_view_base_payload('Access & billing', 'API state, payment destination, and recent balance ledger entries.', $metrics, $actions, [
+            ['type' => 'subnav', 'items' => ve_admin_user_detail_subnav_payload($selectedUserId, $activeSubview)],
+            ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                ['title' => 'API access', 'items' => [
+                    ['label' => 'Status', 'value' => (string) ($apiUsage['status_label'] ?? 'Unknown')],
+                    ['label' => 'Requests / hour', 'value' => (string) (($apiUsage['limits']['requests_per_hour'] ?? 0))],
+                    ['label' => 'Requests / day', 'value' => (string) (($apiUsage['limits']['requests_per_day'] ?? 0))],
+                    ['label' => 'Last used', 'value' => (string) (($apiUsage['usage']['last_used_at'] ?? 'Never'))],
+                ]],
+                ['title' => 'Billing settings', 'items' => [
+                    ['label' => 'Payout method', 'value' => (string) ($settings['payment_method'] ?? 'Not configured')],
+                    ['label' => 'Destination', 'value' => ve_admin_mask_payout_destination((string) ($settings['payment_id'] ?? '')) ?: 'Not configured'],
+                    ['label' => 'Open payouts', 'value' => (string) ($counts['payout_open_total'] ?? 0)],
+                    ['label' => 'Total payout requests', 'value' => (string) ($counts['payout_total'] ?? 0)],
+                ]],
+                ['title' => 'Recent balance ledger', 'table' => [
+                    'columns' => ['Type', 'Amount', 'Created'],
+                    'rows' => $ledgerRows,
+                    'empty' => 'No recent balance ledger entries.',
+                ]],
+            ]],
+        ]);
+    }
+
+    if ($activeSubview === 'users-related') {
+        $recentVideos = [];
+        $recentRemote = [];
+        $recentDomains = [];
+
+        foreach ((array) ($detail['recent_videos'] ?? []) as $row) {
+            if (is_array($row)) {
+                $recentVideos[] = ['primary' => (string) ($row['title'] ?? $row['public_id'] ?? 'Video'), 'secondary' => (string) ($row['status'] ?? 'unknown') . ' / ' . ve_format_datetime_label((string) ($row['created_at'] ?? '')), 'href' => ve_admin_subsection_url('videos-detail', (int) ($row['id'] ?? 0))];
+            }
+        }
+
+        foreach ((array) ($detail['recent_remote_uploads'] ?? []) as $row) {
+            if (is_array($row)) {
+                $recentRemote[] = ['primary' => (string) ($row['source_url'] ?? 'Remote upload'), 'secondary' => (string) ($row['status'] ?? 'unknown') . ' / ' . ve_format_datetime_label((string) ($row['created_at'] ?? '')), 'href' => ve_admin_subsection_url('remote-uploads-detail', (int) ($row['id'] ?? 0))];
+            }
+        }
+
+        foreach ((array) ($detail['custom_domains'] ?? []) as $row) {
+            if (is_array($row)) {
+                $recentDomains[] = ['primary' => (string) ($row['domain'] ?? 'Domain'), 'secondary' => (string) ($row['status'] ?? 'unknown'), 'href' => ve_admin_subsection_url('domains-detail', (int) ($row['id'] ?? 0))];
+            }
+        }
+
+        return ve_admin_view_base_payload('Related records', 'Recent files, remote uploads, domains, and account-linked records.', $metrics, $actions, [
+            ['type' => 'subnav', 'items' => ve_admin_user_detail_subnav_payload($selectedUserId, $activeSubview)],
+            ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                ['title' => 'Recent files', 'list' => $recentVideos],
+                ['title' => 'Recent remote uploads', 'list' => $recentRemote],
+                ['title' => 'Custom domains', 'list' => $recentDomains],
+            ]],
+        ]);
+    }
+
+    $roleOptions = [];
+    foreach (ve_admin_role_catalog() as $code => $meta) {
+        $roleOptions[] = ['value' => $code, 'label' => (string) ($meta['label'] ?? $code)];
+    }
+
+    $paymentMethodOptions = [];
+    foreach (ve_allowed_payment_methods() as $method) {
+        $paymentMethodOptions[] = ['value' => $method, 'label' => $method];
+    }
+
+    return ve_admin_view_base_payload('User profile', 'Full operator profile for ' . (string) ($detail['username'] ?? 'user') . '.', $metrics, $actions, [
+        ['type' => 'subnav', 'items' => ve_admin_user_detail_subnav_payload($selectedUserId, $activeSubview)],
+        ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+            ['title' => 'Identity', 'items' => [
+                ['label' => 'Username', 'value' => (string) ($detail['username'] ?? '')],
+                ['label' => 'Email', 'value' => (string) ($detail['email'] ?? '')],
+                ['label' => 'Status', 'value' => (string) ($detail['status'] ?? 'active')],
+                ['label' => 'Premium until', 'value' => ve_format_datetime_label((string) ($detail['premium_until'] ?? ''), 'Not set')],
+            ]],
+            ['title' => 'Service footprint', 'items' => [
+                ['label' => 'Files', 'value' => (string) ($counts['videos_total'] ?? 0)],
+                ['label' => 'Remote uploads', 'value' => (string) ($counts['remote_total'] ?? 0)],
+                ['label' => 'DMCA notices', 'value' => (string) ($counts['dmca_total'] ?? 0)],
+                ['label' => 'Active domains', 'value' => (string) ($counts['active_domain_total'] ?? 0)],
+            ]],
+            ['title' => 'Update account', 'form' => [
+                'action' => $actionUrl,
+                'method' => 'POST',
+                'hidden' => ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'save_user', 'user_id' => $selectedUserId, 'return_to' => $returnTo]),
+                'fields' => [
+                    ve_admin_form_field('select', 'status', 'Status', (string) ($detail['status'] ?? 'active'), ['options' => [['value' => 'active', 'label' => 'Active'], ['value' => 'suspended', 'label' => 'Suspended']]]),
+                    ve_admin_form_field('select', 'role_code', 'Role', (string) ($detail['primary_role_code'] ?? 'user'), ['options' => $roleOptions]),
+                    ve_admin_form_field('text', 'plan_code', 'Plan code', (string) ($detail['plan_code'] ?? 'free')),
+                    ve_admin_form_field('text', 'premium_until', 'Premium until (UTC)', (string) ($detail['premium_until'] ?? '')),
+                    ve_admin_form_field('select', 'payment_method', 'Payout method', (string) ($settings['payment_method'] ?? 'Webmoney'), ['options' => $paymentMethodOptions]),
+                    ve_admin_form_field('text', 'payment_id', 'Payout destination', (string) ($settings['payment_id'] ?? '')),
+                    ve_admin_form_field('checkbox', 'api_enabled', 'API enabled', ((int) ($settings['api_enabled'] ?? 1)) === 1 ? '1' : '0', ['checked' => ((int) ($settings['api_enabled'] ?? 1)) === 1]),
+                ],
+                'actions' => [['type' => 'submit', 'label' => 'Save user', 'tone' => 'primary']],
+            ]],
+        ]],
+    ]);
+}
+
+function ve_admin_backend_users_view_payload(array $actorUser, string $activeSubview): array
+{
+    $query = trim((string) ($_GET['q'] ?? ''));
+    $status = trim((string) ($_GET['status'] ?? ''));
+    $roleCode = trim((string) ($_GET['role'] ?? ''));
+    $page = ve_admin_request_page();
+    $selectedUserId = ve_admin_current_resource_id();
+    $list = ve_admin_list_users($query, $status, $roleCode, $page);
+
+    if (in_array($activeSubview, ['users-profile', 'users-activity', 'users-access', 'users-related'], true)) {
+        return ve_admin_backend_user_detail_view_payload($actorUser, $activeSubview, $selectedUserId);
+    }
+
+    if ($activeSubview === 'users-segments') {
+        $snapshot = ve_admin_user_segments_snapshot();
+        $summary = (array) ($snapshot['summary'] ?? []);
+        $newUsers = [];
+        $leaders = [];
+
+        foreach ((array) ($snapshot['new_users'] ?? []) as $row) {
+            if (is_array($row)) {
+                $newUsers[] = ['primary' => (string) ($row['username'] ?? ''), 'secondary' => (string) ($row['email'] ?? '') . ' / ' . ve_format_datetime_label((string) ($row['created_at'] ?? '')), 'href' => ve_admin_subsection_url('users-profile', (int) ($row['id'] ?? 0))];
+            }
+        }
+
+        foreach ((array) ($snapshot['storage_leaders'] ?? []) as $row) {
+            if (is_array($row)) {
+                $leaders[] = ['primary' => (string) ($row['username'] ?? ''), 'secondary' => (string) ($row['video_total'] ?? 0) . ' files / ' . ve_human_bytes((int) ($row['storage_bytes'] ?? 0)), 'href' => ve_admin_subsection_url('users-profile', (int) ($row['id'] ?? 0))];
+            }
+        }
+
+        return ve_admin_view_base_payload('User segments', 'Stable slices of the account base that help you understand who is using the service and where support load is likely to land.', [
+            ve_admin_metric_payload('Total accounts', (string) ($summary['total_users'] ?? 0)),
+            ve_admin_metric_payload('Paid-plan users', (string) ($summary['paid_plan_users'] ?? 0)),
+            ve_admin_metric_payload('Branded users', (string) ($summary['branded_users'] ?? 0)),
+            ve_admin_metric_payload('25+ file libraries', (string) ($summary['library_users'] ?? 0)),
+        ], [], [
+            ['type' => 'group_grid', 'cards' => [
+                ['title' => 'Account state', 'description' => 'Core account health and moderation load.', 'items' => [
+                    ['label' => 'Total accounts', 'value' => (string) ($summary['total_users'] ?? 0)],
+                    ['label' => 'Active accounts', 'value' => (string) ($summary['active_users'] ?? 0)],
+                    ['label' => 'Suspended accounts', 'value' => (string) ($summary['suspended_users'] ?? 0)],
+                    ['label' => 'Joined last 30 days', 'value' => (string) ($summary['new_last_30_days'] ?? 0)],
+                ]],
+                ['title' => 'Commercial footprint', 'description' => 'Accounts most likely to need billing and API support.', 'items' => [
+                    ['label' => 'Paid-plan users', 'value' => (string) ($summary['paid_plan_users'] ?? 0)],
+                    ['label' => 'Premium-active users', 'value' => (string) ($summary['premium_users'] ?? 0)],
+                    ['label' => 'API-enabled users', 'value' => (string) ($summary['api_enabled_users'] ?? 0)],
+                    ['label' => 'Branded users', 'value' => (string) ($summary['branded_users'] ?? 0)],
+                ]],
+            ]],
+            ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                ['title' => 'Newest accounts', 'list' => $newUsers],
+                ['title' => 'Largest libraries', 'list' => $leaders],
+            ]],
+        ]);
+    }
+
+    if ($activeSubview === 'users-operations') {
+        $days = ve_admin_request_range_days(30);
+        $snapshot = ve_admin_user_operations_snapshot($days);
+        $recentLogins = [];
+        $topTraffic = [];
+        $apiLeaders = [];
+
+        foreach ((array) ($snapshot['recent_logins'] ?? []) as $row) {
+            if (is_array($row)) {
+                $recentLogins[] = ['cells' => [ve_admin_link_cell((string) ($row['username'] ?? ''), ve_admin_subsection_url('users-profile', (int) ($row['id'] ?? 0)), (string) ($row['email'] ?? '')), ve_admin_text_cell(ve_format_datetime_label((string) ($row['last_login_at'] ?? '')))]];
+            }
+        }
+
+        foreach ((array) ($snapshot['top_traffic'] ?? []) as $row) {
+            if (is_array($row)) {
+                $topTraffic[] = ['cells' => [ve_admin_link_cell((string) ($row['username'] ?? ''), ve_admin_subsection_url('users-profile', (int) ($row['id'] ?? 0))), ve_admin_text_cell((string) ($row['views_total'] ?? 0)), ve_admin_text_cell(ve_human_bytes((int) ($row['bandwidth_total'] ?? 0))), ve_admin_text_cell(ve_dashboard_format_currency_micro_usd((int) ($row['earnings_total'] ?? 0)))]];
+            }
+        }
+
+        foreach ((array) ($snapshot['api_leaders'] ?? []) as $row) {
+            if (is_array($row)) {
+                $apiLeaders[] = ['cells' => [ve_admin_link_cell((string) ($row['username'] ?? ''), ve_admin_subsection_url('users-profile', (int) ($row['id'] ?? 0))), ve_admin_text_cell(ve_format_datetime_label((string) ($row['api_key_last_used_at'] ?? ''), 'Never')), ve_admin_text_cell((string) ($row['api_requests_per_hour'] ?? 250) . '/hr'), ve_admin_text_cell((string) ($row['api_requests_per_day'] ?? 5000) . '/day')]];
+            }
+        }
+
+        return ve_admin_view_base_payload('User operations', 'Recent logins, traffic leaders, and API-heavy accounts for the selected time window.', [
+            ve_admin_metric_payload('Lookback window', (string) $days . ' days'),
+            ve_admin_metric_payload('Recent logins', (string) count($recentLogins)),
+            ve_admin_metric_payload('Traffic leaders', (string) count($topTraffic)),
+            ve_admin_metric_payload('API leaders', (string) count($apiLeaders)),
+        ], [], [
+            ['type' => 'chart_cards', 'period' => ve_admin_period_switch_payload([7, 14, 30, 90], $days, 'users-operations'), 'cards' => []],
+            ['type' => 'cards', 'layout' => 'stack', 'cards' => [
+                ['title' => 'Recent logins', 'table' => ['columns' => ['User', 'Last login'], 'rows' => $recentLogins, 'empty' => 'No recent logins recorded.']],
+                ['title' => 'Top traffic accounts', 'table' => ['columns' => ['User', 'Views', 'Bandwidth', 'Earnings'], 'rows' => $topTraffic, 'empty' => 'No user traffic recorded in this window.']],
+                ['title' => 'API-heavy accounts', 'table' => ['columns' => ['User', 'Last used', 'Hourly limit', 'Daily limit'], 'rows' => $apiLeaders, 'empty' => 'No API usage recorded yet.']],
+            ]],
+        ]);
+    }
+
+    $rows = [];
+
+    foreach ((array) ($list['rows'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $userId = (int) ($row['id'] ?? 0);
+        $detailUrl = ve_admin_subsection_url('users-profile', $userId, [], true);
+        $rows[] = ['cells' => [
+            ve_admin_link_cell('#' . $userId, $detailUrl),
+            ve_admin_link_cell((string) ($row['username'] ?? ''), $detailUrl, (string) ($row['email'] ?? '')),
+            ve_admin_status_cell((string) ($row['status'] ?? 'active')),
+            ve_admin_text_cell(ve_admin_role_label((string) ($row['role_code'] ?? 'user'))),
+            ve_admin_text_cell((string) ($row['plan_code'] ?? 'free')),
+            ve_admin_text_cell((string) ($row['video_count'] ?? 0)),
+            ve_admin_text_cell(ve_human_bytes((int) ($row['storage_bytes'] ?? 0))),
+            ve_admin_text_cell(ve_format_datetime_label((string) ($row['last_login_at'] ?? ''), 'Never')),
+        ]];
+    }
+
+    $roleOptions = [['value' => '', 'label' => 'All roles']];
+    foreach (ve_admin_role_catalog() as $code => $meta) {
+        $roleOptions[] = ['value' => (string) $code, 'label' => (string) ($meta['label'] ?? $code)];
+    }
+
+    return ve_admin_view_base_payload('User directory', 'Search accounts, isolate moderation cases, and jump into the full operator profile for a selected user.', [
+        ve_admin_metric_payload('Visible users', (string) (int) ($list['total'] ?? 0)),
+        ve_admin_metric_payload('Current page', (string) (int) ($list['page'] ?? 1), 'Page size ' . (string) (int) ($list['page_size'] ?? ve_admin_page_size())),
+        ve_admin_metric_payload('Status filter', $status !== '' ? ucfirst($status) : 'All'),
+        ve_admin_metric_payload('Role filter', $roleCode !== '' ? ve_admin_role_label($roleCode) : 'All roles'),
+    ], [], [
+        ['type' => 'toolbar', 'action' => ve_admin_subsection_url('users-directory'), 'method' => 'GET', 'items' => [
+            ve_admin_form_field('text', 'q', 'Search', $query, ['placeholder' => 'Username, email, or id']),
+            ve_admin_form_field('select', 'status', 'Status', $status, ['options' => [['value' => '', 'label' => 'All statuses'], ['value' => 'active', 'label' => 'Active'], ['value' => 'suspended', 'label' => 'Suspended']]]),
+            ve_admin_form_field('select', 'role', 'Role', $roleCode, ['options' => $roleOptions]),
+            ['type' => 'submit', 'label' => 'Apply filters', 'tone' => 'primary'],
+            ['type' => 'link', 'label' => 'Reset', 'tone' => 'secondary', 'href' => ve_admin_subsection_url('users-directory'), 'admin_nav' => true],
+        ]],
+        ['type' => 'table', 'columns' => ['ID', 'User', 'Status', 'Role', 'Plan', 'Files', 'Storage', 'Last login'], 'rows' => $rows, 'empty' => 'No users matched the current filters.', 'pagination' => ve_admin_table_pagination_payload((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()), 'users-directory', null, ['q' => $query, 'status' => $status, 'role' => $roleCode])],
+    ]);
+}
+
+function ve_admin_backend_videos_view_payload(string $activeSubview): array
+{
+    $query = trim((string) ($_GET['q'] ?? ''));
+    $status = trim((string) ($_GET['status'] ?? ''));
+    $page = ve_admin_request_page();
+    $selectedVideoId = ve_admin_current_resource_id();
+    $list = ve_admin_list_videos($query, $status, 0, $page);
+
+    if ($activeSubview === 'videos-detail') {
+        $detail = $selectedVideoId > 0 ? ve_admin_video_detail($selectedVideoId) : null;
+
+        if (!is_array($detail)) {
+            return ve_admin_view_base_payload('File detail', 'Select a file from the library to inspect ownership and moderation state.', [], [], [['type' => 'notice', 'message' => 'Choose a file from the library to inspect it.']]);
+        }
+
+        $token = ve_csrf_token();
+        $actionUrl = ve_admin_subsection_url('videos-detail', $selectedVideoId, [], false);
+        $toggleAction = ((int) ($detail['is_public'] ?? 0)) === 1 ? 'make_video_private' : 'make_video_public';
+        $toggleLabel = ((int) ($detail['is_public'] ?? 0)) === 1 ? 'Make private' : 'Make public';
+        $actions = [
+            ve_admin_action_form_payload($toggleLabel, $actionUrl, 'secondary', ve_admin_form_hidden_inputs([
+                'token' => $token,
+                'action' => $toggleAction,
+                'video_id' => $selectedVideoId,
+                'return_to' => ve_admin_subsection_url('videos-detail', $selectedVideoId, [], true),
+            ]), 'fa-eye'),
+            ve_admin_action_form_payload('Delete file', $actionUrl, 'danger', ve_admin_form_hidden_inputs([
+                'token' => $token,
+                'action' => 'delete_video',
+                'video_id' => $selectedVideoId,
+                'return_to' => ve_admin_subsection_url('videos-library'),
+            ]), 'fa-trash', 'Delete this file permanently?'),
+        ];
+
+        return ve_admin_view_base_payload('File detail', 'Ownership, storage footprint, and moderation actions for the selected file.', [
+            ve_admin_metric_payload('Video ID', '#' . $selectedVideoId, (string) ($detail['public_id'] ?? '')),
+            ve_admin_metric_payload('Owner', (string) ($detail['username'] ?? ''), 'User #' . (string) ($detail['user_id'] ?? 0)),
+            ve_admin_metric_payload('Status', (string) ($detail['status'] ?? 'unknown')),
+            ve_admin_metric_payload('Size', ve_human_bytes((int) (($detail['processed_size_bytes'] ?? 0) > 0 ? $detail['processed_size_bytes'] : ($detail['original_size_bytes'] ?? 0)))),
+        ], $actions, [
+            ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                ['title' => 'File facts', 'items' => [
+                    ['label' => 'Title', 'value' => (string) ($detail['title'] ?? 'Untitled')],
+                    ['label' => 'Public ID', 'value' => (string) ($detail['public_id'] ?? '')],
+                    ['label' => 'Status', 'value' => (string) ($detail['status'] ?? 'unknown')],
+                    ['label' => 'Visibility', 'value' => ((int) ($detail['is_public'] ?? 0)) === 1 ? 'Public' : 'Private'],
+                    ['label' => 'Created', 'value' => ve_format_datetime_label((string) ($detail['created_at'] ?? ''))],
+                ]],
+                ['title' => 'Storage & delivery', 'items' => [
+                    ['label' => 'Original size', 'value' => ve_human_bytes((int) ($detail['original_size_bytes'] ?? 0))],
+                    ['label' => 'Processed size', 'value' => ve_human_bytes((int) ($detail['processed_size_bytes'] ?? 0))],
+                    ['label' => 'Folder', 'value' => (string) ($detail['folder_id'] ?? 0)],
+                    ['label' => 'Owner', 'value' => (string) ($detail['username'] ?? '')],
+                ]],
+            ]],
+        ]);
+    }
+
+    $rows = [];
+    foreach ((array) ($list['rows'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $videoId = (int) ($row['id'] ?? 0);
+        $detailUrl = ve_admin_subsection_url('videos-detail', $videoId, [], true);
+        $rows[] = ['cells' => [
+            ve_admin_link_cell('#' . $videoId, $detailUrl),
+            ve_admin_link_cell((string) ($row['title'] ?? $row['public_id'] ?? 'Untitled'), $detailUrl, (string) ($row['public_id'] ?? '')),
+            ve_admin_link_cell((string) ($row['username'] ?? ''), ve_admin_subsection_url('users-profile', (int) ($row['user_id'] ?? 0))),
+            ve_admin_status_cell((string) ($row['status'] ?? 'unknown')),
+            ve_admin_text_cell(ve_human_bytes((int) (($row['processed_size_bytes'] ?? 0) > 0 ? $row['processed_size_bytes'] : ($row['original_size_bytes'] ?? 0)))),
+            ve_admin_text_cell(((int) ($row['is_public'] ?? 0)) === 1 ? 'Public' : 'Private'),
+        ]];
+    }
+
+    return ve_admin_view_base_payload('Files and videos', 'Moderate stored content with direct access to file ownership and moderation actions.', [
+        ve_admin_metric_payload('Visible files', (string) (int) ($list['total'] ?? 0)),
+        ve_admin_metric_payload('Current page', (string) (int) ($list['page'] ?? 1)),
+        ve_admin_metric_payload('Status filter', $status !== '' ? $status : 'All'),
+    ], [], [
+        ['type' => 'toolbar', 'action' => ve_admin_subsection_url('videos-library'), 'method' => 'GET', 'items' => [
+            ve_admin_form_field('text', 'q', 'Search', $query, ['placeholder' => 'Title, public id, or owner']),
+            ve_admin_form_field('text', 'status', 'Status', $status, ['placeholder' => 'ready, queued, processing']),
+            ['type' => 'submit', 'label' => 'Apply filters', 'tone' => 'primary'],
+            ['type' => 'link', 'label' => 'Reset', 'tone' => 'secondary', 'href' => ve_admin_subsection_url('videos-library'), 'admin_nav' => true],
+        ]],
+        ['type' => 'table', 'columns' => ['ID', 'File', 'Owner', 'Status', 'Size', 'Access'], 'rows' => $rows, 'empty' => 'No files matched the current filters.', 'pagination' => ve_admin_table_pagination_payload((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()), 'videos-library', null, ['q' => $query, 'status' => $status])],
+    ]);
+}
+
+function ve_admin_backend_remote_uploads_view_payload(string $activeSubview): array
+{
+    $query = trim((string) ($_GET['q'] ?? ''));
+    $status = trim((string) ($_GET['status'] ?? ''));
+    $page = ve_admin_request_page();
+    $selectedJobId = ve_admin_current_resource_id();
+    $list = ve_admin_list_remote_uploads($query, $status, 0, $page);
+
+    if ($activeSubview === 'remote-uploads-detail') {
+        $detail = $selectedJobId > 0 ? ve_admin_remote_upload_detail($selectedJobId) : null;
+
+        if (!is_array($detail)) {
+            return ve_admin_view_base_payload('Remote upload detail', 'Select a remote upload job to inspect source and retry state.', [], [], [['type' => 'notice', 'message' => 'Choose a remote upload job from the queue.']]);
+        }
+
+        $token = ve_csrf_token();
+        $actionUrl = ve_admin_subsection_url('remote-uploads-detail', $selectedJobId, [], false);
+        $actions = [
+            ve_admin_action_form_payload('Retry job', $actionUrl, 'primary', ve_admin_form_hidden_inputs([
+                'token' => $token,
+                'action' => 'retry_remote_upload',
+                'job_id' => $selectedJobId,
+                'return_to' => ve_admin_subsection_url('remote-uploads-detail', $selectedJobId, [], true),
+            ]), 'fa-redo'),
+            ve_admin_action_form_payload('Delete job', $actionUrl, 'danger', ve_admin_form_hidden_inputs([
+                'token' => $token,
+                'action' => 'delete_remote_upload',
+                'job_id' => $selectedJobId,
+                'return_to' => ve_admin_subsection_url('remote-uploads-queue'),
+            ]), 'fa-trash', 'Delete this remote upload job?'),
+        ];
+
+        return ve_admin_view_base_payload('Remote upload detail', 'Source reliability, progress, and resolution information for the selected job.', [
+            ve_admin_metric_payload('Job ID', '#' . $selectedJobId),
+            ve_admin_metric_payload('Status', (string) ($detail['status'] ?? 'unknown')),
+            ve_admin_metric_payload('Owner', (string) ($detail['username'] ?? ''), 'User #' . (string) ($detail['user_id'] ?? 0)),
+            ve_admin_metric_payload('Progress', number_format((float) ($detail['progress_percent'] ?? 0), 1) . '%'),
+        ], $actions, [
+            ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                ['title' => 'Job facts', 'items' => [
+                    ['label' => 'Source URL', 'value' => (string) ($detail['source_url'] ?? '')],
+                    ['label' => 'Resolved URL', 'value' => (string) ($detail['resolved_url'] ?? 'Not resolved')],
+                    ['label' => 'Status message', 'value' => (string) ($detail['status_message'] ?? '')],
+                    ['label' => 'Error message', 'value' => (string) ($detail['error_message'] ?? 'None')],
+                ]],
+                ['title' => 'Transfer state', 'items' => [
+                    ['label' => 'Bytes downloaded', 'value' => ve_human_bytes((int) ($detail['bytes_downloaded'] ?? 0))],
+                    ['label' => 'Bytes total', 'value' => ve_human_bytes((int) ($detail['bytes_total'] ?? 0))],
+                    ['label' => 'Speed', 'value' => ve_human_bytes((int) ($detail['speed_bytes_per_second'] ?? 0)) . '/s'],
+                    ['label' => 'Video', 'value' => (string) ($detail['video_public_id'] ?? 'Not attached')],
+                ]],
+            ]],
+        ]);
+    }
+
+    $rows = [];
+    foreach ((array) ($list['rows'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $jobId = (int) ($row['id'] ?? 0);
+        $detailUrl = ve_admin_subsection_url('remote-uploads-detail', $jobId, [], true);
+        $rows[] = ['cells' => [
+            ve_admin_link_cell('#' . $jobId, $detailUrl),
+            ve_admin_link_cell((string) ($row['username'] ?? ''), ve_admin_subsection_url('users-profile', (int) ($row['user_id'] ?? 0))),
+            ve_admin_text_cell((string) ($row['source_url'] ?? '')),
+            ve_admin_status_cell((string) ($row['status'] ?? 'unknown')),
+            ve_admin_text_cell(number_format((float) ($row['progress_percent'] ?? 0), 1) . '%'),
+            ve_admin_text_cell((string) ($row['video_public_id'] ?? '')),
+        ]];
+    }
+
+    return ve_admin_view_base_payload('Remote uploads', 'Track queued imports, broken sources, and ingest throughput without leaving the backend.', [
+        ve_admin_metric_payload('Visible jobs', (string) (int) ($list['total'] ?? 0)),
+        ve_admin_metric_payload('Current page', (string) (int) ($list['page'] ?? 1)),
+        ve_admin_metric_payload('Status filter', $status !== '' ? $status : 'All'),
+    ], [], [
+        ['type' => 'toolbar', 'action' => ve_admin_subsection_url('remote-uploads-queue'), 'method' => 'GET', 'items' => [
+            ve_admin_form_field('text', 'q', 'Search', $query, ['placeholder' => 'Source URL, public id, or owner']),
+            ve_admin_form_field('text', 'status', 'Status', $status, ['placeholder' => 'pending, downloading, error']),
+            ['type' => 'submit', 'label' => 'Apply filters', 'tone' => 'primary'],
+            ['type' => 'link', 'label' => 'Reset', 'tone' => 'secondary', 'href' => ve_admin_subsection_url('remote-uploads-queue'), 'admin_nav' => true],
+        ]],
+        ['type' => 'table', 'columns' => ['Job', 'User', 'Source', 'Status', 'Progress', 'Video'], 'rows' => $rows, 'empty' => 'No remote upload jobs matched the current filters.', 'pagination' => ve_admin_table_pagination_payload((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()), 'remote-uploads-queue', null, ['q' => $query, 'status' => $status])],
+    ]);
+}
+
+function ve_admin_backend_dmca_view_payload(string $activeSubview): array
+{
+    $status = trim((string) ($_GET['status'] ?? ''));
+    $query = trim((string) ($_GET['q'] ?? ''));
+    $page = ve_admin_request_page();
+    $selectedNoticeId = ve_admin_current_resource_id();
+    $list = ve_admin_list_dmca_notices($status, $query, $page);
+
+    if (in_array($activeSubview, ['dmca-detail', 'dmca-events'], true)) {
+        $detail = $selectedNoticeId > 0 ? ve_admin_dmca_detail($selectedNoticeId) : null;
+
+        if (!is_array($detail)) {
+            return ve_admin_view_base_payload('DMCA case', 'Select a case from the queue to inspect the record and its event history.', [], [], [['type' => 'notice', 'message' => 'Choose a DMCA case from the queue.']]);
+        }
+
+        if ($activeSubview === 'dmca-events') {
+            $eventCards = [];
+            foreach ((array) ($detail['events'] ?? []) as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $eventCards[] = [
+                    'title' => (string) ($row['title'] ?? ($row['event_type'] ?? 'Event')),
+                    'description' => ve_format_datetime_label((string) ($row['created_at'] ?? '')),
+                    'text' => (string) ($row['note'] ?? ''),
+                    'items' => [
+                        ['label' => 'Type', 'value' => (string) ($row['event_type'] ?? 'event')],
+                    ],
+                ];
+            }
+
+            return ve_admin_view_base_payload('DMCA events', 'Case timeline and operator-facing event history.', [
+                ve_admin_metric_payload('Case', (string) ($detail['case_code'] ?? '')),
+                ve_admin_metric_payload('Status', (string) ($detail['status'] ?? 'unknown')),
+                ve_admin_metric_payload('Events', (string) count((array) ($detail['events'] ?? []))),
+            ], [ve_admin_action_link_payload('Case detail', ve_admin_subsection_url('dmca-detail', $selectedNoticeId, [], true), 'secondary', 'fa-arrow-left')], [
+                ['type' => 'cards', 'layout' => 'stack', 'cards' => $eventCards],
+            ]);
+        }
+
+        $token = ve_csrf_token();
+        $actionUrl = ve_admin_subsection_url('dmca-detail', $selectedNoticeId, [], false);
+        $statusOptions = [];
+        foreach (ve_dmca_notice_status_catalog() as $code => $label) {
+            $statusOptions[] = ['value' => (string) $code, 'label' => (string) $label];
+        }
+
+        return ve_admin_view_base_payload('DMCA case detail', 'Complaint data, stored payload, and operator workflow for the selected notice.', [
+            ve_admin_metric_payload('Case code', (string) ($detail['case_code'] ?? '')),
+            ve_admin_metric_payload('Status', (string) ($detail['status'] ?? 'unknown')),
+            ve_admin_metric_payload('User', (string) ($detail['user_id'] ?? 0)),
+            ve_admin_metric_payload('Received', ve_format_datetime_label((string) ($detail['received_at'] ?? ''))),
+        ], [ve_admin_action_link_payload('Open events', ve_admin_subsection_url('dmca-events', $selectedNoticeId, [], true), 'secondary', 'fa-stream')], [
+            ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                ['title' => 'Case facts', 'items' => [
+                    ['label' => 'Reported URL', 'value' => (string) ($detail['reported_url'] ?? '')],
+                    ['label' => 'Video title', 'value' => (string) ($detail['video_title_snapshot'] ?? '')],
+                    ['label' => 'Complainant', 'value' => (string) ($detail['complainant_name'] ?? '')],
+                    ['label' => 'Complainant email', 'value' => (string) ($detail['complainant_email'] ?? '')],
+                ]],
+                ['title' => 'Update case', 'form' => [
+                    'action' => $actionUrl,
+                    'method' => 'POST',
+                    'hidden' => ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'update_dmca_status', 'notice_id' => $selectedNoticeId, 'return_to' => ve_admin_subsection_url('dmca-detail', $selectedNoticeId, [], true)]),
+                    'fields' => [
+                        ve_admin_form_field('select', 'status', 'Status', (string) ($detail['status'] ?? ''), ['options' => $statusOptions]),
+                        ve_admin_form_field('textarea', 'note', 'Operator note', ''),
+                    ],
+                    'actions' => [['type' => 'submit', 'label' => 'Save case update', 'tone' => 'primary']],
+                ]],
+            ]],
+        ]);
+    }
+
+    $rows = [];
+    foreach ((array) ($list['rows'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $noticeId = (int) ($row['id'] ?? 0);
+        $rows[] = ['cells' => [
+            ve_admin_link_cell((string) ($row['case_code'] ?? ''), ve_admin_subsection_url('dmca-detail', $noticeId, [], true)),
+            ve_admin_link_cell((string) ($row['username'] ?? ''), ve_admin_subsection_url('users-profile', (int) ($row['user_id'] ?? 0))),
+            ve_admin_text_cell((string) ($row['video_title'] ?? $row['video_title_snapshot'] ?? '')),
+            ve_admin_status_cell((string) ($row['status'] ?? 'unknown')),
+            ve_admin_text_cell(ve_format_datetime_label((string) ($row['received_at'] ?? ''))),
+        ]];
+    }
+
+    return ve_admin_view_base_payload('DMCA operations', 'Work the complaint queue with direct access to case detail and event history.', [
+        ve_admin_metric_payload('Visible cases', (string) (int) ($list['total'] ?? 0)),
+        ve_admin_metric_payload('Current page', (string) (int) ($list['page'] ?? 1)),
+        ve_admin_metric_payload('Status filter', $status !== '' ? $status : 'All'),
+    ], [], [
+        ['type' => 'toolbar', 'action' => ve_admin_subsection_url('dmca-queue'), 'method' => 'GET', 'items' => [
+            ve_admin_form_field('text', 'q', 'Search', $query, ['placeholder' => 'Case code, url, title, or user']),
+            ve_admin_form_field('text', 'status', 'Status', $status, ['placeholder' => 'open, resolved, pending_review']),
+            ['type' => 'submit', 'label' => 'Apply filters', 'tone' => 'primary'],
+            ['type' => 'link', 'label' => 'Reset', 'tone' => 'secondary', 'href' => ve_admin_subsection_url('dmca-queue'), 'admin_nav' => true],
+        ]],
+        ['type' => 'table', 'columns' => ['Case', 'User', 'Video', 'Status', 'Received'], 'rows' => $rows, 'empty' => 'No DMCA notices matched the current filters.', 'pagination' => ve_admin_table_pagination_payload((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()), 'dmca-queue', null, ['q' => $query, 'status' => $status])],
+    ]);
+}
+
+function ve_admin_backend_payouts_view_payload(string $activeSubview): array
+{
+    $status = trim((string) ($_GET['status'] ?? ''));
+    $userId = max(0, (int) ($_GET['user_id'] ?? 0));
+    $page = ve_admin_request_page();
+    $selectedRequestId = ve_admin_current_resource_id();
+    $list = ve_admin_list_payouts($status, $userId, $page);
+
+    if (in_array($activeSubview, ['payouts-detail', 'payouts-transfer'], true)) {
+        $detail = $selectedRequestId > 0 ? ve_admin_payout_request_by_id($selectedRequestId) : null;
+
+        if (!is_array($detail)) {
+            return ve_admin_view_base_payload('Payout request', 'Select a payout request from the queue to inspect approval and transfer state.', [], [], [['type' => 'notice', 'message' => 'Choose a payout request from the queue.']]);
+        }
+
+        $transfer = ve_admin_payout_transfer_by_request_id($selectedRequestId);
+
+        if ($activeSubview === 'payouts-transfer') {
+            return ve_admin_view_base_payload('Transfer tracking', 'Settlement and transfer information for the selected payout request.', [
+                ve_admin_metric_payload('Request', (string) ($detail['public_id'] ?? '')),
+                ve_admin_metric_payload('Status', (string) ($detail['status'] ?? 'unknown')),
+                ve_admin_metric_payload('Transfer row', is_array($transfer) ? (string) ($transfer['status'] ?? 'sent') : 'Not created'),
+            ], [ve_admin_action_link_payload('Request detail', ve_admin_subsection_url('payouts-detail', $selectedRequestId, [], true), 'secondary', 'fa-arrow-left')], [
+                ['type' => 'cards', 'layout' => 'grid', 'cards' => [[
+                    'title' => 'Transfer data',
+                    'items' => [
+                        ['label' => 'Reference', 'value' => (string) ($detail['transfer_reference'] ?? '')],
+                        ['label' => 'Gross', 'value' => ve_dashboard_format_currency_micro_usd((int) ($detail['amount_micro_usd'] ?? 0))],
+                        ['label' => 'Fee', 'value' => is_array($transfer) ? ve_dashboard_format_currency_micro_usd((int) ($transfer['fee_micro_usd'] ?? 0)) : '$0.00'],
+                        ['label' => 'Net', 'value' => is_array($transfer) ? ve_dashboard_format_currency_micro_usd((int) ($transfer['net_amount_micro_usd'] ?? 0)) : ve_dashboard_format_currency_micro_usd((int) ($detail['amount_micro_usd'] ?? 0))],
+                    ],
+                ]]],
+            ]);
+        }
+
+        $token = ve_csrf_token();
+        $actionUrl = ve_admin_subsection_url('payouts-detail', $selectedRequestId, [], false);
+
+        return ve_admin_view_base_payload('Payout request detail', 'Approval, rejection, and settlement actions for the selected payout request.', [
+            ve_admin_metric_payload('Request', (string) ($detail['public_id'] ?? '')),
+            ve_admin_metric_payload('Amount', ve_dashboard_format_currency_micro_usd((int) ($detail['amount_micro_usd'] ?? 0))),
+            ve_admin_metric_payload('Status', (string) ($detail['status'] ?? 'unknown')),
+            ve_admin_metric_payload('User', (string) ($detail['username'] ?? ''), (string) ($detail['email'] ?? '')),
+        ], [ve_admin_action_link_payload('Transfer tracking', ve_admin_subsection_url('payouts-transfer', $selectedRequestId, [], true), 'secondary', 'fa-exchange-alt')], [
+            ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                ['title' => 'Request facts', 'items' => [
+                    ['label' => 'Method', 'value' => (string) ($detail['payout_method'] ?? '')],
+                    ['label' => 'Destination', 'value' => (string) ($detail['payout_destination_masked'] ?? '')],
+                    ['label' => 'Created', 'value' => ve_format_datetime_label((string) ($detail['created_at'] ?? ''))],
+                    ['label' => 'Reviewed', 'value' => ve_format_datetime_label((string) ($detail['reviewed_at'] ?? ''), 'Not reviewed')],
+                ]],
+                ['title' => 'Approve request', 'form' => [
+                    'action' => $actionUrl, 'method' => 'POST',
+                    'hidden' => ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'approve_payout', 'request_id' => $selectedRequestId, 'return_to' => ve_admin_subsection_url('payouts-detail', $selectedRequestId, [], true)]),
+                    'fields' => [ve_admin_form_field('textarea', 'notes', 'Operator note', (string) ($detail['notes'] ?? ''))],
+                    'actions' => [['type' => 'submit', 'label' => 'Approve payout', 'tone' => 'primary']],
+                ]],
+                ['title' => 'Reject request', 'form' => [
+                    'action' => $actionUrl, 'method' => 'POST',
+                    'hidden' => ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'reject_payout', 'request_id' => $selectedRequestId, 'return_to' => ve_admin_subsection_url('payouts-detail', $selectedRequestId, [], true)]),
+                    'fields' => [ve_admin_form_field('text', 'rejection_reason', 'Rejection reason', ''), ve_admin_form_field('textarea', 'notes', 'Operator note', '')],
+                    'actions' => [['type' => 'submit', 'label' => 'Reject payout', 'tone' => 'danger']],
+                ]],
+                ['title' => 'Mark paid', 'form' => [
+                    'action' => $actionUrl, 'method' => 'POST',
+                    'hidden' => ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'mark_payout_paid', 'request_id' => $selectedRequestId, 'return_to' => ve_admin_subsection_url('payouts-detail', $selectedRequestId, [], true)]),
+                    'fields' => [ve_admin_form_field('text', 'transfer_reference', 'Transfer reference', (string) ($detail['transfer_reference'] ?? '')), ve_admin_form_field('text', 'fee_amount', 'Fee amount (USD)', is_array($transfer) ? number_format(((int) ($transfer['fee_micro_usd'] ?? 0)) / 1000000, 2, '.', '') : '0.00'), ve_admin_form_field('textarea', 'notes', 'Operator note', '')],
+                    'actions' => [['type' => 'submit', 'label' => 'Mark payout paid', 'tone' => 'primary']],
+                ]],
+            ]],
+        ]);
+    }
+
+    $rows = [];
+    foreach ((array) ($list['rows'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $requestId = (int) ($row['id'] ?? 0);
+        $rows[] = ['cells' => [
+            ve_admin_link_cell((string) ($row['public_id'] ?? ''), ve_admin_subsection_url('payouts-detail', $requestId, [], true)),
+            ve_admin_link_cell((string) ($row['username'] ?? ''), ve_admin_subsection_url('users-profile', (int) ($row['user_id'] ?? 0)), (string) ($row['email'] ?? '')),
+            ve_admin_text_cell((string) ($row['payout_method'] ?? '')),
+            ve_admin_text_cell(ve_dashboard_format_currency_micro_usd((int) ($row['amount_micro_usd'] ?? 0))),
+            ve_admin_status_cell((string) ($row['status'] ?? 'unknown')),
+            ve_admin_text_cell(ve_format_datetime_label((string) ($row['created_at'] ?? ''))),
+        ]];
+    }
+
+    return ve_admin_view_base_payload('Payout operations', 'Review payout requests with direct access to approval and settlement actions.', [
+        ve_admin_metric_payload('Visible requests', (string) (int) ($list['total'] ?? 0)),
+        ve_admin_metric_payload('Current page', (string) (int) ($list['page'] ?? 1)),
+        ve_admin_metric_payload('Status filter', $status !== '' ? $status : 'All'),
+    ], [], [
+        ['type' => 'toolbar', 'action' => ve_admin_subsection_url('payouts-queue'), 'method' => 'GET', 'items' => array_values(array_filter([
+            $userId > 0 ? ve_admin_form_field('hidden', 'user_id', '', (string) $userId) : null,
+            ve_admin_form_field('text', 'status', 'Status', $status, ['placeholder' => 'pending, approved, paid']),
+            ['type' => 'submit', 'label' => 'Apply filters', 'tone' => 'primary'],
+            ['type' => 'link', 'label' => 'Reset', 'tone' => 'secondary', 'href' => ve_admin_subsection_url('payouts-queue'), 'admin_nav' => true],
+        ]))],
+        ['type' => 'table', 'columns' => ['Request', 'User', 'Method', 'Amount', 'Status', 'Created'], 'rows' => $rows, 'empty' => 'No payout requests matched the current filters.', 'pagination' => ve_admin_table_pagination_payload((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()), 'payouts-queue', null, ['status' => $status, 'user_id' => $userId > 0 ? $userId : null])],
+    ]);
+}
+
+function ve_admin_backend_domains_view_payload(string $activeSubview): array
+{
+    $query = trim((string) ($_GET['q'] ?? ''));
+    $status = trim((string) ($_GET['status'] ?? ''));
+    $page = ve_admin_request_page();
+    $selectedDomainId = ve_admin_current_resource_id();
+    $list = ve_admin_list_custom_domains($status, $query, $page);
+
+    if ($activeSubview === 'domains-detail') {
+        $detail = $selectedDomainId > 0 ? ve_admin_custom_domain_detail($selectedDomainId) : null;
+
+        if (!is_array($detail)) {
+            return ve_admin_view_base_payload('Domain detail', 'Select a domain from the directory to inspect DNS and owner state.', [], [], [['type' => 'notice', 'message' => 'Choose a domain from the directory.']]);
+        }
+
+        $token = ve_csrf_token();
+        $actionUrl = ve_admin_subsection_url('domains-detail', $selectedDomainId, [], false);
+        $actions = [
+            ve_admin_action_form_payload('Refresh DNS', $actionUrl, 'primary', ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'refresh_domain', 'domain_id' => $selectedDomainId, 'return_to' => ve_admin_subsection_url('domains-detail', $selectedDomainId, [], true)]), 'fa-sync'),
+            ve_admin_action_form_payload('Delete domain', $actionUrl, 'danger', ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'delete_domain', 'domain_id' => $selectedDomainId, 'return_to' => ve_admin_subsection_url('domains-directory')]), 'fa-trash', 'Delete this domain mapping?'),
+        ];
+
+        return ve_admin_view_base_payload('Domain detail', 'DNS readiness and ownership data for the selected custom domain.', [
+            ve_admin_metric_payload('Domain', (string) ($detail['domain'] ?? '')),
+            ve_admin_metric_payload('Status', (string) ($detail['status'] ?? 'unknown')),
+            ve_admin_metric_payload('Owner', (string) ($detail['username'] ?? ''), (string) ($detail['email'] ?? '')),
+        ], $actions, [
+            ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                ['title' => 'DNS state', 'items' => [
+                    ['label' => 'Stored target', 'value' => (string) ($detail['dns_target'] ?? '')],
+                    ['label' => 'Platform target', 'value' => (string) (ve_config()['custom_domain_target'] ?? '')],
+                    ['label' => 'Last checked', 'value' => ve_format_datetime_label((string) ($detail['dns_last_checked_at'] ?? ''), 'Never')],
+                    ['label' => 'Resolver error', 'value' => (string) ($detail['dns_check_error'] ?? 'None')],
+                ]],
+            ]],
+        ]);
+    }
+
+    $rows = [];
+    foreach ((array) ($list['rows'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $domainId = (int) ($row['id'] ?? 0);
+        $rows[] = ['cells' => [
+            ve_admin_link_cell((string) ($row['domain'] ?? ''), ve_admin_subsection_url('domains-detail', $domainId, [], true)),
+            ve_admin_link_cell((string) ($row['username'] ?? ''), ve_admin_subsection_url('users-profile', (int) ($row['user_id'] ?? 0))),
+            ve_admin_status_cell((string) ($row['status'] ?? 'unknown')),
+            ve_admin_text_cell((string) ($row['dns_target'] ?? '')),
+            ve_admin_text_cell(ve_format_datetime_label((string) ($row['dns_last_checked_at'] ?? ''), 'Never')),
+        ]];
+    }
+
+    return ve_admin_view_base_payload('Domain operations', 'Track custom domains, validate DNS resolution, and remove broken mappings.', [
+        ve_admin_metric_payload('Visible domains', (string) (int) ($list['total'] ?? 0)),
+        ve_admin_metric_payload('Current page', (string) (int) ($list['page'] ?? 1)),
+        ve_admin_metric_payload('Status filter', $status !== '' ? $status : 'All'),
+    ], [], [
+        ['type' => 'toolbar', 'action' => ve_admin_subsection_url('domains-directory'), 'method' => 'GET', 'items' => [
+            ve_admin_form_field('text', 'q', 'Search', $query, ['placeholder' => 'Domain or uploader']),
+            ve_admin_form_field('text', 'status', 'Status', $status, ['placeholder' => 'active, pending_dns, lookup_failed']),
+            ['type' => 'submit', 'label' => 'Apply filters', 'tone' => 'primary'],
+            ['type' => 'link', 'label' => 'Reset', 'tone' => 'secondary', 'href' => ve_admin_subsection_url('domains-directory'), 'admin_nav' => true],
+        ]],
+        ['type' => 'table', 'columns' => ['Domain', 'User', 'Status', 'DNS target', 'Last checked'], 'rows' => $rows, 'empty' => 'No domains matched the current filters.', 'pagination' => ve_admin_table_pagination_payload((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()), 'domains-directory', null, ['q' => $query, 'status' => $status])],
+    ]);
+}
+
+function ve_admin_backend_app_view_payload(string $activeSubview): array
+{
+    $token = ve_csrf_token();
+    $settings = [];
+
+    foreach (ve_admin_default_settings() as $key => $defaultValue) {
+        $settings[$key] = (string) (ve_get_app_setting($key, (string) $defaultValue) ?? (string) $defaultValue);
+    }
+
+    if ($activeSubview === 'app-roles') {
+        $rows = [];
+        foreach (ve_admin_role_catalog() as $code => $meta) {
+            $rows[] = ['cells' => [
+                ve_admin_code_cell((string) $code),
+                ve_admin_text_cell((string) ($meta['label'] ?? $code)),
+                ve_admin_text_cell(implode(', ', array_map(static fn ($item): string => (string) $item, (array) ($meta['permissions'] ?? [])))),
+            ]];
+        }
+
+        return ve_admin_view_base_payload('Role catalog', 'Primary backend roles and their built-in permission sets.', [
+            ve_admin_metric_payload('Roles', (string) count(ve_admin_role_catalog())),
+        ], [], [
+            ['type' => 'table', 'columns' => ['Code', 'Label', 'Permissions'], 'rows' => $rows, 'empty' => 'No roles defined.'],
+        ]);
+    }
+
+    if ($activeSubview === 'app-permissions') {
+        $rows = [];
+        foreach (ve_admin_permission_catalog() as $code => $meta) {
+            $rows[] = ['cells' => [
+                ve_admin_code_cell((string) $code),
+                ve_admin_text_cell((string) ($meta['label'] ?? $code)),
+                ve_admin_text_cell((string) ($meta['group_code'] ?? 'core')),
+            ]];
+        }
+
+        return ve_admin_view_base_payload('Permission inventory', 'Permission codes available to backend roles and bootstrap admins.', [
+            ve_admin_metric_payload('Permission codes', (string) count(ve_admin_permission_catalog())),
+        ], [], [
+            ['type' => 'table', 'columns' => ['Code', 'Label', 'Group'], 'rows' => $rows, 'empty' => 'No permission codes defined.'],
+        ]);
+    }
+
+    return ve_admin_view_base_payload('App settings', 'Backend operating thresholds and bootstrap access defaults.', [
+        ve_admin_metric_payload('Bootstrap admins', implode(', ', ve_admin_bootstrap_logins()) ?: 'None'),
+        ve_admin_metric_payload('Custom domain target', (string) (ve_config()['custom_domain_target'] ?? '')),
+    ], [], [
+        ['type' => 'cards', 'layout' => 'stack', 'cards' => [[
+            'title' => 'Operator thresholds',
+            'form' => [
+                'action' => ve_admin_subsection_url('app-general', null, [], false),
+                'method' => 'POST',
+                'hidden' => ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'save_app_settings', 'return_to' => ve_admin_subsection_url('app-general', null, [], true)]),
+                'fields' => [
+                    ve_admin_form_field('text', 'payout_minimum_micro_usd', 'Payout minimum (micro USD)', $settings['payout_minimum_micro_usd'] ?? ''),
+                    ve_admin_form_field('text', 'admin_default_page_size', 'Default page size', $settings['admin_default_page_size'] ?? ''),
+                    ve_admin_form_field('text', 'admin_recent_audit_limit', 'Recent audit limit', $settings['admin_recent_audit_limit'] ?? ''),
+                    ve_admin_form_field('text', 'remote_max_queue_per_user', 'Remote queue max per user', $settings['remote_max_queue_per_user'] ?? ''),
+                ],
+                'actions' => [['type' => 'submit', 'label' => 'Save app settings', 'tone' => 'primary']],
+            ],
+        ]]],
+    ]);
+}
+
+function ve_admin_backend_infrastructure_view_payload(string $activeSubview): array
+{
+    $snapshot = ve_admin_infrastructure_snapshot();
+    $nodes = (array) ($snapshot['storage_nodes'] ?? []);
+    $volumes = (array) ($snapshot['storage_volumes'] ?? []);
+    $endpoints = (array) ($snapshot['upload_endpoints'] ?? []);
+    $deliveryDomains = (array) ($snapshot['delivery_domains'] ?? []);
+    $maintenanceWindows = (array) ($snapshot['maintenance_windows'] ?? []);
+    $token = ve_csrf_token();
+
+    $nodeOptions = [];
+    foreach ($nodes as $node) {
+        if (is_array($node)) {
+            $nodeOptions[] = ['value' => (string) ($node['id'] ?? 0), 'label' => (string) ($node['hostname'] ?? ('Node #' . ($node['id'] ?? 0)))];
+        }
+    }
+
+    $metrics = [
+        ve_admin_metric_payload('Storage nodes', (string) count($nodes)),
+        ve_admin_metric_payload('Volumes', (string) count($volumes)),
+        ve_admin_metric_payload('Upload endpoints', (string) count($endpoints)),
+        ve_admin_metric_payload('Delivery domains', (string) count($deliveryDomains), (string) count($maintenanceWindows) . ' maintenance windows'),
+    ];
+
+    if ($activeSubview === 'infra-volumes') {
+        $rows = [];
+        foreach ($volumes as $row) {
+            if (is_array($row)) {
+                $rows[] = ['cells' => [
+                    ve_admin_text_cell((string) ($row['hostname'] ?? '')),
+                    ve_admin_text_cell((string) ($row['code'] ?? '')),
+                    ve_admin_text_cell((string) ($row['mount_path'] ?? '')),
+                    ve_admin_status_cell((string) ($row['health_status'] ?? 'healthy')),
+                    ve_admin_text_cell(ve_human_bytes((int) ($row['used_bytes'] ?? 0)) . ' / ' . ve_human_bytes((int) ($row['capacity_bytes'] ?? 0))),
+                ]];
+            }
+        }
+
+        return ve_admin_view_base_payload('Storage volumes', 'Capacity, mount paths, and health state for configured storage volumes.', $metrics, [], [
+            ['type' => 'table', 'columns' => ['Node', 'Code', 'Mount path', 'Health', 'Usage'], 'rows' => $rows, 'empty' => 'No storage volumes configured.'],
+        ]);
+    }
+
+    if ($activeSubview === 'infra-endpoints') {
+        $rows = [];
+        foreach ($endpoints as $row) {
+            if (is_array($row)) {
+                $rows[] = ['cells' => [
+                    ve_admin_text_cell((string) ($row['code'] ?? '')),
+                    ve_admin_text_cell((string) ($row['hostname'] ?? '')),
+                    ve_admin_text_cell((string) ($row['protocol'] ?? 'https') . '://' . (string) ($row['host'] ?? '') . (string) ($row['path_prefix'] ?? '')),
+                    ve_admin_text_cell(((int) ($row['is_active'] ?? 0)) === 1 ? 'Active' : 'Inactive'),
+                    ve_admin_text_cell((string) ($row['weight'] ?? 0)),
+                    ve_admin_text_cell(ve_human_bytes((int) ($row['max_file_size_bytes'] ?? 0))),
+                ]];
+            }
+        }
+
+        return ve_admin_view_base_payload('Upload endpoints', 'Ingest endpoints, routing weight, and per-node upload capacity.', $metrics, [], [
+            ['type' => 'table', 'columns' => ['Code', 'Node', 'Address', 'Status', 'Weight', 'Max file size'], 'rows' => $rows, 'empty' => 'No upload endpoints configured.'],
+        ]);
+    }
+
+    if ($activeSubview === 'infra-delivery') {
+        $rows = [];
+        foreach ($deliveryDomains as $row) {
+            if (is_array($row)) {
+                $rows[] = ['cells' => [
+                    ve_admin_text_cell((string) ($row['domain'] ?? '')),
+                    ve_admin_text_cell((string) ($row['purpose'] ?? 'watch')),
+                    ve_admin_status_cell((string) ($row['status'] ?? 'active')),
+                    ve_admin_text_cell((string) ($row['tls_mode'] ?? 'managed')),
+                ]];
+            }
+        }
+
+        return ve_admin_view_base_payload('Delivery domains', 'Streaming and download domains used by the delivery plane.', $metrics, [], [
+            ['type' => 'table', 'columns' => ['Domain', 'Purpose', 'Status', 'TLS mode'], 'rows' => $rows, 'empty' => 'No delivery domains configured.'],
+        ]);
+    }
+
+    if ($activeSubview === 'infra-maintenance') {
+        $rows = [];
+        foreach ($maintenanceWindows as $row) {
+            if (is_array($row)) {
+                $rows[] = ['cells' => [
+                    ve_admin_text_cell((string) ($row['hostname'] ?? '')),
+                    ve_admin_text_cell((string) ($row['mode'] ?? 'drain')),
+                    ve_admin_text_cell(ve_format_datetime_label((string) ($row['starts_at'] ?? ''))),
+                    ve_admin_text_cell(ve_format_datetime_label((string) ($row['ends_at'] ?? ''))),
+                    ve_admin_text_cell((string) ($row['reason'] ?? '')),
+                    ve_admin_actions_cell([ve_admin_action_form_payload('Delete', ve_admin_subsection_url('infra-maintenance', null, [], false), 'danger', ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'delete_maintenance_window', 'maintenance_window_id' => (int) ($row['id'] ?? 0), 'return_to' => ve_admin_subsection_url('infra-maintenance', null, [], true)]), '', 'Delete this maintenance window?')]),
+                ]];
+            }
+        }
+
+        return ve_admin_view_base_payload('Maintenance windows', 'Scheduled node maintenance and drain windows.', $metrics, [], [
+            ['type' => 'cards', 'layout' => 'stack', 'cards' => [[
+                'title' => 'Schedule maintenance window',
+                'form' => [
+                    'action' => ve_admin_subsection_url('infra-maintenance', null, [], false),
+                    'method' => 'POST',
+                    'hidden' => ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'add_maintenance_window', 'return_to' => ve_admin_subsection_url('infra-maintenance', null, [], true)]),
+                    'fields' => [
+                        ve_admin_form_field('select', 'storage_node_id', 'Node', '', ['options' => $nodeOptions]),
+                        ve_admin_form_field('text', 'starts_at', 'Start (UTC)', '', ['placeholder' => 'YYYY-MM-DD HH:MM:SS']),
+                        ve_admin_form_field('text', 'ends_at', 'End (UTC)', '', ['placeholder' => 'YYYY-MM-DD HH:MM:SS']),
+                        ve_admin_form_field('select', 'mode', 'Mode', 'drain', ['options' => [['value' => 'drain', 'label' => 'Drain'], ['value' => 'offline', 'label' => 'Offline']]]),
+                        ve_admin_form_field('textarea', 'reason', 'Reason', ''),
+                    ],
+                    'actions' => [['type' => 'submit', 'label' => 'Schedule maintenance', 'tone' => 'primary']],
+                ],
+            ]]],
+            ['type' => 'table', 'columns' => ['Node', 'Mode', 'Starts', 'Ends', 'Reason', 'Action'], 'rows' => $rows, 'empty' => 'No maintenance windows scheduled.'],
+        ]);
+    }
+
+    $rows = [];
+    foreach ($nodes as $row) {
+        if (is_array($row)) {
+            $rows[] = ['cells' => [
+                ve_admin_text_cell((string) ($row['code'] ?? '')),
+                ve_admin_text_cell((string) ($row['hostname'] ?? '')),
+                ve_admin_status_cell((string) ($row['health_status'] ?? 'healthy')),
+                ve_admin_text_cell(ve_human_bytes((int) ($row['used_bytes'] ?? 0)) . ' / ' . ve_human_bytes((int) ($row['available_bytes'] ?? 0))),
+                ve_admin_text_cell((string) ($row['max_ingest_qps'] ?? 0)),
+                ve_admin_text_cell((string) ($row['max_stream_qps'] ?? 0)),
+            ]];
+        }
+    }
+
+    return ve_admin_view_base_payload('Infrastructure', 'Operate the storage and delivery plane from one backend surface.', $metrics, [], [
+        ['type' => 'table', 'columns' => ['Code', 'Hostname', 'Health', 'Capacity', 'Ingest QPS', 'Stream QPS'], 'rows' => $rows, 'empty' => 'No storage nodes configured.'],
+    ]);
+}
+
+function ve_admin_backend_audit_view_payload(string $activeSubview): array
+{
+    $page = ve_admin_request_page();
+    $selectedLogId = ve_admin_current_resource_id();
+    $list = ve_admin_list_audit_logs($page);
+
+    if ($activeSubview === 'audit-detail') {
+        $detail = $selectedLogId > 0 ? ve_admin_audit_log_detail($selectedLogId) : null;
+
+        if (!is_array($detail)) {
+            return ve_admin_view_base_payload('Audit detail', 'Select an audit record from the log feed to inspect actor and payload changes.', [], [], [['type' => 'notice', 'message' => 'Choose an audit log entry from the feed.']]);
+        }
+
+        $beforeDecoded = json_decode((string) ($detail['before_json'] ?? '{}'), true);
+        $afterDecoded = json_decode((string) ($detail['after_json'] ?? '{}'), true);
+
+        return ve_admin_view_base_payload('Audit detail', 'Actor, target, and before/after payload for the selected backend action.', [
+            ve_admin_metric_payload('Actor', (string) ($detail['actor_username'] ?? 'System')),
+            ve_admin_metric_payload('Event code', (string) ($detail['event_code'] ?? '')),
+            ve_admin_metric_payload('IP', (string) ($detail['ip_address'] ?? '')),
+        ], [], [
+            ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                ['title' => 'Record facts', 'items' => [
+                    ['label' => 'Target type', 'value' => (string) ($detail['target_type'] ?? '')],
+                    ['label' => 'Target ID', 'value' => (string) ($detail['target_id'] ?? 0)],
+                    ['label' => 'Created', 'value' => ve_format_datetime_label((string) ($detail['created_at'] ?? ''))],
+                ]],
+                ['title' => 'Before payload', 'code' => json_encode(is_array($beforeDecoded) ? $beforeDecoded : ['value' => $detail['before_json'] ?? ''], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)],
+                ['title' => 'After payload', 'code' => json_encode(is_array($afterDecoded) ? $afterDecoded : ['value' => $detail['after_json'] ?? ''], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)],
+            ]],
+        ]);
+    }
+
+    $rows = [];
+    foreach ((array) ($list['rows'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $rows[] = ['cells' => [
+            ve_admin_link_cell(ve_format_datetime_label((string) ($row['created_at'] ?? '')), ve_admin_subsection_url('audit-detail', (int) ($row['id'] ?? 0), [], true)),
+            ve_admin_text_cell((string) ($row['actor_username'] ?? 'System')),
+            ve_admin_text_cell((string) ($row['event_code'] ?? '')),
+            ve_admin_text_cell((string) ($row['target_type'] ?? '') . ' #' . (string) ($row['target_id'] ?? 0)),
+            ve_admin_text_cell((string) ($row['ip_address'] ?? '')),
+        ]];
+    }
+
+    return ve_admin_view_base_payload('Audit log feed', 'Recent backend actions with actor, target, and IP context.', [
+        ve_admin_metric_payload('Visible entries', (string) (int) ($list['total'] ?? 0)),
+        ve_admin_metric_payload('Current page', (string) (int) ($list['page'] ?? 1)),
+    ], [], [
+        ['type' => 'table', 'columns' => ['Time', 'Actor', 'Event', 'Target', 'IP'], 'rows' => $rows, 'empty' => 'No audit logs recorded yet.', 'pagination' => ve_admin_table_pagination_payload((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()), 'audit-feed')],
+    ]);
+}
+
+function ve_admin_backend_view_payload(array $actorUser, string $activeSection, string $activeSubview): array
+{
+    return match ($activeSection) {
+        'overview' => ve_admin_backend_overview_view_payload($activeSubview),
+        'users' => ve_admin_backend_users_view_payload($actorUser, $activeSubview),
+        'videos' => ve_admin_backend_videos_view_payload($activeSubview),
+        'remote-uploads' => ve_admin_backend_remote_uploads_view_payload($activeSubview),
+        'dmca' => ve_admin_backend_dmca_view_payload($activeSubview),
+        'payouts' => ve_admin_backend_payouts_view_payload($activeSubview),
+        'domains' => ve_admin_backend_domains_view_payload($activeSubview),
+        'app' => ve_admin_backend_app_view_payload($activeSubview),
+        'infrastructure' => ve_admin_backend_infrastructure_view_payload($activeSubview),
+        'audit' => ve_admin_backend_audit_view_payload($activeSubview),
+        default => ve_admin_view_base_payload('Backend', 'This backend section is not available.', [], [], [['type' => 'notice', 'message' => 'This backend section is not available.']]),
+    };
 }
 
 function ve_admin_partial_payload(
@@ -7511,30 +9230,32 @@ function ve_handle_backend_request(): void
     $context['header_nav_html'] = ve_admin_backend_header_nav_html($actorUser, $activeSection);
     $context['header_action_html'] = ve_admin_impersonation_stop_control_html('btn btn-sm btn-secondary admin-stop-button', true);
     $context['mobile_nav_html'] = ve_admin_backend_mobile_nav_html($actorUser, $activeSection);
-    $title = (string) ((ve_admin_sections()[$activeSection]['label'] ?? 'Backend') . ' - Video Engine');
-    $sidebarIntroHtml = ve_admin_backend_sidebar_intro_html($actorUser, $activeSection);
-    $menuHtml = ve_admin_backend_sidebar_menu_html($actorUser, $activeSection);
-    $contentHtml = ve_admin_section_content_html($activeSection);
+    $activeSubview = ve_admin_current_subview_slug($activeSection);
+    $viewPayload = ve_admin_backend_view_payload($actorUser, $activeSection, $activeSubview);
+    $title = (string) (($viewPayload['title'] ?? (ve_admin_sections()[$activeSection]['label'] ?? 'Backend')) . ' - Video Engine');
+    $sidebarHtml = ve_admin_backend_sidebar_collection_html($actorUser, $activeSection);
+    $contentHtml = ve_admin_backend_content_shell_html($actorUser, $activeSubview);
+    $bootHtml = ve_admin_backend_boot_script_html(ve_admin_backend_boot_config($actorUser, $activeSection, $activeSubview));
     $widgetsHtml = '';
 
-    if (ve_admin_request_is_partial()) {
-        ve_json(ve_admin_partial_payload(
-            $actorUser,
-            $context,
-            $activeSection,
-            $title,
-            $sidebarIntroHtml,
-            $menuHtml,
-            $contentHtml
-        ));
+    if (ve_admin_request_wants_json()) {
+        ve_json([
+            'status' => 'ok',
+            'title' => $title,
+            'active_section' => $activeSection,
+            'active_subview' => $activeSubview,
+            'sidebar_subview' => ve_admin_sidebar_active_subview($activeSection, $activeSubview),
+            'resource' => ve_admin_current_resource_token(),
+            'view' => $viewPayload,
+        ]);
     }
 
     ve_html(ve_rewrite_html_paths(ve_admin_dashboard_shell(
         $context,
         $title,
-        $sidebarIntroHtml,
-        $menuHtml,
+        $sidebarHtml,
         $contentHtml,
-        $widgetsHtml
+        $widgetsHtml,
+        $bootHtml
     )));
 }

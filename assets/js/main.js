@@ -80,69 +80,652 @@ $(document).ready(function() {
         return url.pathname === backendBase || url.pathname.indexOf(backendBase + '/') === 0;
     }
 
-    function setAdminLoadingState(isLoading) {
-        var $shell = $('[data-admin-shell="1"]').first();
+    function getAdminConfig() {
+        var node = document.getElementById('admin-backend-config');
 
-        if (!$shell.length) {
-            return;
+        if (!node) {
+            return null;
         }
 
-        $shell.toggleClass('is-loading', !!isLoading);
+        if (!window.__veAdminConfigCache) {
+            try {
+                window.__veAdminConfigCache = JSON.parse(node.textContent || '{}');
+            } catch (err) {
+                window.__veAdminConfigCache = null;
+            }
+        }
+
+        return window.__veAdminConfigCache;
+    }
+
+    function getAdminRoute(nextUrl) {
+        var config = getAdminConfig();
+        var url;
+        var path;
+        var suffix;
+        var segments;
+        var firstSegment;
+        var sectionEntry;
+        var entry;
+        var resource = '';
+
+        if (!config || !config.base_path) {
+            return null;
+        }
+
+        try {
+            url = new URL(nextUrl, window.location.origin);
+        } catch (err) {
+            return null;
+        }
+
+        path = url.pathname;
+
+        if (path !== config.base_path && path.indexOf(config.base_path + '/') !== 0) {
+            return null;
+        }
+
+        suffix = path.slice(config.base_path.length).replace(/^\/+/, '');
+        segments = suffix ? suffix.split('/').filter(Boolean) : [];
+        firstSegment = segments[0] || '';
+
+        if (firstSegment && config.catalog && config.catalog[firstSegment]) {
+            entry = config.catalog[firstSegment];
+            resource = segments[1] || '';
+
+            return {
+                section: entry.section || 'overview',
+                subview: entry.canonical || firstSegment,
+                sidebarSubview: null,
+                resource: resource,
+                url: url.toString()
+            };
+        }
+
+        sectionEntry = config.sections && config.sections[firstSegment || 'overview'];
+        resource = segments[1] || '';
+
+        if (!sectionEntry) {
+            sectionEntry = config.sections && config.sections.overview;
+            firstSegment = 'overview';
+        }
+
+        return {
+            section: firstSegment || 'overview',
+            subview: resource ? sectionEntry.default_detail : sectionEntry.default_list,
+            sidebarSubview: null,
+            resource: resource,
+            url: url.toString()
+        };
+    }
+
+    function getAdminPanel(subview) {
+        return document.querySelector('[data-admin-view="' + subview + '"]');
+    }
+
+    function resolveAdminSidebarSubview(route) {
+        var config = getAdminConfig();
+        var section;
+        var sidebarViews;
+        var index;
+
+        if (!config || !route) {
+            return '';
+        }
+
+        section = config.sections && config.sections[route.section];
+        sidebarViews = section && section.sidebar_views ? section.sidebar_views : [];
+
+        for (index = 0; index < sidebarViews.length; index += 1) {
+            if (sidebarViews[index] && sidebarViews[index].slug === route.subview) {
+                return route.subview;
+            }
+        }
+
+        return section ? section.default_list : route.subview;
+    }
+
+    function adminButtonClass(tone) {
+        if (tone === 'primary') {
+            return 'btn btn-sm btn-primary';
+        }
+
+        if (tone === 'danger') {
+            return 'btn btn-sm btn-danger';
+        }
+
+        return 'btn btn-sm btn-secondary';
+    }
+
+    function renderHiddenInputs(fields) {
+        var html = '';
+
+        (fields || []).forEach(function(field) {
+            if (!field || field.type !== 'hidden') {
+                return;
+            }
+
+            html += '<input type="hidden" name="' + escapeHtml(field.name || '') + '" value="' + escapeHtml(field.value || '') + '">';
+        });
+
+        return html;
+    }
+
+    function renderAdminAction(action) {
+        if (!action) {
+            return '';
+        }
+
+        if (action.type === 'form') {
+            return '<form method="' + escapeHtml(action.method || 'POST') + '" action="' + escapeHtml(action.action || '#') + '" class="admin-stop-form"' + (action.confirm ? ' data-confirm="' + escapeHtml(action.confirm) + '"' : '') + '>' + renderHiddenInputs(action.hidden) + '<button type="submit" class="' + adminButtonClass(action.tone || 'secondary') + '">' + (action.icon ? '<i class="fad ' + escapeHtml(action.icon) + '"></i>' : '') + '<span>' + escapeHtml(action.label || 'Submit') + '</span></button></form>';
+        }
+
+        return '<a href="' + escapeHtml(action.href || '#') + '"' + (action.admin_nav ? ' data-admin-nav="1"' : '') + ' class="' + adminButtonClass(action.tone || 'secondary') + '">' + (action.icon ? '<i class="fad ' + escapeHtml(action.icon) + '"></i>' : '') + '<span>' + escapeHtml(action.label || 'Open') + '</span></a>';
+    }
+
+    function renderToolbarField(field) {
+        var optionsHtml = '';
+        var html = '';
+
+        if (!field) {
+            return '';
+        }
+
+        if (field.type === 'hidden') {
+            return '<input type="hidden" name="' + escapeHtml(field.name || '') + '" value="' + escapeHtml(field.value || '') + '">';
+        }
+
+        if (field.type === 'submit') {
+            return '<div class="form-group form-group--action"><button type="submit" class="' + adminButtonClass(field.tone || 'primary') + '">' + escapeHtml(field.label || 'Submit') + '</button></div>';
+        }
+
+        if (field.type === 'link') {
+            return '<div class="form-group form-group--action"><a href="' + escapeHtml(field.href || '#') + '"' + (field.admin_nav ? ' data-admin-nav="1"' : '') + ' class="' + adminButtonClass(field.tone || 'secondary') + '">' + escapeHtml(field.label || 'Open') + '</a></div>';
+        }
+
+        html += '<div class="form-group">';
+        html += '<label>' + escapeHtml(field.label || '') + '</label>';
+
+        if (field.type === 'select') {
+            (field.options || []).forEach(function(option) {
+                optionsHtml += '<option value="' + escapeHtml(option.value || '') + '"' + (String(option.value || '') === String(field.value || '') ? ' selected="selected"' : '') + '>' + escapeHtml(option.label || option.value || '') + '</option>';
+            });
+            html += '<select name="' + escapeHtml(field.name || '') + '" class="form-control">' + optionsHtml + '</select>';
+        } else {
+            html += '<input type="text" name="' + escapeHtml(field.name || '') + '" value="' + escapeHtml(field.value || '') + '" class="form-control"' + (field.placeholder ? ' placeholder="' + escapeHtml(field.placeholder) + '"' : '') + '>';
+        }
+
+        html += '</div>';
+        return html;
+    }
+
+    function renderAdminToolbar(block) {
+        var html = '<form method="' + escapeHtml(block.method || 'GET') + '" action="' + escapeHtml(block.action || '#') + '" class="admin-toolbar" data-admin-filter="1">';
+
+        (block.items || []).forEach(function(field) {
+            html += renderToolbarField(field);
+        });
+
+        html += '</form>';
+        return html;
+    }
+
+    function renderAdminStatusBadge(cell) {
+        var tone = cell && cell.tone ? cell.tone : 'secondary';
+        var classMap = {
+            success: 'badge badge-success',
+            danger: 'badge badge-danger',
+            warning: 'badge badge-warning',
+            info: 'badge badge-info',
+            primary: 'badge badge-primary',
+            secondary: 'badge badge-secondary'
+        };
+
+        return '<span class="' + (classMap[tone] || classMap.secondary) + '">' + escapeHtml(cell.label || '') + '</span>';
+    }
+
+    function renderAdminCell(cell) {
+        if (!cell) {
+            return '';
+        }
+
+        if (cell.type === 'link') {
+            return '<a href="' + escapeHtml(cell.href || '#') + '"' + (cell.admin_nav ? ' data-admin-nav="1"' : '') + '>' + escapeHtml(cell.label || '') + '</a>' + (cell.secondary ? '<small>' + escapeHtml(cell.secondary) + '</small>' : '');
+        }
+
+        if (cell.type === 'status') {
+            return renderAdminStatusBadge(cell);
+        }
+
+        if (cell.type === 'code') {
+            return '<code>' + escapeHtml(cell.primary || '') + '</code>' + (cell.secondary ? '<small>' + escapeHtml(cell.secondary) + '</small>' : '');
+        }
+
+        if (cell.type === 'actions') {
+            return '<div class="admin-table-actions">' + (cell.actions || []).map(renderAdminAction).join('') + '</div>';
+        }
+
+        return '<span>' + escapeHtml(cell.primary || '') + '</span>' + (cell.secondary ? '<small>' + escapeHtml(cell.secondary) + '</small>' : '');
+    }
+
+    function renderAdminTable(table) {
+        var html = '<div class="settings-table-wrap"><table class="table"><thead><tr>';
+        var pagination = '';
+
+        (table.columns || []).forEach(function(column) {
+            html += '<th>' + escapeHtml(column || '') + '</th>';
+        });
+
+        html += '</tr></thead><tbody>';
+
+        if (!table.rows || !table.rows.length) {
+            html += '<tr><td colspan="' + (table.columns ? table.columns.length : 1) + '" class="text-center text-muted">' + escapeHtml(table.empty || 'No rows.') + '</td></tr>';
+        } else {
+            (table.rows || []).forEach(function(row) {
+                html += '<tr>';
+                (row.cells || []).forEach(function(cell) {
+                    html += '<td>' + renderAdminCell(cell) + '</td>';
+                });
+                html += '</tr>';
+            });
+        }
+
+        html += '</tbody></table></div>';
+
+        if (table.pagination && table.pagination.length) {
+            pagination += '<nav><ul class="pagination">';
+            table.pagination.forEach(function(item) {
+                var classes = 'page-item';
+
+                if (item.active) {
+                    classes += ' active';
+                }
+
+                if (item.disabled) {
+                    classes += ' disabled';
+                }
+
+                pagination += '<li class="' + classes + '"><a class="page-link" href="' + escapeHtml(item.href || '#') + '"' + (!item.disabled ? ' data-admin-nav="1"' : '') + '>' + escapeHtml(item.label || '') + '</a></li>';
+            });
+            pagination += '</ul></nav>';
+        }
+
+        return html + pagination;
+    }
+
+    function renderAdminList(items) {
+        var html = '<ul class="admin-mini-list admin-list-tight">';
+
+        if (!items || !items.length) {
+            return '<p class="admin-empty">No records yet.</p>';
+        }
+
+        items.forEach(function(item) {
+            html += '<li>';
+            if (item.href) {
+                html += '<a href="' + escapeHtml(item.href) + '" data-admin-nav="1">' + escapeHtml(item.primary || '') + '</a>';
+            } else {
+                html += '<strong>' + escapeHtml(item.primary || '') + '</strong>';
+            }
+            if (item.secondary) {
+                html += '<small>' + escapeHtml(item.secondary) + '</small>';
+            }
+            html += '</li>';
+        });
+
+        return html + '</ul>';
+    }
+
+    function renderAdminForm(block) {
+        var html = '<form method="' + escapeHtml(block.method || 'POST') + '" action="' + escapeHtml(block.action || '#') + '" class="admin-stack"' + (block.confirm ? ' data-confirm="' + escapeHtml(block.confirm) + '"' : '') + '>';
+        html += renderHiddenInputs(block.hidden);
+
+        if (block.fields && block.fields.length) {
+            html += '<div class="admin-form-grid">';
+            block.fields.forEach(function(field) {
+                var optionsHtml = '';
+                html += '<div class="form-group"' + (field.type === 'textarea' ? ' style="grid-column:1 / -1;"' : '') + '>';
+                if (field.type !== 'hidden') {
+                    html += '<label>' + escapeHtml(field.label || '') + '</label>';
+                }
+
+                if (field.type === 'select') {
+                    (field.options || []).forEach(function(option) {
+                        optionsHtml += '<option value="' + escapeHtml(option.value || '') + '"' + (String(option.value || '') === String(field.value || '') ? ' selected="selected"' : '') + '>' + escapeHtml(option.label || option.value || '') + '</option>';
+                    });
+                    html += '<select name="' + escapeHtml(field.name || '') + '" class="form-control">' + optionsHtml + '</select>';
+                } else if (field.type === 'textarea') {
+                    html += '<textarea name="' + escapeHtml(field.name || '') + '" class="form-control">' + escapeHtml(field.value || '') + '</textarea>';
+                } else if (field.type === 'checkbox') {
+                    html += '<div class="custom-control custom-checkbox"><input type="checkbox" class="custom-control-input" id="admin_field_' + escapeHtml(field.name || '') + '" name="' + escapeHtml(field.name || '') + '" value="1"' + (field.checked ? ' checked="checked"' : '') + '><label class="custom-control-label" for="admin_field_' + escapeHtml(field.name || '') + '">' + escapeHtml(field.label || '') + '</label></div>';
+                } else if (field.type === 'hidden') {
+                    html += '<input type="hidden" name="' + escapeHtml(field.name || '') + '" value="' + escapeHtml(field.value || '') + '">';
+                } else {
+                    html += '<input type="text" name="' + escapeHtml(field.name || '') + '" value="' + escapeHtml(field.value || '') + '" class="form-control"' + (field.placeholder ? ' placeholder="' + escapeHtml(field.placeholder) + '"' : '') + '>';
+                }
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+
+        if (block.actions && block.actions.length) {
+            html += '<div class="admin-actions">';
+            block.actions.forEach(function(action) {
+                if (action.type === 'submit') {
+                    html += '<button type="submit" class="' + adminButtonClass(action.tone || 'primary') + '">' + escapeHtml(action.label || 'Save') + '</button>';
+                } else {
+                    html += renderAdminAction(action);
+                }
+            });
+            html += '</div>';
+        }
+
+        return html + '</form>';
+    }
+
+    function renderAdminCards(block) {
+        var wrapperClass = block.layout === 'stack' ? 'admin-stack' : 'admin-section-grid';
+        var html = '<div class="' + wrapperClass + '">';
+
+        (block.cards || []).forEach(function(card) {
+            html += '<div class="admin-detail-panel">';
+            if (card.title) {
+                html += '<h5>' + escapeHtml(card.title) + '</h5>';
+            }
+            if (card.description) {
+                html += '<p class="admin-chart-copy">' + escapeHtml(card.description) + '</p>';
+            }
+            if (card.text) {
+                html += '<p>' + escapeHtml(card.text) + '</p>';
+            }
+            if (card.items && card.items.length) {
+                html += '<div class="admin-meta-grid">';
+                card.items.forEach(function(item) {
+                    html += '<div class="admin-meta-item"><span>' + escapeHtml(item.label || '') + '</span><strong>' + escapeHtml(item.value || '') + '</strong></div>';
+                });
+                html += '</div>';
+            }
+            if (card.list) {
+                html += renderAdminList(card.list);
+            }
+            if (card.table) {
+                html += renderAdminTable(card.table);
+            }
+            if (card.form) {
+                html += renderAdminForm(card.form);
+            }
+            if (card.code) {
+                html += '<div class="admin-code-block"><pre class="mb-0 small">' + escapeHtml(card.code) + '</pre></div>';
+            }
+            html += '</div>';
+        });
+
+        return html + '</div>';
+    }
+
+    function renderAdminGroupGrid(block) {
+        var html = '<div class="admin-group-grid">';
+
+        (block.cards || []).forEach(function(card) {
+            html += '<div class="admin-group-card"><h6>' + escapeHtml(card.title || '') + '</h6><p>' + escapeHtml(card.description || '') + '</p><ul>';
+            (card.items || []).forEach(function(item) {
+                html += '<li><span>' + escapeHtml(item.label || '') + '</span><strong>' + escapeHtml(item.value || '') + '</strong></li>';
+            });
+            html += '</ul></div>';
+        });
+
+        return html + '</div>';
+    }
+
+    function renderAdminChart(block) {
+        var charts = block.cards || [];
+        var layoutClass = (charts.length > 1 || block.columns === 2) ? 'admin-chart-grid-layout' : '';
+        var html = '';
+
+        if (block.title || block.subtitle || (block.period && block.period.length)) {
+            html += '<div class="admin-actions justify-content-between align-items-start mb-3">';
+            html += '<div>';
+            if (block.title) {
+                html += '<h5 class="mb-1">' + escapeHtml(block.title) + '</h5>';
+            }
+            if (block.subtitle) {
+                html += '<p class="admin-chart-copy mb-0">' + escapeHtml(block.subtitle) + '</p>';
+            }
+            html += '</div>';
+            if (block.period && block.period.length) {
+                html += '<div class="admin-actions admin-period-switch">';
+                block.period.forEach(function(action) {
+                    html += '<a href="' + escapeHtml(action.href || '#') + '" data-admin-nav="1" class="' + adminButtonClass(action.tone || 'secondary') + '">' + escapeHtml(action.label || '') + '</a>';
+                });
+                html += '</div>';
+            }
+            html += '</div>';
+        }
+
+        html += '<div class="' + layoutClass + '">';
+        charts.forEach(function(chartCard) {
+            html += '<div class="admin-chart-card">';
+            if (chartCard.title) {
+                html += '<h5 class="mb-2">' + escapeHtml(chartCard.title) + '</h5>';
+            }
+            if (chartCard.subtitle) {
+                html += '<p class="admin-chart-copy">' + escapeHtml(chartCard.subtitle) + '</p>';
+            }
+            html += renderAdminChartSvg(chartCard.chart || {points: [], series: []});
+            if (chartCard.legend && chartCard.legend.length) {
+                html += '<div class="admin-chart-legend">';
+                chartCard.legend.forEach(function(item) {
+                    html += '<div class="admin-chart-legend-item"><span><i class="admin-chart-swatch" style="background:' + escapeHtml(item.color || '#ff9900') + ';"></i>' + escapeHtml(item.label || '') + '</span><strong>' + escapeHtml(item.value || '') + '</strong></div>';
+                });
+                html += '</div>';
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+
+        return html;
+    }
+
+    function renderAdminChartSvg(chart) {
+        var points = chart.points || [];
+        var series = chart.series || [];
+        var width = 760;
+        var height = 280;
+        var padding = {left: 24, right: 20, top: 20, bottom: 36};
+        var plotWidth = width - padding.left - padding.right;
+        var plotHeight = height - padding.top - padding.bottom;
+        var maxValue = 0;
+        var gridHtml = '';
+        var seriesHtml = '';
+        var hitsHtml = '';
+        var labelsHtml = '';
+        var stepX = points.length > 1 ? plotWidth / (points.length - 1) : 0;
+
+        series.forEach(function(definition) {
+            points.forEach(function(point) {
+                maxValue = Math.max(maxValue, Number(point[definition.key] || 0));
+            });
+        });
+
+        if (!points.length || !series.length) {
+            return '<div class="admin-chart-empty">No chart data available.</div>';
+        }
+
+        maxValue = Math.max(maxValue, 1);
+
+        [0, 1, 2, 3, 4].forEach(function(index) {
+            var y = padding.top + ((plotHeight / 4) * index);
+            gridHtml += '<line x1="' + padding.left + '" y1="' + y + '" x2="' + (width - padding.right) + '" y2="' + y + '"></line>';
+        });
+
+        series.forEach(function(definition) {
+            var polylinePoints = [];
+
+            points.forEach(function(point, index) {
+                var value = Number(point[definition.key] || 0);
+                var x = padding.left + (stepX * index);
+                var y = padding.top + plotHeight - ((value / maxValue) * plotHeight);
+                polylinePoints.push(x.toFixed(2) + ',' + y.toFixed(2));
+                hitsHtml += '<rect class="admin-chart-hit" x="' + (x - 12) + '" y="' + padding.top + '" width="24" height="' + plotHeight + '" fill="transparent" data-series-label="' + escapeHtml(definition.label || definition.key || '') + '" data-value-label="' + escapeHtml(formatChartValue(value, definition.format || 'number')) + '" data-date-label="' + escapeHtml(String(point.date || '')) + '"></rect>';
+            });
+
+            if (definition.fill && definition.fill !== 'none') {
+                seriesHtml += '<polygon points="' + escapeHtml(polylinePoints.concat([(padding.left + (stepX * (points.length - 1))).toFixed(2) + ',' + (padding.top + plotHeight).toFixed(2), padding.left.toFixed(2) + ',' + (padding.top + plotHeight).toFixed(2)]).join(' ')) + '" fill="' + escapeHtml(definition.fill) + '"></polygon>';
+            }
+
+            seriesHtml += '<polyline points="' + escapeHtml(polylinePoints.join(' ')) + '" stroke="' + escapeHtml(definition.stroke || '#ff9900') + '" stroke-width="2.5" fill="none"></polyline>';
+        });
+
+        points.forEach(function(point, index) {
+            if (index === 0 || index === points.length - 1 || index === Math.floor(points.length / 2)) {
+                labelsHtml += '<text x="' + (padding.left + (stepX * index)) + '" y="' + (height - 12) + '" text-anchor="middle">' + escapeHtml(String(point.date || '').slice(5)) + '</text>';
+            }
+        });
+
+        return '<div class="admin-chart-frame"><svg viewBox="0 0 ' + width + ' ' + height + '" class="admin-chart-svg" preserveAspectRatio="none"><g class="admin-chart-grid">' + gridHtml + '</g><g>' + seriesHtml + '</g><g class="admin-chart-labels">' + labelsHtml + '</g><g>' + hitsHtml + '</g></svg><div class="admin-chart-tooltip" hidden></div></div>';
+    }
+
+    function formatChartValue(value, format) {
+        if (format === 'bytes') {
+            return humanFileSize(value);
+        }
+
+        if (format === 'currency') {
+            return '$' + (Number(value || 0) / 1000000).toFixed(2);
+        }
+
+        return String(Math.round(Number(value || 0)));
+    }
+
+    function humanFileSize(bytes) {
+        var value = Number(bytes || 0);
+        var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        var index = 0;
+
+        while (value >= 1024 && index < units.length - 1) {
+            value /= 1024;
+            index += 1;
+        }
+
+        return value.toFixed(index === 0 ? 0 : 1) + ' ' + units[index];
+    }
+    function setAdminLoadingState(isLoading, panel) {
+        var $shell = $('[data-admin-shell="1"]').first();
+        var $panel = panel ? $(panel) : $();
+
+        if ($shell.length) {
+            $shell.toggleClass('is-loading', !!isLoading);
+        }
+
+        if ($panel.length) {
+            $panel.toggleClass('is-loading', !!isLoading);
+            $panel.attr('data-admin-loading', isLoading ? '1' : '0');
+        }
+    }
+
+    function renderAdminBlocks(blocks) {
+        var html = '';
+
+        (blocks || []).forEach(function(block) {
+            if (!block || !block.type) {
+                return;
+            }
+
+            if (block.type === 'toolbar') {
+                html += '<div class="admin-render-block">' + renderAdminToolbar(block) + '</div>';
+            } else if (block.type === 'table') {
+                html += '<div class="admin-render-block">' + renderAdminTable(block) + '</div>';
+            } else if (block.type === 'group_grid') {
+                html += '<div class="admin-render-block">' + renderAdminGroupGrid(block) + '</div>';
+            } else if (block.type === 'cards') {
+                html += '<div class="admin-render-block">' + renderAdminCards(block) + '</div>';
+            } else if (block.type === 'chart_cards') {
+                html += '<div class="admin-render-block">' + renderAdminChart(block) + '</div>';
+            } else if (block.type === 'subnav') {
+                html += '<div class="admin-render-block"><div class="admin-subnav">' + (block.items || []).map(function(item) {
+                    return '<a href="' + escapeHtml(item.href || '#') + '" data-admin-nav="1" class="' + (item.active ? 'active' : '') + '">' + (item.icon ? '<i class="fad ' + escapeHtml(item.icon) + '"></i>' : '') + '<span>' + escapeHtml(item.label || '') + '</span></a>';
+                }).join('') + '</div></div>';
+            } else if (block.type === 'notice') {
+                html += '<div class="admin-render-block"><div class="admin-subsection"><p class="admin-empty">' + escapeHtml(block.message || '') + '</p></div></div>';
+            }
+        });
+
+        return html;
+    }
+
+    function renderAdminView(panel, payload) {
+        var $panel = $(panel);
+        var $actions = $panel.find('[data-admin-actions]').first();
+        var $metrics = $panel.find('[data-admin-metrics]').first();
+        var $body = $panel.find('[data-admin-body]').first();
+        var metricsHtml = '';
+
+        $panel.attr('data-admin-loaded', '1');
+        $panel.find('[data-admin-title]').text(payload.title || '');
+        $panel.find('[data-admin-subtitle]').text(payload.subtitle || '');
+        $panel.find('[data-admin-feedback]').empty();
+
+        (payload.metrics || []).forEach(function(item) {
+            metricsHtml += '<div class="admin-kv__item"><span>' + escapeHtml(item.label || '') + '</span><strong>' + escapeHtml(item.value || '') + '</strong>' + (item.meta ? '<small>' + escapeHtml(item.meta) + '</small>' : '') + '</div>';
+        });
+
+        $actions.html((payload.actions || []).map(renderAdminAction).join(''));
+        $metrics.html(metricsHtml ? '<div class="admin-kv">' + metricsHtml + '</div>' : '');
+        $body.html(renderAdminBlocks(payload.blocks || []));
+    }
+
+    function activateAdminRoute(route, sidebarSubview) {
+        var sidebarSlug = sidebarSubview || resolveAdminSidebarSubview(route);
+
+        $('[data-admin-view]').removeClass('is-active');
+        $('[data-admin-sidebar-section]').removeClass('active');
+        $('.admin-header-nav .nav-link[data-admin-nav="1"]').removeClass('active');
+
+        if (route && route.section) {
+            $('[data-admin-sidebar-section="' + route.section + '"]').addClass('active');
+            $('.admin-header-nav .nav-link[data-admin-nav="1"]').each(function() {
+                var candidate = getAdminRoute(this.href);
+
+                if (candidate && candidate.section === route.section) {
+                    $(this).addClass('active');
+                }
+            });
+        }
+
+        $('.settings_menu a[data-admin-nav="1"]').removeClass('active');
+        $('.settings_menu a[data-admin-nav="1"]').each(function() {
+            var candidate = getAdminRoute(this.href);
+
+            if (candidate && candidate.subview === sidebarSlug) {
+                $(this).addClass('active');
+            }
+        });
+
+        if (route && route.subview) {
+            $(getAdminPanel(route.subview)).addClass('is-active');
+        }
     }
 
     function syncAdminShell(payload, nextUrl, pushState) {
-        var currentShell = document.querySelector('[data-admin-shell="1"]');
-        var currentHeaderStrip = document.querySelector('.admin-header-strip');
-        var currentMobileNav = document.querySelector('#menu .container-fluid > ul.nav');
-        var currentSidebar;
-        var currentContent;
-        var $headerNav;
-        var $mobileNav;
-        var $sidebar;
-        var $content;
+        var route = getAdminRoute(nextUrl);
+        var panel;
 
-        if (!payload || payload.status !== 'ok' || !currentShell) {
+        if (!payload || payload.status !== 'ok' || !route) {
             window.location.href = nextUrl;
             return;
         }
 
-        if (payload.header_nav_html && currentHeaderStrip) {
-            $headerNav = $(currentHeaderStrip).find('.admin-header-nav').first();
+        route.section = payload.active_section || route.section;
+        route.subview = payload.active_subview || route.subview;
+        panel = getAdminPanel(route.subview);
 
-            if ($headerNav.length) {
-                $headerNav.html(payload.header_nav_html);
-            }
-        } else if (payload.header_nav_html && !currentHeaderStrip) {
-            var navbar = document.querySelector('nav.main-menu');
-            var strip = document.createElement('div');
-
-            if (navbar && navbar.parentNode) {
-                strip.className = 'admin-header-strip d-none d-lg-block';
-                strip.innerHTML = '<div class="container-fluid"><ul class="nav justify-content-center admin-header-nav">' + payload.header_nav_html + '</ul></div>';
-                navbar.insertAdjacentElement('afterend', strip);
-            }
-        } else if (!payload.header_nav_html && currentHeaderStrip) {
-            currentHeaderStrip.remove();
-        }
-
-        if (payload.mobile_nav_html && currentMobileNav) {
-            $mobileNav = $(currentMobileNav);
-            $mobileNav.html(payload.mobile_nav_html);
-        }
-
-        currentSidebar = currentShell.querySelector('.sidebar.settings-page');
-        currentContent = currentShell.querySelector('.details.settings_data');
-
-        if (!currentSidebar || !currentContent || !payload.sidebar_html || !payload.content_html) {
+        if (!panel) {
             window.location.href = nextUrl;
             return;
         }
 
-        $sidebar = $(payload.sidebar_html);
-        $content = $(payload.content_html);
-
-        $(currentSidebar).replaceWith($sidebar);
-        $(currentContent).replaceWith($content);
+        activateAdminRoute(route, payload.sidebar_subview);
+        renderAdminView(panel, payload.view || {});
         document.title = payload.title || document.title;
         $('#menu').removeClass('show');
 
@@ -154,16 +737,28 @@ $(document).ready(function() {
     }
 
     function loadAdminView(nextUrl, pushState) {
-        if (!hasAdminShell() || !isAdminNavigationHref(nextUrl)) {
+        var route = getAdminRoute(nextUrl);
+        var panel;
+
+        if (!hasAdminShell() || !isAdminNavigationHref(nextUrl) || !route) {
             window.location.href = nextUrl;
             return;
         }
+
+        panel = getAdminPanel(route.subview);
+
+        if (!panel) {
+            window.location.href = nextUrl;
+            return;
+        }
+
+        activateAdminRoute(route, resolveAdminSidebarSubview(route));
 
         if (adminRequest && typeof adminRequest.abort === 'function') {
             adminRequest.abort();
         }
 
-        setAdminLoadingState(true);
+        setAdminLoadingState(true, panel);
         adminRequest = $.ajax({
             url: nextUrl,
             method: 'GET',
@@ -180,7 +775,7 @@ $(document).ready(function() {
             }
         }).always(function() {
             adminRequest = null;
-            setAdminLoadingState(false);
+            setAdminLoadingState(false, panel);
         });
     }
 
@@ -226,6 +821,25 @@ $(document).ready(function() {
         loadAdminView(href, true);
     });
 
+    $(document).on('submit', 'form[data-admin-filter="1"]', function(e) {
+        var action = $(this).attr('action') || window.location.href;
+        var query = $(this).serialize();
+        var nextUrl = action + (query ? (action.indexOf('?') === -1 ? '?' : '&') + query : '');
+
+        if (!hasAdminShell() || !isAdminNavigationHref(nextUrl)) {
+            return;
+        }
+
+        e.preventDefault();
+        loadAdminView(nextUrl, true);
+    });
+
+    $(document).on('submit', 'form[data-confirm]', function(e) {
+        if (!window.confirm($(this).data('confirm') || 'Are you sure?')) {
+            e.preventDefault();
+        }
+    });
+
     window.addEventListener('popstate', function() {
         if (!hasAdminShell() || !isAdminNavigationHref(window.location.href)) {
             return;
@@ -236,6 +850,7 @@ $(document).ready(function() {
 
     if (hasAdminShell() && isAdminNavigationHref(window.location.href)) {
         window.history.replaceState({adminShell: true, url: window.location.href}, '', window.location.href);
+        loadAdminView(window.location.href, false);
     }
 
     $(document).on('mouseenter mousemove focus', '.admin-chart-hit', function(e) {
