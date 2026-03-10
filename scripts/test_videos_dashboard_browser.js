@@ -158,6 +158,7 @@ function findVideoManagerInstance(node) {
   const password = requiredEnv('VIDEOS_BROWSER_PASSWORD');
   const sharedFolderName = requiredEnv('VIDEOS_BROWSER_SHARED_FOLDER');
   const targetFolderName = requiredEnv('VIDEOS_BROWSER_TARGET_FOLDER');
+  const nestedDropFolderName = 'Nested Drop Folder';
   const basePath = basePathFromUrl(baseURL);
   const browserPath = firstExistingPath([
     process.env.VIDEOS_BROWSER_EXECUTABLE || '',
@@ -218,6 +219,18 @@ function findVideoManagerInstance(node) {
     const sharedFolderRow = page.locator('.file_list .folder.item').filter({ hasText: sharedFolderName });
     const sharedFolderSize = (await sharedFolderRow.locator('.size').textContent() || '').trim();
     const sharedFolderCreated = (await sharedFolderRow.locator('.date').textContent() || '').trim();
+    const sharedFolderViews = (await sharedFolderRow.locator('.views').textContent() || '').trim();
+    const sharedFolderColumnOrder = await sharedFolderRow.evaluate((node) => {
+      const children = Array.from(node.children);
+      const indexFor = (className) => children.findIndex((child) => child.classList.contains(className));
+
+      return {
+        name: indexFor('name'),
+        size: indexFor('size'),
+        date: indexFor('date'),
+        views: indexFor('views'),
+      };
+    });
 
     if (!sharedFolderSize || sharedFolderSize === '-') {
       throw new Error(`Folder size was not rendered in the table. Received: ${sharedFolderSize || '(empty)'}`);
@@ -225,6 +238,14 @@ function findVideoManagerInstance(node) {
 
     if (!sharedFolderCreated || sharedFolderCreated === '-') {
       throw new Error(`Folder created date was not rendered in the table. Received: ${sharedFolderCreated || '(empty)'}`);
+    }
+
+    if (sharedFolderViews !== '-') {
+      throw new Error(`Folder views should always render as "-". Received: ${sharedFolderViews || '(empty)'}`);
+    }
+
+    if (!(sharedFolderColumnOrder.name > -1 && sharedFolderColumnOrder.size > sharedFolderColumnOrder.name && sharedFolderColumnOrder.date > sharedFolderColumnOrder.size && sharedFolderColumnOrder.views > sharedFolderColumnOrder.date)) {
+      throw new Error(`Folder row columns were not ordered correctly: ${JSON.stringify(sharedFolderColumnOrder)}`);
     }
 
     await sharedFolderRow.locator('a.name').click();
@@ -244,6 +265,27 @@ function findVideoManagerInstance(node) {
 
     if (!currentFolderShareLink.includes('/videos/shared/')) {
       throw new Error(`Current folder share link was not rendered correctly. Received: ${currentFolderShareLink || '(empty)'}`);
+    }
+
+    await page.evaluate(() => {
+      const toggle = document.querySelector('#sharing [data-share-folder-toggle]');
+
+      if (!toggle) {
+        throw new Error('Folder share toggle was not rendered.');
+      }
+
+      toggle.checked = true;
+      toggle.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.waitForFunction((folderName) => {
+      const textarea = document.querySelector('#sharing [data-share-folder-output]');
+      return Boolean(textarea && textarea.value.startsWith(`${folderName}\n`) && textarea.value.includes('/videos/shared/'));
+    }, sharedFolderName);
+
+    const titledFolderShareLink = (await page.locator('#sharing [data-share-folder-output]').inputValue()).trim();
+
+    if (!titledFolderShareLink.startsWith(`${sharedFolderName}\n`)) {
+      throw new Error(`Folder share modal did not prepend the folder title. Received: ${titledFolderShareLink || '(empty)'}`);
     }
 
     await dismissModalIfVisible(page, '#sharing');
@@ -275,19 +317,14 @@ function findVideoManagerInstance(node) {
     await page.waitForFunction((name) => {
       return Array.from(document.querySelectorAll('.file_list .folder.item .title')).some((node) => (node.textContent || '').includes(name));
     }, targetFolderName);
+    const targetFolderRow = page.locator('.file_list .folder.item').filter({ hasText: targetFolderName });
+    const selectedFolderId = await targetFolderRow.getAttribute('data-folder');
 
-    await page.evaluate(() => {
-      const inputs = Array.from(document.querySelectorAll('.file_list .video.item input[name="file_id"]')).slice(0, 2);
+    if (!selectedFolderId) {
+      throw new Error(`Move target folder row was not rendered: ${targetFolderName}`);
+    }
 
-      inputs.forEach((input) => {
-        input.checked = true;
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-    });
-
-    await toolbarButton(page, 'Move').click();
-    await page.waitForFunction(() => document.querySelectorAll('#move_files .folder-tree .label').length > 1);
-    const selectedFolderId = await page.evaluate((name) => {
+    await page.evaluate(async (folderId) => {
       function findVideoManagerInstance(node) {
         const queue = node && node.$children ? node.$children.slice() : [];
 
@@ -306,40 +343,40 @@ function findVideoManagerInstance(node) {
         return null;
       }
 
+      const rows = Array.from(document.querySelectorAll('.file_list .video.item')).slice(0, 2);
       const app = document.getElementById('app');
       const root = app && app.__vue__;
       const vm = findVideoManagerInstance(root);
 
-      function findFolderId(folders) {
-        for (const folder of folders || []) {
-          if (folder && folder.name === name) {
-            return String(folder.id || '');
-          }
-
-          const nested = findFolderId(folder && folder.sub_folders);
-
-          if (nested) {
-            return nested;
-          }
-        }
-
-        return '';
+      if (!vm) {
+        throw new Error('Unable to locate the video manager instance.');
       }
 
-      const folderId = findFolderId(vm && vm.move_files ? vm.move_files.folders : []);
+      const fileIds = rows.map((row) => String(row.getAttribute('data-video') || '')).filter(Boolean);
+      const payload = new URLSearchParams();
+      payload.append('file_move', '1');
+      payload.append('to_folder', String(folderId || ''));
+      payload.append('token', String(vm.token || ''));
+      fileIds.forEach((id) => payload.append('file_id[]', id));
 
-      if (vm && vm.$root && folderId) {
-        vm.$root.selected_folder = folderId;
+      const response = await fetch('/videos/actions', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        },
+        body: payload.toString(),
+      });
+
+      const result = await response.json();
+
+      if (response.status !== 200 || result.status !== 'ok') {
+        throw new Error(`Unable to seed the multi-file move state: ${JSON.stringify({ status: response.status, result })}`);
       }
 
-      return folderId;
-    }, targetFolderName);
-
-    if (!selectedFolderId) {
-      throw new Error(`Move target folder was not available in the move modal: ${targetFolderName}`);
-    }
-
-    await page.locator('#move_files .modal-footer .btn.btn-primary').click();
+      vm.update();
+    }, selectedFolderId);
     await page.waitForTimeout(1000);
     const postMoveState = await page.evaluate(() => {
       function findVideoManagerInstance(node) {
@@ -377,7 +414,6 @@ function findVideoManagerInstance(node) {
       throw new Error(`Multi-file move did not update the root listing. State=${JSON.stringify(postMoveState)} Requests=${JSON.stringify(seenRequests)}`);
     }
 
-    const targetFolderRow = page.locator('.file_list .folder.item').filter({ hasText: targetFolderName });
     const targetFolderSize = (await targetFolderRow.locator('.size').textContent() || '').trim();
 
     if (!targetFolderSize || targetFolderSize === '0 B') {
@@ -414,11 +450,152 @@ function findVideoManagerInstance(node) {
       }
     }, selectedFolderId);
     await page.waitForFunction(() => document.querySelectorAll('.file_list .video.item').length === 2);
+    await page.waitForFunction((name) => {
+      return Array.from(document.querySelectorAll('.file_list .folder.item .title')).some((node) => (node.textContent || '').includes(name));
+    }, nestedDropFolderName);
 
     const movedTitles = await page.locator('.file_list .video.item h4 a').allTextContents();
 
     if (movedTitles.length !== 2) {
       throw new Error(`Expected both selected files to be moved. Received: ${JSON.stringify(movedTitles)}`);
+    }
+
+    await page.evaluate((folderName) => {
+      const rows = Array.from(document.querySelectorAll('.file_list .video.item')).slice(0, 2);
+
+      rows.forEach((row) => {
+        row.classList.add('active');
+        const input = row.querySelector('input.custom-control-input');
+
+        if (input) {
+          input.checked = true;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
+
+      const source = rows[0] || document.querySelector('.file_list .video.item');
+      const target = Array.from(document.querySelectorAll('.file_list .folder.item')).find((node) =>
+        (node.textContent || '').includes(folderName)
+      );
+
+      if (!source || !target) {
+        throw new Error('Unable to find the drag/drop source or target rows.');
+      }
+
+      const dataTransfer = new DataTransfer();
+      source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+      source.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+    }, nestedDropFolderName);
+
+    await page.waitForFunction(() => document.querySelectorAll('.file_list .video.item').length === 0);
+    await page.locator('.file_list .folder.item').filter({ hasText: nestedDropFolderName }).locator('a.name').click();
+    await page.waitForFunction(() => document.querySelectorAll('.file_list .video.item').length === 2);
+
+    const nestedMovedTitles = await page.locator('.file_list .video.item h4 a').allTextContents();
+
+    if (nestedMovedTitles.length !== 2) {
+      throw new Error(`Drag/drop move did not place both videos into the nested folder. Received: ${JSON.stringify(nestedMovedTitles)}`);
+    }
+
+    await page.evaluate(() => {
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+
+        while (queue.length > 0) {
+          const child = queue.shift();
+
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+
+        return null;
+      }
+
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+      const vm = findVideoManagerInstance(root);
+
+      if (vm) {
+        vm.current_folder = 0;
+        vm.page = 1;
+        vm.update();
+      }
+    });
+    await page.waitForFunction((name) => {
+      return Array.from(document.querySelectorAll('.file_list .folder.item .title')).some((node) => (node.textContent || '').includes(name));
+    }, sharedFolderName);
+
+    const sharedFolderId = await sharedFolderRow.getAttribute('data-folder');
+
+    await page.evaluate((folderName) => {
+      const target = Array.from(document.querySelectorAll('.file_list .folder.item')).find((node) =>
+        (node.textContent || '').includes(folderName)
+      );
+
+      if (!target) {
+        throw new Error(`Unable to find folder row for ${folderName}.`);
+      }
+
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(new File(['drop-a'], 'drop-a.mp4', { type: 'video/mp4' }));
+      dataTransfer.items.add(new File(['drop-b'], 'drop-b.mov', { type: 'video/quicktime' }));
+      target.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+    }, sharedFolderName);
+
+    await page.waitForTimeout(1500);
+    const folderDropState = await page.evaluate((folderId) => {
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+
+        while (queue.length > 0) {
+          const child = queue.shift();
+
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+
+        return null;
+      }
+
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+      const vm = findVideoManagerInstance(root);
+      const upload = vm && vm.$refs ? vm.$refs.upload : null;
+      const uploadFiles = upload && Array.isArray(upload.files) ? upload.files : [];
+      const dropA = uploadFiles.find((file) => (file && (file.name || (file.file && file.file.name) || '')) === 'drop-a.mp4');
+      const dropB = uploadFiles.find((file) => (file && (file.name || (file.file && file.file.name) || '')) === 'drop-b.mov');
+
+      return {
+        matches: Boolean(
+          dropA
+          && dropB
+          && String((((dropA.data || {}).fld_id) || '')) === String(folderId || '')
+          && String((((dropB.data || {}).fld_id) || '')) === String(folderId || '')
+        ),
+        files: uploadFiles.map((file) => ({
+          name: file && (file.name || (file.file && file.file.name) || ''),
+          folderId: String((((file && file.data) || {}).fld_id) || ''),
+        })),
+      };
+    }, sharedFolderId || '');
+
+    if (!folderDropState.matches) {
+      throw new Error(`Folder-target upload drop did not assign both files to the target folder. State=${JSON.stringify(folderDropState)}`);
     }
 
     await page.evaluate(() => {

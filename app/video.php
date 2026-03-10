@@ -2532,12 +2532,22 @@ function ve_handle_legacy_folder_sharing(): void
     $shareNotice = $publicCount > 0
         ? 'Shared visitors can open the public videos in this folder through this link.'
         : 'This shared folder page is live, but only public videos appear to visitors. Private videos stay hidden until you mark them public.';
+    $toggleId = 'share-folder-title-' . (int) ($folder['id'] ?? 0);
 
-    ve_html(
-        '<p class="mb-2"><strong>' . $folderName . '</strong></p>'
-        . '<div class="form-group mb-3"><label>Share link</label><textarea class="form-control" rows="3" onclick="this.focus();this.select()">' . $shareUrl . '</textarea></div>'
-        . '<p class="text-muted mb-0">' . ve_h($shareNotice) . '</p>'
-    );
+    ve_html(<<<HTML
+<div data-share-folder-root data-share-folder-link="{$shareUrl}" data-share-folder-title="{$folderName}">
+    <p class="mb-2"><strong>{$folderName}</strong></p>
+    <div class="custom-control custom-switch mb-3">
+        <input type="checkbox" class="custom-control-input" id="{$toggleId}" value="1" data-share-folder-toggle>
+        <label class="custom-control-label" for="{$toggleId}">Show Title</label>
+    </div>
+    <div class="form-group mb-3">
+        <label>Share link</label>
+        <textarea class="form-control" rows="3" data-share-folder-output onclick="this.focus();this.select()">{$shareUrl}</textarea>
+    </div>
+    <p class="text-muted mb-0">{$shareNotice}</p>
+</div>
+HTML);
 }
 
 function ve_render_public_folder_page(string $publicCode): void
@@ -2558,19 +2568,38 @@ function ve_render_public_folder_page(string $publicCode): void
     $folderSize = ve_h(ve_video_format_bytes(ve_video_folder_size_bytes($userId, $folderId)));
     $folderCreated = ve_h(ve_video_legacy_date_label((string) ($folder['created_at'] ?? '')));
     $shareUrl = ve_h(ve_video_folder_share_url($folder));
-    $folderCards = '';
-    $videoCards = '';
+    $jqueryUrl = ve_h('https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js');
+    $bootstrapCssUrl = ve_h(ve_url('/assets/css/bootstrap.min.css'));
+    $styleCssUrl = ve_h(ve_url('/assets/css/style.min.css'));
+    $panelCssUrl = ve_h(ve_url('/assets/css/panel.min__q_e2207d238712.css'));
+    $videoPageCssUrl = ve_h(ve_url('/assets/css/video_page.min.css'));
+    $bootstrapJsUrl = ve_h('https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.2.1/js/bootstrap.min.js');
+    $logoUrl = ve_h(ve_url('/assets/img/logo-s.png'));
+    $folderRows = '';
+    $videoRows = '';
+    $hasSubfolders = false;
 
     foreach ($folders as $childFolder) {
         if (!is_array($childFolder)) {
             continue;
         }
 
+        $hasSubfolders = true;
         $childName = ve_h((string) ($childFolder['name'] ?? 'Folder'));
         $childUrl = ve_h(ve_video_folder_share_url($childFolder));
         $childSize = ve_h(ve_video_format_bytes(ve_video_folder_size_bytes($userId, (int) ($childFolder['id'] ?? 0))));
         $childCreated = ve_h(ve_video_legacy_date_label((string) ($childFolder['created_at'] ?? '')));
-        $folderCards .= '<a class="ve-folder-card" href="' . $childUrl . '"><strong>' . $childName . '</strong><span>' . $childSize . '</span><small>' . $childCreated . '</small></a>';
+        $folderRows .= <<<HTML
+<li class="folder item d-flex align-items-center">
+    <div class="name">
+        <h4><a href="{$childUrl}">{$childName}</a></h4>
+        <span class="text-muted">Shared sub-folder</span>
+    </div>
+    <div class="size d-none d-sm-block">{$childSize}</div>
+    <div class="date d-none d-sm-block">{$childCreated}</div>
+    <div class="views d-none d-sm-block">-</div>
+</li>
+HTML;
     }
 
     foreach ($videos as $video) {

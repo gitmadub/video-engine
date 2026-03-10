@@ -208,6 +208,57 @@
         requestHtml(ENDPOINTS.share, { folder_id: folderId }, function (html) {
             window.jQuery('#sharing').modal('show');
             window.jQuery('#sharing .modal-body').html(html);
+            initFolderShareModal();
+        });
+    }
+
+    function insertAfter(parent, child, reference) {
+        if (!parent || !child || !reference) {
+            return;
+        }
+
+        if (reference.nextSibling === child) {
+            return;
+        }
+
+        parent.insertBefore(child, reference.nextSibling);
+    }
+
+    function updateFolderShareOutput(root) {
+        if (!root) {
+            return;
+        }
+
+        var output = root.querySelector('[data-share-folder-output]');
+        var toggle = root.querySelector('[data-share-folder-toggle]');
+        var link = root.getAttribute('data-share-folder-link') || '';
+        var title = root.getAttribute('data-share-folder-title') || 'Folder';
+
+        if (!output) {
+            return;
+        }
+
+        output.value = toggle && toggle.checked ? title + '\n' + link : link;
+    }
+
+    function initFolderShareModal() {
+        var root = document.querySelector('#sharing [data-share-folder-root]');
+
+        if (!root) {
+            return;
+        }
+
+        var toggle = root.querySelector('[data-share-folder-toggle]');
+
+        updateFolderShareOutput(root);
+
+        if (!toggle || toggle.__veBound) {
+            return;
+        }
+
+        toggle.__veBound = true;
+        toggle.addEventListener('change', function () {
+            updateFolderShareOutput(root);
         });
     }
 
@@ -232,6 +283,7 @@
             var folder = folderPayloadById(vm, folderId);
             var size = folder && folder.siz ? folder.siz : '0 B';
             var created = folder && folder.cre ? folder.cre : '-';
+            var nameColumn = item.querySelector('.name');
             var existingSize = item.querySelector(':scope > .size');
             var existingDate = item.querySelector(':scope > .date');
             var existingViews = item.querySelector(':scope > .views');
@@ -255,17 +307,221 @@
                 item.appendChild(existingViews);
             }
 
-            if (!existingPublic) {
-                existingPublic = document.createElement('div');
-                existingPublic.className = 'public d-none d-sm-block';
-                item.appendChild(existingPublic);
+            if (existingPublic && existingPublic.parentNode === item) {
+                item.removeChild(existingPublic);
             }
 
             existingSize.textContent = size;
             existingDate.textContent = created;
             existingViews.textContent = '-';
-            existingPublic.innerHTML = '<a href="#sharing" data-folder-share="' + String(folderId || '') + '">Share</a>';
+
+            if (nameColumn) {
+                insertAfter(item, existingSize, nameColumn);
+                insertAfter(item, existingDate, existingSize);
+                insertAfter(item, existingViews, existingDate);
+            }
         });
+    }
+
+    function decorateDraggableItems() {
+        document.querySelectorAll('.file_list .item').forEach(function (item) {
+            if (item.classList.contains('header')) {
+                item.removeAttribute('draggable');
+                return;
+            }
+
+            if (item.hasAttribute('data-video') || item.hasAttribute('data-folder')) {
+                item.setAttribute('draggable', 'true');
+                return;
+            }
+
+            item.removeAttribute('draggable');
+        });
+    }
+
+    function dataTransferLooksLikeFiles(dataTransfer) {
+        if (!dataTransfer) {
+            return false;
+        }
+
+        if (dataTransfer.files && dataTransfer.files.length > 0) {
+            return true;
+        }
+
+        if (!dataTransfer.types) {
+            return false;
+        }
+
+        return Array.prototype.indexOf.call(dataTransfer.types, 'Files') !== -1;
+    }
+
+    function isAcceptedVideoFile(file) {
+        return !!(
+            file && (
+                /^video\//i.test(file.type || '')
+                || /\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpeg|mpg|ts|m2ts|mts|3gp)$/i.test(file.name || '')
+            )
+        );
+    }
+
+    function normalizeUploadFiles(items) {
+        if (!items) {
+            return [];
+        }
+
+        if (Array.isArray(items)) {
+            return items.filter(Boolean);
+        }
+
+        return [items].filter(Boolean);
+    }
+
+    function applyUploadFolder(upload, files, folderId) {
+        if (!upload || typeof upload.update !== 'function') {
+            return;
+        }
+
+        normalizeUploadFiles(files).forEach(function (file) {
+            var currentData = file && file.data && typeof file.data === 'object' ? file.data : {};
+            upload.update(file, {
+                data: Object.assign({}, currentData, {
+                    fld_id: String(folderId || '0')
+                })
+            });
+        });
+    }
+
+    function queueDroppedFiles(vm, dataTransfer, folderId) {
+        var upload = vm && vm.$refs ? vm.$refs.upload : null;
+        var beforeFiles;
+        var queued;
+        var validFiles;
+
+        if (!upload || typeof upload.add !== 'function') {
+            return false;
+        }
+
+        validFiles = Array.prototype.filter.call((dataTransfer && dataTransfer.files) || [], isAcceptedVideoFile);
+
+        if (!validFiles.length) {
+            showToast('info', 'Drop one or more supported video files.');
+            return false;
+        }
+
+        beforeFiles = Array.isArray(upload.files) ? upload.files.slice() : [];
+
+        function finalizeQueuedFiles(result) {
+            var queuedFiles = Array.isArray(upload.files) ? upload.files.filter(function (file) {
+                return beforeFiles.indexOf(file) === -1;
+            }) : [];
+
+            if (!queuedFiles.length) {
+                queuedFiles = normalizeUploadFiles(result);
+            }
+
+            applyUploadFolder(upload, queuedFiles, folderId);
+
+            if (vm.uploadAuto !== false && Object.prototype.hasOwnProperty.call(upload, 'active')) {
+                upload.active = true;
+            }
+        }
+
+        queued = validFiles.map(function (file) {
+            return upload.add(file);
+        });
+
+        if (queued && typeof queued.then === 'function') {
+            queued.then(function (result) {
+                window.setTimeout(function () {
+                    finalizeQueuedFiles(result);
+                }, 50);
+            });
+        } else {
+            window.setTimeout(function () {
+                finalizeQueuedFiles(queued);
+            }, 50);
+        }
+
+        return true;
+    }
+
+    function selectionFromItem(vm, item) {
+        syncSelectionFromDom(vm);
+
+        if (!item.classList.contains('active')) {
+            document.querySelectorAll('.file_list .item.active').forEach(function (node) {
+                setItemSelected(node, false);
+            });
+            setItemSelected(item, true);
+            syncSelectionFromDom(vm);
+        }
+
+        return {
+            fileIds: normalizeIdList(vm.file_ids),
+            folderIds: normalizeIdList(vm.folder_ids)
+        };
+    }
+
+    function moveItemsToFolder(vm, selection, targetFolderId, onComplete) {
+        var fileIds = normalizeIdList(selection && selection.fileIds);
+        var folderIds = normalizeIdList(selection && selection.folderIds);
+        var pending = 0;
+        var failed = false;
+        var successMessages = [];
+        var normalizedTargetFolderId = String(targetFolderId || '0');
+
+        function finalize() {
+            if (!failed && successMessages.length) {
+                showToast('success', successMessages.join(' '));
+            }
+
+            if (typeof onComplete === 'function') {
+                onComplete(failed);
+            }
+        }
+
+        function handleResponse(response) {
+            pending -= 1;
+
+            if (response && response.status === 'fail') {
+                failed = true;
+                showToast('error', response.message || 'The move could not be completed.');
+            } else if (response && response.status === 'ok' && response.message) {
+                successMessages.push(response.message);
+            }
+
+            if (pending <= 0) {
+                finalize();
+            }
+        }
+
+        if (!fileIds.length && !folderIds.length) {
+            if (typeof onComplete === 'function') {
+                onComplete(false);
+            }
+            return;
+        }
+
+        if (fileIds.length) {
+            pending += 1;
+            requestJson('post', ENDPOINTS.actions, {
+                file_move: 1,
+                to_folder: normalizedTargetFolderId,
+                file_id: fileIds,
+                token: vm.token
+            }, handleResponse);
+        }
+
+        if (folderIds.length) {
+            pending += 1;
+            requestJson('post', ENDPOINTS.actions, {
+                folder_move: 1,
+                to_folder_fld: normalizedTargetFolderId,
+                fld_id1: folderIds,
+                fld_id: vm.current_folder,
+                token: vm.token
+            }, handleResponse);
+        }
     }
 
     function ensureToolbarLabels(vm) {
@@ -386,41 +642,45 @@
 
         function clearHighlight() {
             root.classList.remove('ve-drag-over');
+            root.querySelectorAll('.ve-drag-folder-target').forEach(function (node) {
+                node.classList.remove('ve-drag-folder-target');
+            });
         }
 
-        function addFiles(files) {
-            var list = Array.prototype.filter.call(files || [], function (file) {
-                return !!(
-                    file && (
-                        /^video\//i.test(file.type || '')
-                        || /\.(mp4|m4v|mov|mkv|webm|avi|wmv|flv|mpeg|mpg|ts|m2ts|mts|3gp)$/i.test(file.name || '')
-                    )
-                );
-            });
+        function highlightTarget(target) {
+            clearHighlight();
+            root.classList.add('ve-drag-over');
 
-            if (!list.length) {
-                return;
+            if (target) {
+                target.classList.add('ve-drag-folder-target');
             }
+        }
 
-            if (vm.$refs && vm.$refs.upload && typeof vm.$refs.upload.add === 'function') {
-                list.forEach(function (file) {
-                    vm.$refs.upload.add(file);
-                });
+        function folderDropTargetFromEvent(event) {
+            var target = event.target && event.target.closest('.file_list .folder.item[data-folder]');
 
-                if (vm.uploadAuto !== false && Object.prototype.hasOwnProperty.call(vm.$refs.upload, 'active')) {
-                    vm.$refs.upload.active = true;
-                }
-            }
+            return target && root.contains(target) ? target : null;
         }
 
         root.addEventListener('dragenter', function (event) {
+            if (!dataTransferLooksLikeFiles(event.dataTransfer) && !vm.__veInternalDrag) {
+                return;
+            }
+
             event.preventDefault();
-            root.classList.add('ve-drag-over');
+            highlightTarget(folderDropTargetFromEvent(event));
         });
 
         root.addEventListener('dragover', function (event) {
+            if (!dataTransferLooksLikeFiles(event.dataTransfer) && !vm.__veInternalDrag) {
+                return;
+            }
+
             event.preventDefault();
-            root.classList.add('ve-drag-over');
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = 'move';
+            }
+            highlightTarget(folderDropTargetFromEvent(event));
         });
 
         root.addEventListener('dragleave', function (event) {
@@ -429,10 +689,56 @@
             }
         });
 
+        root.addEventListener('dragstart', function (event) {
+            var item = event.target && event.target.closest('.file_list .item');
+            var selection;
+
+            if (!item || item.classList.contains('header') || (!item.hasAttribute('data-video') && !item.hasAttribute('data-folder'))) {
+                return;
+            }
+
+            selection = selectionFromItem(vm, item);
+
+            vm.__veInternalDrag = {
+                fileIds: selection.fileIds,
+                folderIds: selection.folderIds
+            };
+
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+
+                try {
+                    event.dataTransfer.setData('text/plain', JSON.stringify(vm.__veInternalDrag));
+                } catch (error) {
+                    // Ignore browsers that block custom drag data here.
+                }
+            }
+        });
+
+        root.addEventListener('dragend', function () {
+            vm.__veInternalDrag = null;
+            clearHighlight();
+        });
+
         root.addEventListener('drop', function (event) {
+            var folderTarget = folderDropTargetFromEvent(event);
+            var targetFolderId = folderTarget ? folderTarget.getAttribute('data-folder') : String(vm.current_folder || '0');
+
             event.preventDefault();
             clearHighlight();
-            addFiles(event.dataTransfer && event.dataTransfer.files);
+
+            if (vm.__veInternalDrag) {
+                moveItemsToFolder(vm, vm.__veInternalDrag, targetFolderId, function () {
+                    vm.__veInternalDrag = null;
+                    vm.__vePendingMove = null;
+                    vm.file_ids = [];
+                    vm.folder_ids = [];
+                    vm.update();
+                });
+                return;
+            }
+
+            queueDroppedFiles(vm, event.dataTransfer, targetFolderId);
         });
 
         vm.__veDropZoneReady = true;
@@ -481,6 +787,7 @@
             ensureToolbarLabels(vm);
             ensureActionButtonTypes();
             decorateFolderRows(vm);
+            decorateDraggableItems();
             installSelection(vm);
             installDropZone(vm);
             installSelectionSync(vm);
@@ -620,31 +927,17 @@
                 return;
             }
 
-            if (fileIds.length) {
-                vm.ajax({
-                    file_move: 1,
-                    to_folder: targetFolderId,
-                    file_id: fileIds,
-                    token: vm.token
-                }, false);
-            }
-
-            if (folderIds.length) {
-                vm.ajax({
-                    folder_move: 1,
-                    to_folder_fld: targetFolderId,
-                    fld_id1: folderIds,
-                    fld_id: vm.current_folder,
-                    token: vm.token
-                }, false);
-            }
-
             window.jQuery('#move_files').modal('hide');
             vm.move_files.folders = null;
-            vm.__vePendingMove = null;
-            window.setTimeout(function () {
+            moveItemsToFolder(vm, {
+                fileIds: fileIds,
+                folderIds: folderIds
+            }, targetFolderId, function () {
+                vm.__vePendingMove = null;
+                vm.file_ids = [];
+                vm.folder_ids = [];
                 vm.update();
-            }, 50);
+            });
         };
 
         target.export_files = function () {

@@ -482,11 +482,21 @@ try {
     ]);
     videos_actions_assert($sharing['status'] === 200 && str_contains($sharing['body'], 'Share link'), 'Folder sharing modal endpoint should render the share helper UI.');
     videos_actions_assert(str_contains($sharing['body'], '/videos/shared/'), 'Folder sharing modal endpoint should expose the public folder URL.');
+    videos_actions_assert(str_contains($sharing['body'], 'Show Title'), 'Folder sharing modal endpoint should expose the Show Title toggle.');
+    videos_actions_assert(str_contains($sharing['body'], 'data-share-folder-toggle'), 'Folder sharing modal endpoint should expose the share title toggle hook.');
 
     $publicFolderPath = (string) parse_url((string) ($folderActions['current_folder']['share_url'] ?? ''), PHP_URL_PATH);
     videos_actions_assert($publicFolderPath !== '', 'Folder sharing payload should expose a valid share path.');
     $publicFolder = $client->request('GET', $publicFolderPath);
     videos_actions_assert($publicFolder['status'] === 200 && str_contains($publicFolder['body'], 'Root Video Renamed'), 'Public folder page should render the public video listing.');
+    videos_actions_assert(str_contains($publicFolder['body'], 'video_page.min.css'), 'Public folder page should load the shared player/dashboard design assets.');
+    videos_actions_assert(str_contains($publicFolder['body'], '<h2 class="title mb-1">Folders</h2>'), 'Public folder page should render the sub-folder section when sub-folders exist.');
+
+    $emptyFolderSharePath = (string) parse_url((string) ($initialActions['folders'][0]['share_url'] ?? ''), PHP_URL_PATH);
+    videos_actions_assert($emptyFolderSharePath !== '', 'Seeded folder should expose a public share path.');
+    $emptyFolderPage = $client->request('GET', $emptyFolderSharePath);
+    videos_actions_assert($emptyFolderPage['status'] === 200, 'Seeded shared folder page should load.');
+    videos_actions_assert(!str_contains($emptyFolderPage['body'], '<h2 class="title mb-1">Folders</h2>'), 'Public folder page should hide the folder section when there are no sub-folders.');
 
     $bulkDelete = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [

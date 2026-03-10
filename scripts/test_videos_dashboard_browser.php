@@ -163,6 +163,18 @@ $insertFolder->execute([
 ]);
 $targetFolderId = (int) $pdo->lastInsertId();
 
+$pdo->prepare(
+    'INSERT INTO video_folders (user_id, parent_id, public_code, name, created_at, updated_at, deleted_at)
+     VALUES (:user_id, :parent_id, :public_code, :name, :created_at, :updated_at, NULL)'
+)->execute([
+    ':user_id' => $userId,
+    ':parent_id' => $targetFolderId,
+    ':public_code' => ve_video_folder_generate_public_code(),
+    ':name' => 'Nested Drop Folder',
+    ':created_at' => $now,
+    ':updated_at' => $now,
+]);
+
 videos_browser_insert_ready_video($pdo, $userId, $sharedFolderId, 'sharedfolder1', 'Shared Folder Clip', 64 * 1024 * 1024);
 videos_browser_insert_ready_video($pdo, $userId, 0, 'browsermove01', 'Browser Move A', 40 * 1024 * 1024);
 videos_browser_insert_ready_video($pdo, $userId, 0, 'browsermove02', 'Browser Move B', 55 * 1024 * 1024);
