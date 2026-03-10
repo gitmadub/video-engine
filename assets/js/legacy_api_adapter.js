@@ -153,6 +153,23 @@
         return true;
     }
 
+    function installXmlHttpRequestAdapter() {
+        if (!window.XMLHttpRequest || window.__veLegacyXmlHttpRequestAdapterInstalled) {
+            return;
+        }
+
+        var originalOpen = window.XMLHttpRequest.prototype.open;
+
+        window.XMLHttpRequest.prototype.open = function (method, url) {
+            var replacementUrl = rewriteLegacyUrl(url);
+            var nextUrl = replacementUrl || url;
+
+            return originalOpen.apply(this, [method, nextUrl].concat(Array.prototype.slice.call(arguments, 2)));
+        };
+
+        window.__veLegacyXmlHttpRequestAdapterInstalled = true;
+    }
+
     function installWindowOpenAdapter() {
         if (window.__veLegacyWindowOpenAdapterInstalled) {
             return;
@@ -169,6 +186,7 @@
     }
 
     function boot() {
+        installXmlHttpRequestAdapter();
         installWindowOpenAdapter();
 
         if (installJqueryAdapter()) {
