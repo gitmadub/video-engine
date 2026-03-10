@@ -59,31 +59,31 @@ function ve_dispatch_legacy_route(string $op, string $path): bool
             ve_legacy_endpoint_removed('/api/dmca', ['GET']);
 
         case 'videos_json':
-            ve_legacy_endpoint_removed('/api/videos/actions', ['GET', 'POST']);
+            ve_handle_legacy_videos_json();
 
         case 'remote_upload_json':
             ve_legacy_endpoint_removed('/api/remote/jobs', ['GET', 'POST']);
 
         case 'upload_get_srv':
-            ve_legacy_endpoint_removed('/api/videos/upload-target', ['GET']);
+            ve_handle_legacy_upload_get_server();
 
         case 'pass_file':
-            ve_legacy_endpoint_removed('/api/uploads/check', ['GET', 'POST']);
+            ve_handle_legacy_pass_file();
 
         case 'upload_results_json':
-            ve_legacy_endpoint_removed('/api/uploads/result', ['POST']);
+            ve_handle_legacy_upload_results();
 
         case 'add_srt':
-            ve_legacy_endpoint_removed('/api/videos/subtitles', ['GET', 'POST']);
+            ve_handle_legacy_add_srt();
 
         case 'change_thumbnail':
-            ve_legacy_endpoint_removed('/api/videos/thumbnail', ['GET']);
+            ve_handle_legacy_change_thumbnail();
 
         case 'folder_sharing':
-            ve_legacy_endpoint_removed('/api/folders/share', ['GET']);
+            ve_handle_legacy_folder_sharing();
 
         case 'marker':
-            ve_legacy_endpoint_removed('/api/videos/markers', ['GET']);
+            ve_handle_legacy_marker();
 
         case 'payments':
             ve_legacy_endpoint_removed('/api/billing/paypal', ['GET', 'POST']);
