@@ -871,6 +871,9 @@ $(document).ready(function() {
         var frameRect;
         var left;
         var top;
+        var seriesLabel;
+        var valueLabel;
+        var dateLabel;
 
         if (!$frame.length || !$tooltip.length || !$frame[0].getBoundingClientRect) {
             return;
@@ -879,11 +882,14 @@ $(document).ready(function() {
         frameRect = $frame[0].getBoundingClientRect();
         left = (event.clientX || frameRect.left) - frameRect.left;
         top = (event.clientY || frameRect.top) - frameRect.top;
+        seriesLabel = $hit.attr('data-series-label') || '';
+        valueLabel = $hit.attr('data-value-label') || '';
+        dateLabel = $hit.attr('data-date-label') || '';
 
         $tooltip.html(
-            '<span>' + escapeHtml($hit.data('series-label') || '') + '</span>' +
-            '<strong>' + escapeHtml($hit.data('value-label') || '') + '</strong>' +
-            '<small>' + escapeHtml($hit.data('date-label') || '') + '</small>'
+            '<span>' + escapeHtml(seriesLabel) + '</span>' +
+            '<strong>' + escapeHtml(valueLabel) + '</strong>' +
+            '<small>' + escapeHtml(dateLabel) + '</small>'
         );
         $tooltip.css({
             left: left + 'px',
