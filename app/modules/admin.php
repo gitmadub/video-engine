@@ -8,7 +8,7 @@ const VE_ADMIN_PAGE_SIZE = 25;
 function ve_admin_sections(): array
 {
     return [
-        'overview' => ['label' => 'Overview', 'icon' => 'fa-chart-network', 'permission' => 'admin.access'],
+        'overview' => ['label' => 'Overview', 'icon' => 'fa-chart-bar', 'permission' => 'admin.access'],
         'users' => ['label' => 'Users', 'icon' => 'fa-users', 'permission' => 'admin.users.manage'],
         'videos' => ['label' => 'Files', 'icon' => 'fa-photo-video', 'permission' => 'admin.videos.manage'],
         'remote-uploads' => ['label' => 'Remote Uploads', 'icon' => 'fa-cloud-download-alt', 'permission' => 'admin.remote_uploads.manage'],
@@ -1071,11 +1071,15 @@ function ve_admin_backend_subview_catalog(): array
         'overview-usage' => ['section' => 'overview'],
         'overview-traffic' => ['section' => 'overview'],
         'users-directory' => ['section' => 'users'],
+        'users-segments' => ['section' => 'users'],
+        'users-operations' => ['section' => 'users'],
         'users-profile' => ['section' => 'users'],
+        'users-activity' => ['section' => 'users'],
+        'users-access' => ['section' => 'users'],
+        'users-related' => ['section' => 'users'],
         'users-charts' => ['section' => 'users'],
         'users-sessions' => ['section' => 'users'],
         'users-billing' => ['section' => 'users'],
-        'users-related' => ['section' => 'users'],
         'videos-library' => ['section' => 'videos'],
         'videos-detail' => ['section' => 'videos'],
         'remote-uploads-queue' => ['section' => 'remote-uploads'],
@@ -1115,6 +1119,22 @@ function ve_admin_default_subview(string $section, int $resourceId = 0): string
         'infrastructure' => 'infra-nodes',
         'audit' => $resourceId > 0 ? 'audit-detail' : 'audit-feed',
         default => $section,
+    };
+}
+
+function ve_admin_sidebar_active_subview(string $section, string $activeSubview): string
+{
+    return match ($section) {
+        'users' => in_array($activeSubview, ['users-profile', 'users-activity', 'users-access', 'users-related', 'users-charts', 'users-sessions', 'users-billing'], true)
+            ? 'users-directory'
+            : $activeSubview,
+        'videos' => $activeSubview === 'videos-detail' ? 'videos-library' : $activeSubview,
+        'remote-uploads' => $activeSubview === 'remote-uploads-detail' ? 'remote-uploads-queue' : $activeSubview,
+        'dmca' => in_array($activeSubview, ['dmca-detail', 'dmca-events'], true) ? 'dmca-queue' : $activeSubview,
+        'payouts' => in_array($activeSubview, ['payouts-detail', 'payouts-transfer'], true) ? 'payouts-queue' : $activeSubview,
+        'domains' => $activeSubview === 'domains-detail' ? 'domains-directory' : $activeSubview,
+        'audit' => $activeSubview === 'audit-detail' ? 'audit-feed' : $activeSubview,
+        default => $activeSubview,
     };
 }
 
@@ -2906,18 +2926,22 @@ function ve_admin_dashboard_shell(
         }
         .admin-shell .the_box {
             display: grid !important;
-            grid-template-columns: 285px minmax(0, 1fr);
+            grid-template-columns: 270px minmax(0, 1fr);
             align-items: flex-start;
             gap: 18px;
+            width: 100%;
         }
         .admin-shell .sidebar.settings-page {
-            width: 285px;
+            width: 270px;
             margin-right: 0 !important;
             position: sticky;
             top: 132px;
         }
         .admin-shell .details.settings_data {
             min-width: 0;
+            width: 100% !important;
+            max-width: none !important;
+            flex: 1 1 auto;
         }
         .admin-shell .settings_data > .data {
             display: block !important;
@@ -2939,11 +2963,17 @@ function ve_admin_dashboard_shell(
             padding: 24px 26px;
             background: #151515;
             border: 1px solid rgba(255, 255, 255, 0.06);
+            width: 100%;
         }
         .admin-shell .settings_menu a {
             border-radius: 0;
             min-height: 54px;
             padding: 0 18px;
+        }
+        .admin-shell .settings_menu i {
+            width: 18px;
+            margin-right: 10px;
+            text-align: center;
         }
         .admin-shell .settings_menu a.active { background: rgba(255, 153, 0, 0.13); color: #ffb347; }
         .admin-shell .settings_menu a.active span,
@@ -3061,12 +3091,16 @@ function ve_admin_dashboard_shell(
             color: #8f8f8f;
             margin-bottom: 18px;
         }
+        .admin-shell .admin-period-switch {
+            justify-content: flex-end;
+        }
         .admin-shell .admin-chart-frame {
             position: relative;
+            min-height: 256px;
         }
         .admin-shell .admin-chart-svg {
             width: 100%;
-            height: auto;
+            height: clamp(230px, 28vw, 290px);
             display: block;
         }
         .admin-shell .admin-chart-hit {
@@ -3172,6 +3206,79 @@ function ve_admin_dashboard_shell(
             gap: 18px;
             margin-bottom: 18px;
         }
+        .admin-shell .admin-group-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+            margin-bottom: 18px;
+        }
+        .admin-shell .admin-group-card {
+            background: #171717;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 20px;
+        }
+        .admin-shell .admin-group-card h6 {
+            font-size: .95rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .admin-shell .admin-group-card p {
+            color: #878787;
+            margin-bottom: 14px;
+        }
+        .admin-shell .admin-group-card ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .admin-shell .admin-group-card li {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 9px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .admin-shell .admin-group-card li:last-child {
+            border-bottom: 0;
+            padding-bottom: 0;
+        }
+        .admin-shell .admin-group-card li span {
+            color: #8a8a8a;
+        }
+        .admin-shell .admin-group-card li strong {
+            color: #fff;
+            text-align: right;
+        }
+        .admin-shell .admin-subnav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+        .admin-shell .admin-subnav a {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 40px;
+            padding: 0 14px;
+            background: #1a1a1a;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            color: #b8b8b8;
+        }
+        .admin-shell .admin-subnav a.active {
+            background: rgba(255, 153, 0, 0.12);
+            border-color: rgba(255, 153, 0, 0.28);
+            color: #ffb347;
+        }
+        .admin-shell .admin-subnav a i {
+            width: 16px;
+            text-align: center;
+        }
+        .admin-shell .admin-chart-grid-layout {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 18px;
+        }
         .admin-shell .admin-profile-identity h3 {
             margin-bottom: 8px;
         }
@@ -3247,6 +3354,7 @@ function ve_admin_dashboard_shell(
             }
             .admin-shell .sidebar.settings-page { margin-bottom: 18px; }
             .admin-shell .admin-profile-head { grid-template-columns: 1fr; }
+            .admin-shell .admin-period-switch { justify-content: flex-start; }
         }
         @media (max-width: 575.98px) {
             .admin-shell .widget_area { grid-template-columns: 1fr; }
@@ -3543,70 +3651,50 @@ function ve_admin_backend_sidebar_menu_html(array $actorUser, string $activeSect
 {
     unset($actorUser);
 
-    $resourceId = ve_admin_current_resource_id();
-    $activeSubview = ve_admin_current_subview_slug($activeSection);
+    $activeSubview = ve_admin_sidebar_active_subview($activeSection, ve_admin_current_subview_slug($activeSection));
     $items = [];
-    $selectedVideo = $activeSection === 'videos' && $resourceId > 0 ? ve_admin_video_detail($resourceId) : null;
-    $selectedRemote = $activeSection === 'remote-uploads' && $resourceId > 0 ? ve_admin_remote_upload_detail($resourceId) : null;
-    $selectedDomain = $activeSection === 'domains' && $resourceId > 0 ? ve_admin_custom_domain_detail($resourceId) : null;
-    $selectedAudit = $activeSection === 'audit' && $resourceId > 0 ? ve_admin_audit_log_detail($resourceId) : null;
 
     $definitions = match ($activeSection) {
         'overview' => [
-            ['label' => 'Service totals', 'icon' => 'fa-chart-network', 'slug' => 'overview-service'],
+            ['label' => 'Service totals', 'icon' => 'fa-th-large', 'slug' => 'overview-service'],
             ['label' => 'User trends', 'icon' => 'fa-users', 'slug' => 'overview-users'],
-            ['label' => 'Usage trends', 'icon' => 'fa-waveform-path', 'slug' => 'overview-usage'],
-            ['label' => 'Traffic trends', 'icon' => 'fa-signal-stream', 'slug' => 'overview-traffic'],
+            ['label' => 'Usage trends', 'icon' => 'fa-play-circle', 'slug' => 'overview-usage'],
+            ['label' => 'Traffic trends', 'icon' => 'fa-chart-line', 'slug' => 'overview-traffic'],
         ],
         'users' => [
-            ['label' => 'Directory', 'icon' => 'fa-list', 'slug' => 'users-directory'],
-            ['label' => 'Profile', 'icon' => 'fa-id-card', 'slug' => $resourceId > 0 ? 'users-profile' : 'users-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
-            ['label' => 'Charts', 'icon' => 'fa-chart-line', 'slug' => $resourceId > 0 ? 'users-charts' : 'users-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
-            ['label' => 'Sessions', 'icon' => 'fa-user-clock', 'slug' => $resourceId > 0 ? 'users-sessions' : 'users-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
-            ['label' => 'Billing', 'icon' => 'fa-wallet', 'slug' => $resourceId > 0 ? 'users-billing' : 'users-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
-            ['label' => 'Related records', 'icon' => 'fa-diagram-project', 'slug' => $resourceId > 0 ? 'users-related' : 'users-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Directory', 'icon' => 'fa-address-book', 'slug' => 'users-directory'],
+            ['label' => 'Segments', 'icon' => 'fa-layer-group', 'slug' => 'users-segments'],
+            ['label' => 'Operations', 'icon' => 'fa-user-clock', 'slug' => 'users-operations'],
         ],
         'videos' => [
-            ['label' => 'Library', 'icon' => 'fa-photo-video', 'slug' => 'videos-library'],
-            ['label' => 'Selected file', 'icon' => 'fa-file-video', 'slug' => $resourceId > 0 ? 'videos-detail' : 'videos-library', 'resource' => $resourceId > 0 ? $resourceId : null],
-            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedVideo) ? ve_admin_subsection_url('users-profile', (int) ($selectedVideo['user_id'] ?? 0)) : ve_admin_subsection_url('videos-library')],
+            ['label' => 'Library', 'icon' => 'fa-folder-open', 'slug' => 'videos-library'],
         ],
         'remote-uploads' => [
-            ['label' => 'Queue', 'icon' => 'fa-list-check', 'slug' => 'remote-uploads-queue'],
-            ['label' => 'Selected job', 'icon' => 'fa-cloud-arrow-down', 'slug' => $resourceId > 0 ? 'remote-uploads-detail' : 'remote-uploads-queue', 'resource' => $resourceId > 0 ? $resourceId : null],
-            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedRemote) ? ve_admin_subsection_url('users-profile', (int) ($selectedRemote['user_id'] ?? 0)) : ve_admin_subsection_url('remote-uploads-queue')],
+            ['label' => 'Queue', 'icon' => 'fa-tasks', 'slug' => 'remote-uploads-queue'],
         ],
         'dmca' => [
-            ['label' => 'Case queue', 'icon' => 'fa-folder-times', 'slug' => 'dmca-queue'],
-            ['label' => 'Case detail', 'icon' => 'fa-scale-balanced', 'slug' => $resourceId > 0 ? 'dmca-detail' : 'dmca-queue', 'resource' => $resourceId > 0 ? $resourceId : null],
-            ['label' => 'Event log', 'icon' => 'fa-timeline', 'slug' => $resourceId > 0 ? 'dmca-events' : 'dmca-queue', 'resource' => $resourceId > 0 ? $resourceId : null],
+            ['label' => 'Case queue', 'icon' => 'fa-balance-scale', 'slug' => 'dmca-queue'],
         ],
         'payouts' => [
             ['label' => 'Queue', 'icon' => 'fa-wallet', 'slug' => 'payouts-queue'],
-            ['label' => 'Request detail', 'icon' => 'fa-file-invoice-dollar', 'slug' => $resourceId > 0 ? 'payouts-detail' : 'payouts-queue', 'resource' => $resourceId > 0 ? $resourceId : null],
-            ['label' => 'Transfer record', 'icon' => 'fa-money-check-dollar', 'slug' => $resourceId > 0 ? 'payouts-transfer' : 'payouts-queue', 'resource' => $resourceId > 0 ? $resourceId : null],
         ],
         'domains' => [
             ['label' => 'Directory', 'icon' => 'fa-globe', 'slug' => 'domains-directory'],
-            ['label' => 'Domain detail', 'icon' => 'fa-magnifying-glass', 'slug' => $resourceId > 0 ? 'domains-detail' : 'domains-directory', 'resource' => $resourceId > 0 ? $resourceId : null],
-            ['label' => 'Owner profile', 'icon' => 'fa-user', 'url' => is_array($selectedDomain) ? ve_admin_subsection_url('users-profile', (int) ($selectedDomain['user_id'] ?? 0)) : ve_admin_subsection_url('domains-directory')],
         ],
         'app' => [
             ['label' => 'General', 'icon' => 'fa-sliders-h', 'slug' => 'app-general'],
             ['label' => 'Roles', 'icon' => 'fa-user-shield', 'slug' => 'app-roles'],
-            ['label' => 'Permissions', 'icon' => 'fa-key-skeleton-left-right', 'slug' => 'app-permissions'],
+            ['label' => 'Permissions', 'icon' => 'fa-key', 'slug' => 'app-permissions'],
         ],
         'infrastructure' => [
             ['label' => 'Nodes', 'icon' => 'fa-server', 'slug' => 'infra-nodes'],
-            ['label' => 'Volumes', 'icon' => 'fa-hard-drive', 'slug' => 'infra-volumes'],
-            ['label' => 'Upload endpoints', 'icon' => 'fa-arrow-up-from-bracket', 'slug' => 'infra-endpoints'],
-            ['label' => 'Delivery domains', 'icon' => 'fa-globe-pointer', 'slug' => 'infra-delivery'],
-            ['label' => 'Maintenance', 'icon' => 'fa-screwdriver-wrench', 'slug' => 'infra-maintenance'],
+            ['label' => 'Volumes', 'icon' => 'fa-hdd', 'slug' => 'infra-volumes'],
+            ['label' => 'Upload endpoints', 'icon' => 'fa-upload', 'slug' => 'infra-endpoints'],
+            ['label' => 'Delivery domains', 'icon' => 'fa-broadcast-tower', 'slug' => 'infra-delivery'],
+            ['label' => 'Maintenance', 'icon' => 'fa-tools', 'slug' => 'infra-maintenance'],
         ],
         'audit' => [
             ['label' => 'Log feed', 'icon' => 'fa-clipboard-list', 'slug' => 'audit-feed'],
-            ['label' => 'Selected event', 'icon' => 'fa-magnifying-glass-chart', 'slug' => $resourceId > 0 ? 'audit-detail' : 'audit-feed', 'resource' => $resourceId > 0 ? $resourceId : null],
-            ['label' => 'Target record', 'icon' => 'fa-arrow-up-right-from-square', 'url' => is_array($selectedAudit) ? ve_admin_audit_target_url($selectedAudit) : ve_admin_subsection_url('audit-feed')],
         ],
         default => [
             ['label' => 'Section', 'icon' => 'fa-circle', 'slug' => ve_admin_default_subview($activeSection)],
@@ -3615,8 +3703,7 @@ function ve_admin_backend_sidebar_menu_html(array $actorUser, string $activeSect
 
     foreach ($definitions as $definition) {
         $slug = trim((string) ($definition['slug'] ?? ''));
-        $resource = $definition['resource'] ?? null;
-        $url = trim((string) ($definition['url'] ?? ($slug !== '' ? ve_admin_subsection_url($slug, is_int($resource) && $resource > 0 ? $resource : $resource) : '#')));
+        $url = trim((string) ($definition['url'] ?? ($slug !== '' ? ve_admin_subsection_url($slug) : '#')));
         $activeClass = $slug !== '' && $slug === $activeSubview ? ' active' : '';
         $icon = ve_h((string) ($definition['icon'] ?? 'fa-circle'));
         $label = ve_h((string) ($definition['label'] ?? 'Link'));
@@ -4402,6 +4489,153 @@ function ve_admin_subsection_notice_html(string $message): string
     return '<div class="admin-subsection"><p class="admin-empty">' . ve_h($message) . '</p></div>';
 }
 
+function ve_admin_group_card_html(string $title, string $description, array $items): string
+{
+    $rows = '';
+
+    foreach ($items as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $label = ve_h((string) ($item['label'] ?? ''));
+        $value = ve_h((string) ($item['value'] ?? '0'));
+        $rows .= '<li><span>' . $label . '</span><strong>' . $value . '</strong></li>';
+    }
+
+    if ($rows === '') {
+        $rows = '<li><span>No data</span><strong>0</strong></li>';
+    }
+
+    return '<div class="admin-group-card"><h6>' . ve_h($title) . '</h6><p>' . ve_h($description) . '</p><ul>' . $rows . '</ul></div>';
+}
+
+function ve_admin_user_segments_snapshot(): array
+{
+    $pdo = ve_db();
+    $summary = (array) ($pdo->query(
+        "SELECT
+            COUNT(*) AS total_users,
+            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_users,
+            SUM(CASE WHEN status = 'suspended' THEN 1 ELSE 0 END) AS suspended_users,
+            SUM(CASE WHEN plan_code <> 'free' THEN 1 ELSE 0 END) AS paid_plan_users,
+            SUM(CASE WHEN premium_until IS NOT NULL AND premium_until >= '" . ve_now() . "' THEN 1 ELSE 0 END) AS premium_users,
+            SUM(CASE WHEN COALESCE(us.api_enabled, 1) = 1 THEN 1 ELSE 0 END) AS api_enabled_users,
+            SUM(CASE WHEN COALESCE(domain_counts.active_domains, 0) > 0 THEN 1 ELSE 0 END) AS branded_users,
+            SUM(CASE WHEN COALESCE(video_counts.video_total, 0) >= 25 THEN 1 ELSE 0 END) AS library_users,
+            SUM(CASE WHEN substr(users.created_at, 1, 10) >= '" . gmdate('Y-m-d', ve_timestamp() - (30 * 86400)) . "' THEN 1 ELSE 0 END) AS new_last_30_days
+         FROM users
+         LEFT JOIN user_settings us ON us.user_id = users.id
+         LEFT JOIN (
+            SELECT user_id, COUNT(*) AS video_total
+            FROM videos
+            WHERE deleted_at IS NULL
+            GROUP BY user_id
+         ) AS video_counts ON video_counts.user_id = users.id
+         LEFT JOIN (
+            SELECT user_id, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_domains
+            FROM custom_domains
+            GROUP BY user_id
+         ) AS domain_counts ON domain_counts.user_id = users.id
+         WHERE users.deleted_at IS NULL"
+    )->fetch() ?: []);
+
+    $newUsers = $pdo->query(
+        "SELECT id, username, email, created_at
+         FROM users
+         WHERE deleted_at IS NULL
+         ORDER BY created_at DESC, id DESC
+         LIMIT 6"
+    )->fetchAll() ?: [];
+
+    $storageLeaders = $pdo->query(
+        "SELECT users.id, users.username,
+                COUNT(videos.id) AS video_total,
+                COALESCE(SUM(CASE WHEN videos.processed_size_bytes > 0 THEN videos.processed_size_bytes ELSE videos.original_size_bytes END), 0) AS storage_bytes
+         FROM users
+         LEFT JOIN videos ON videos.user_id = users.id AND videos.deleted_at IS NULL
+         WHERE users.deleted_at IS NULL
+         GROUP BY users.id, users.username
+         ORDER BY storage_bytes DESC, video_total DESC, users.id DESC
+         LIMIT 6"
+    )->fetchAll() ?: [];
+
+    return [
+        'summary' => $summary,
+        'new_users' => $newUsers,
+        'storage_leaders' => $storageLeaders,
+    ];
+}
+
+function ve_admin_user_operations_snapshot(int $lookbackDays = 14): array
+{
+    $pdo = ve_db();
+    $range = ve_dashboard_normalize_date_range(null, null, $lookbackDays);
+    $recentLogins = $pdo->query(
+        "SELECT id, username, email, last_login_at
+         FROM users
+         WHERE deleted_at IS NULL
+           AND last_login_at IS NOT NULL
+         ORDER BY last_login_at DESC, id DESC
+         LIMIT 8"
+    )->fetchAll() ?: [];
+
+    $topTrafficStmt = $pdo->prepare(
+        'SELECT users.id, users.username,
+                COALESCE(SUM(stats.views), 0) AS views_total,
+                COALESCE(SUM(stats.bandwidth_bytes), 0) AS bandwidth_total,
+                COALESCE(SUM(stats.earned_micro_usd + stats.referral_earned_micro_usd), 0) AS earnings_total
+         FROM user_stats_daily stats
+         INNER JOIN users ON users.id = stats.user_id
+         WHERE stats.stat_date BETWEEN :from_date AND :to_date
+           AND users.deleted_at IS NULL
+         GROUP BY users.id, users.username
+         ORDER BY bandwidth_total DESC, views_total DESC, users.id DESC
+         LIMIT 8'
+    );
+    $topTrafficStmt->execute([
+        ':from_date' => $range['from'],
+        ':to_date' => $range['to'],
+    ]);
+
+    $apiLeaders = $pdo->query(
+        "SELECT users.id, users.username, users.api_key_last_used_at,
+                COALESCE(us.api_requests_per_hour, 250) AS api_requests_per_hour,
+                COALESCE(us.api_requests_per_day, 5000) AS api_requests_per_day
+         FROM users
+         LEFT JOIN user_settings us ON us.user_id = users.id
+         WHERE users.deleted_at IS NULL
+         ORDER BY CASE WHEN users.api_key_last_used_at IS NULL THEN 1 ELSE 0 END, users.api_key_last_used_at DESC, users.id DESC
+         LIMIT 8"
+    )->fetchAll() ?: [];
+
+    return [
+        'range' => $range,
+        'recent_logins' => $recentLogins,
+        'top_traffic' => $topTrafficStmt->fetchAll() ?: [],
+        'api_leaders' => $apiLeaders,
+    ];
+}
+
+function ve_admin_user_detail_nav_html(int $userId, string $activeSubview): string
+{
+    $items = [
+        ['slug' => 'users-profile', 'label' => 'Profile', 'icon' => 'fa-id-card'],
+        ['slug' => 'users-activity', 'label' => 'Activity', 'icon' => 'fa-chart-line'],
+        ['slug' => 'users-access', 'label' => 'Access & Billing', 'icon' => 'fa-wallet'],
+        ['slug' => 'users-related', 'label' => 'Related', 'icon' => 'fa-link'],
+    ];
+    $html = [];
+
+    foreach ($items as $item) {
+        $slug = (string) ($item['slug'] ?? '');
+        $activeClass = $activeSubview === $slug ? ' active' : '';
+        $html[] = '<a href="' . ve_h(ve_admin_subsection_url($slug, $userId, [], true)) . '" data-admin-nav="1" class="' . $activeClass . '"><i class="fad ' . ve_h((string) ($item['icon'] ?? 'fa-circle')) . '"></i><span>' . ve_h((string) ($item['label'] ?? '')) . '</span></a>';
+    }
+
+    return '<div class="admin-subnav">' . implode('', $html) . '</div>';
+}
+
 function ve_admin_chart_svg_html(array $points, array $seriesDefinitions): string
 {
     $width = 720.0;
@@ -4715,30 +4949,64 @@ function ve_admin_render_overview_section_deep(): string
     $uploadsTotal = ve_h((string) ve_admin_series_total($points, 'uploads'));
     $trafficPeakLabel = ve_h(ve_human_bytes((int) ($trend['traffic_peak_bytes'] ?? 0)));
 
+    $serviceTotalsHtml = '<div class="admin-group-grid">'
+        . ve_admin_group_card_html('Accounts', 'Current account mix and operator-facing demand.', [
+            ['label' => 'Total accounts', 'value' => (string) ($snapshot['users']['total_users'] ?? 0)],
+            ['label' => 'Active accounts', 'value' => (string) ($snapshot['users']['active_users'] ?? 0)],
+            ['label' => 'Suspended accounts', 'value' => (string) ($snapshot['users']['suspended_users'] ?? 0)],
+            ['label' => 'Created today', 'value' => (string) ($snapshot['users']['users_today'] ?? 0)],
+        ])
+        . ve_admin_group_card_html('Content & Storage', 'What the library currently holds and what entered the system during the window.', [
+            ['label' => 'Stored files', 'value' => (string) ($snapshot['videos']['total_videos'] ?? 0)],
+            ['label' => 'Ready files', 'value' => (string) ($snapshot['videos']['ready_videos'] ?? 0)],
+            ['label' => 'Stored media', 'value' => $storageLabel],
+            ['label' => 'Uploaded in window', 'value' => $uploadedBytesLabel],
+        ])
+        . ve_admin_group_card_html('Traffic & Delivery', 'Delivery footprint, current demand, and the last-period traffic load.', [
+            ['label' => 'Views served', 'value' => (string) ($trend['views_total'] ?? 0)],
+            ['label' => 'Traffic served', 'value' => $trafficLabel],
+            ['label' => 'Premium traffic', 'value' => $premiumTrafficLabel],
+            ['label' => 'Live watchers', 'value' => (string) ($trend['live_watchers'] ?? 0)],
+        ])
+        . ve_admin_group_card_html('Revenue & Risk', 'Money movement and the queues that can slow support or delivery.', [
+            ['label' => 'Revenue generated', 'value' => $revenueLabel],
+            ['label' => 'Payout demand', 'value' => $payoutDemandLabel],
+            ['label' => 'Open payouts', 'value' => (string) ($snapshot['payouts']['open_payouts'] ?? 0)],
+            ['label' => 'Open DMCA', 'value' => (string) ($snapshot['dmca']['open_notices'] ?? 0)],
+        ])
+        . ve_admin_group_card_html('Infrastructure', 'Capacity endpoints backing uploads and stream delivery right now.', [
+            ['label' => 'Storage nodes', 'value' => (string) ($snapshot['infrastructure']['storage_nodes'] ?? 0)],
+            ['label' => 'Upload endpoints', 'value' => (string) ($snapshot['infrastructure']['active_upload_endpoints'] ?? 0)],
+            ['label' => 'Delivery domains', 'value' => (string) ($snapshot['infrastructure']['active_delivery_domains'] ?? 0)],
+            ['label' => 'Active sessions', 'value' => (string) ($trend['active_sessions'] ?? 0)],
+        ])
+        . '</div>';
     $panels = [
         'overview-service' => <<<HTML
 <div class="admin-subsection" id="overview-service">
-    <div class="admin-actions justify-content-between align-items-center mb-3">
-        <div>
-            <h5 class="mb-1">Service totals</h5>
-            <p class="admin-chart-copy mb-0">Platform-level capacity, traffic, revenue, and workload totals across {$rangeDaysLabel} days.</p>
-        </div>
-        {$periodSwitchHtml}
+    <div class="mb-4">
+        <h5 class="mb-1">Service totals</h5>
+        <p class="admin-chart-copy mb-0">The stable state of the platform right now, grouped by operator concern instead of mixing totals and period-based movement together.</p>
     </div>
-    <div class="admin-overview-grid">
-        <div class="admin-overview-stat"><span>Active accounts</span><strong>{$snapshot['users']['active_users']}</strong><small>{$snapshot['users']['users_today']} new today</small></div>
-        <div class="admin-overview-stat"><span>Total accounts</span><strong>{$snapshot['users']['total_users']}</strong><small>{$snapshot['users']['suspended_users']} suspended</small></div>
-        <div class="admin-overview-stat"><span>Stored files</span><strong>{$snapshot['videos']['total_videos']}</strong><small>{$snapshot['videos']['ready_videos']} ready</small></div>
-        <div class="admin-overview-stat"><span>Stored media</span><strong>{$storageLabel}</strong><small>{$uploadedBytesLabel} uploaded in window</small></div>
-        <div class="admin-overview-stat"><span>Live viewers</span><strong>{$trend['live_watchers']}</strong><small>{$trend['active_sessions']} active signed-in sessions</small></div>
-        <div class="admin-overview-stat"><span>Traffic served</span><strong>{$trafficLabel}</strong><small>Peak {$trafficPeakLabel}</small></div>
-        <div class="admin-overview-stat"><span>Premium traffic</span><strong>{$premiumTrafficLabel}</strong><small>Tracked over {$rangeLabel}</small></div>
-        <div class="admin-overview-stat"><span>Views served</span><strong>{$trend['views_total']}</strong><small>Peak {$trend['views_peak']} in one day</small></div>
-        <div class="admin-overview-stat"><span>New accounts</span><strong>{$trend['new_users_total']}</strong><small>{$trend['active_users_peak']} peak active users</small></div>
-        <div class="admin-overview-stat"><span>Uploads</span><strong>{$trend['uploads_total']}</strong><small>{$snapshot['remote']['queued_jobs']} queued remote jobs</small></div>
-        <div class="admin-overview-stat"><span>Open DMCA</span><strong>{$snapshot['dmca']['open_notices']}</strong><small>{$snapshot['payouts']['open_payouts']} payout requests open</small></div>
-        <div class="admin-overview-stat"><span>Revenue generated</span><strong>{$revenueLabel}</strong><small>{$payoutDemandLabel} requested for payout</small></div>
-        <div class="admin-overview-stat"><span>Delivery footprint</span><strong>{$snapshot['infrastructure']['active_delivery_domains']}</strong><small>{$snapshot['infrastructure']['storage_nodes']} nodes / {$snapshot['infrastructure']['active_upload_endpoints']} endpoints</small></div>
+    {$serviceTotalsHtml}
+    <div class="admin-chart-card mb-0">
+        <div class="admin-actions justify-content-between align-items-start mb-3">
+            <div>
+                <h5 class="mb-1">Time-window trends</h5>
+                <p class="admin-chart-copy mb-0">Rolling activity across {$rangeLabel}. Switch the range without leaving the overview.</p>
+            </div>
+            {$periodSwitchHtml}
+        </div>
+        <div class="admin-chart-grid-layout">
+            <div>
+                <h5 class="mb-2">Daily users</h5>
+                {$userChart}
+            </div>
+            <div>
+                <h5 class="mb-2">Daily traffic</h5>
+                {$trafficChart}
+            </div>
+        </div>
     </div>
 </div>
 HTML,
@@ -4809,12 +5077,19 @@ function ve_admin_render_users_section_deep(): string
     $roleCode = trim((string) ($_GET['role'] ?? ''));
     $page = ve_admin_request_page();
     $activeSubview = ve_admin_current_subview_slug('users');
+    $activeDetailSubview = match ($activeSubview) {
+        'users-charts' => 'users-activity',
+        'users-sessions', 'users-billing' => 'users-access',
+        default => $activeSubview,
+    };
     $selectedUserId = ve_admin_current_resource_id();
     $list = ve_admin_list_users($query, $status, $roleCode, $page);
     $profile = $selectedUserId > 0 ? ve_admin_user_profile_snapshot($selectedUserId) : null;
     $detail = is_array($profile) ? (array) ($profile['detail'] ?? []) : null;
     $sectionUrl = ve_h(ve_admin_url(['section' => 'users', 'resource' => null, 'page' => null], false));
     $directoryUrl = ve_h(ve_admin_subsection_url('users-directory'));
+    $segmentsUrl = ve_h(ve_admin_subsection_url('users-segments'));
+    $operationsUrl = ve_h(ve_admin_subsection_url('users-operations'));
     $statusOptions = ve_admin_select_options_html([
         'active' => 'Active',
         'suspended' => 'Suspended',
@@ -4864,6 +5139,121 @@ function ve_admin_render_users_section_deep(): string
         ['label' => 'Page', 'value' => (string) (int) ($list['page'] ?? 1), 'meta' => 'Page size ' . (string) (int) ($list['page_size'] ?? ve_admin_page_size())],
     ]);
     $detailHtml = '';
+    $segmentsSnapshot = ve_admin_user_segments_snapshot();
+    $segmentsSummary = (array) ($segmentsSnapshot['summary'] ?? []);
+    $newUsersList = '';
+    $storageLeadersList = '';
+
+    foreach ((array) ($segmentsSnapshot['new_users'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $newUsersList .= '<li><a href="' . ve_h(ve_admin_subsection_url('users-profile', (int) ($row['id'] ?? 0))) . '">' . ve_h((string) ($row['username'] ?? '')) . '</a><small>'
+            . ve_h((string) ($row['email'] ?? '')) . ' / ' . ve_h(ve_format_datetime_label((string) ($row['created_at'] ?? ''))) . '</small></li>';
+    }
+
+    foreach ((array) ($segmentsSnapshot['storage_leaders'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $storageLeadersList .= '<li><a href="' . ve_h(ve_admin_subsection_url('users-profile', (int) ($row['id'] ?? 0))) . '">' . ve_h((string) ($row['username'] ?? '')) . '</a><small>'
+            . ve_h((string) ($row['video_total'] ?? 0)) . ' files / ' . ve_h(ve_human_bytes((int) ($row['storage_bytes'] ?? 0))) . '</small></li>';
+    }
+
+    if ($newUsersList === '') {
+        $newUsersList = '<li class="text-muted">No recent signups.</li>';
+    }
+
+    if ($storageLeadersList === '') {
+        $storageLeadersList = '<li class="text-muted">No uploader footprint yet.</li>';
+    }
+
+    $segmentsHtml = '<div class="admin-subsection" id="users-segments">'
+        . '<div class="mb-4"><h5 class="mb-1">User segments</h5><p class="admin-chart-copy mb-0">Stable slices of the account base that help you understand who is using the service, who is monetizing it, and where support load is likely to appear.</p></div>'
+        . '<div class="admin-group-grid">'
+        . ve_admin_group_card_html('Account state', 'Core account health and moderation load.', [
+            ['label' => 'Total accounts', 'value' => (string) ($segmentsSummary['total_users'] ?? 0)],
+            ['label' => 'Active accounts', 'value' => (string) ($segmentsSummary['active_users'] ?? 0)],
+            ['label' => 'Suspended accounts', 'value' => (string) ($segmentsSummary['suspended_users'] ?? 0)],
+            ['label' => 'Joined last 30 days', 'value' => (string) ($segmentsSummary['new_last_30_days'] ?? 0)],
+        ])
+        . ve_admin_group_card_html('Commercial footprint', 'Accounts already paying, branded, or likely to need billing support.', [
+            ['label' => 'Paid-plan users', 'value' => (string) ($segmentsSummary['paid_plan_users'] ?? 0)],
+            ['label' => 'Premium-active users', 'value' => (string) ($segmentsSummary['premium_users'] ?? 0)],
+            ['label' => 'API-enabled users', 'value' => (string) ($segmentsSummary['api_enabled_users'] ?? 0)],
+            ['label' => 'Branded domain users', 'value' => (string) ($segmentsSummary['branded_users'] ?? 0)],
+        ])
+        . ve_admin_group_card_html('Uploader density', 'How concentrated content creation is across the account base.', [
+            ['label' => '25+ file libraries', 'value' => (string) ($segmentsSummary['library_users'] ?? 0)],
+            ['label' => 'Visible result set', 'value' => (string) (int) ($list['total'] ?? 0)],
+            ['label' => 'Active in current filter', 'value' => (string) $activeCount],
+            ['label' => 'Suspended in current filter', 'value' => (string) $suspendedCount],
+        ])
+        . '</div>'
+        . '<div class="admin-detail-panels"><div class="admin-detail-panel"><h5>Newest accounts</h5><ul class="admin-mini-list admin-list-tight">' . $newUsersList . '</ul></div>'
+        . '<div class="admin-detail-panel"><h5>Largest libraries</h5><ul class="admin-mini-list admin-list-tight">' . $storageLeadersList . '</ul></div></div>'
+        . '</div>';
+
+    $operationsDays = ve_admin_request_range_days(30);
+    $operationsSnapshot = ve_admin_user_operations_snapshot($operationsDays);
+    $operationsRangeSwitch = ve_admin_period_switch_html([7, 14, 30, 90], $operationsDays, 'users-operations');
+    $recentLoginRows = '';
+    $topTrafficRows = '';
+    $apiLeaderRows = '';
+
+    foreach ((array) ($operationsSnapshot['recent_logins'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $recentLoginRows .= '<tr><td><a href="' . ve_h(ve_admin_subsection_url('users-profile', (int) ($row['id'] ?? 0))) . '">' . ve_h((string) ($row['username'] ?? '')) . '</a><br><small>' . ve_h((string) ($row['email'] ?? '')) . '</small></td>'
+            . '<td>' . ve_h(ve_format_datetime_label((string) ($row['last_login_at'] ?? ''))) . '</td></tr>';
+    }
+
+    foreach ((array) ($operationsSnapshot['top_traffic'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $topTrafficRows .= '<tr><td><a href="' . ve_h(ve_admin_subsection_url('users-profile', (int) ($row['id'] ?? 0))) . '">' . ve_h((string) ($row['username'] ?? '')) . '</a></td>'
+            . '<td>' . ve_h((string) ($row['views_total'] ?? 0)) . '</td>'
+            . '<td>' . ve_h(ve_human_bytes((int) ($row['bandwidth_total'] ?? 0))) . '</td>'
+            . '<td>' . ve_h(ve_dashboard_format_currency_micro_usd((int) ($row['earnings_total'] ?? 0))) . '</td></tr>';
+    }
+
+    foreach ((array) ($operationsSnapshot['api_leaders'] ?? []) as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $apiLeaderRows .= '<tr><td><a href="' . ve_h(ve_admin_subsection_url('users-profile', (int) ($row['id'] ?? 0))) . '">' . ve_h((string) ($row['username'] ?? '')) . '</a></td>'
+            . '<td>' . ve_h(ve_format_datetime_label((string) ($row['api_key_last_used_at'] ?? ''), 'Never')) . '</td>'
+            . '<td>' . ve_h((string) ($row['api_requests_per_hour'] ?? 250)) . '/hr</td>'
+            . '<td>' . ve_h((string) ($row['api_requests_per_day'] ?? 5000)) . '/day</td></tr>';
+    }
+
+    if ($recentLoginRows === '') {
+        $recentLoginRows = ve_admin_empty_table_row_html(2, 'No recent logins recorded.');
+    }
+
+    if ($topTrafficRows === '') {
+        $topTrafficRows = ve_admin_empty_table_row_html(4, 'No user traffic recorded in this window.');
+    }
+
+    if ($apiLeaderRows === '') {
+        $apiLeaderRows = ve_admin_empty_table_row_html(4, 'No API activity recorded yet.');
+    }
+
+    $operationsHtml = '<div class="admin-subsection" id="users-operations">'
+        . '<div class="admin-actions justify-content-between align-items-start mb-3"><div><h5 class="mb-1">User operations</h5><p class="admin-chart-copy mb-0">Recent account movement, high-traffic operators, and API-heavy accounts across the last ' . ve_h((string) $operationsDays) . ' days.</p></div>' . $operationsRangeSwitch . '</div>'
+        . '<div class="admin-detail-panels">'
+        . '<div class="admin-detail-panel"><h5>Recent logins</h5><div class="settings-table-wrap"><table class="table"><thead><tr><th>User</th><th>Last login</th></tr></thead><tbody>' . $recentLoginRows . '</tbody></table></div></div>'
+        . '<div class="admin-detail-panel"><h5>Top traffic accounts</h5><div class="settings-table-wrap"><table class="table"><thead><tr><th>User</th><th>Views</th><th>Traffic</th><th>Earnings</th></tr></thead><tbody>' . $topTrafficRows . '</tbody></table></div></div>'
+        . '</div>'
+        . '<div class="admin-detail-panel"><h5>API access leaders</h5><div class="settings-table-wrap"><table class="table"><thead><tr><th>User</th><th>Last used</th><th>Hourly limit</th><th>Daily limit</th></tr></thead><tbody>' . $apiLeaderRows . '</tbody></table></div></div>'
+        . '</div>';
 
     if ($selectedUserId > 0 && !is_array($detail)) {
         $detailHtml = '<div class="alert alert-warning">The selected user could not be found.</div>';
@@ -5074,6 +5464,7 @@ function ve_admin_render_users_section_deep(): string
         $payoutTotalLabel = ve_h((string) ($counts['payout_total'] ?? 0));
         $liveViewersLabel = ve_h((string) ($profile['online_watchers'] ?? 0));
         $sessionCountLabel = ve_h((string) count((array) ($profile['recent_sessions'] ?? [])));
+        $detailNavHtml = ve_admin_user_detail_nav_html($detailId, $activeDetailSubview);
         $profileHtml = <<<HTML
 <div class="admin-subsection" id="users-profile">
     <div class="admin-profile-head">
@@ -5099,6 +5490,19 @@ function ve_admin_render_users_section_deep(): string
                 <div class="admin-meta-item"><span>Premium bandwidth</span><strong>{$premiumBandwidthLabel}</strong></div>
             </div>
             <div class="admin-profile-actions">
+                <a href="{$searchSimilarUrl}" class="btn btn-secondary">Find similar users</a>
+                <a href="{$dashboardUrl}" class="btn btn-secondary">Open dashboard shell</a>
+            </div>
+        </div>
+        <div class="admin-profile-card">
+            <h5 class="mb-3">Operator actions</h5>
+            <div class="admin-meta-grid mb-4">
+                <div class="admin-meta-item"><span>Plan</span><strong>{$detailPlan}</strong></div>
+                <div class="admin-meta-item"><span>Premium until</span><strong>{$premiumUntilLabel}</strong></div>
+                <div class="admin-meta-item"><span>API last used</span><strong>{$apiLastUsedLabel}</strong></div>
+                <div class="admin-meta-item"><span>Payout destination</span><strong>{$maskedDestinationLabel}</strong></div>
+            </div>
+            <div class="admin-stack">
                 <form method="POST" action="{$detailActionUrl}">
                     <input type="hidden" name="token" value="{$token}">
                     <input type="hidden" name="action" value="impersonate_user">
@@ -5113,12 +5517,92 @@ function ve_admin_render_users_section_deep(): string
                     {$listReturn}
                     <button type="submit" class="btn btn-danger">Delete user</button>
                 </form>
-                <a href="{$searchSimilarUrl}" class="btn btn-secondary">Find similar users</a>
-                <a href="{$dashboardUrl}" class="btn btn-secondary">Open dashboard shell</a>
+                <a href="{$closeUrl}" class="btn btn-secondary">Back to directory</a>
             </div>
         </div>
-        <div class="admin-profile-card">
-            <h5 class="mb-3">Account controls</h5>
+    </div>
+    <div class="admin-overview-grid">
+        <div class="admin-overview-stat"><span>Lifetime views</span><strong>{$viewsTotalLabel}</strong><small>{$trafficTotalLabel} traffic</small></div>
+        <div class="admin-overview-stat"><span>Lifetime revenue</span><strong>{$revenueTotalLabel}</strong><small>{$directRevenueLabel} direct + {$referralRevenueLabel} referral</small></div>
+        <div class="admin-overview-stat"><span>Stored media</span><strong>{$storageLabel}</strong><small>{$videosTotalLabel} files</small></div>
+        <div class="admin-overview-stat"><span>Remote imports</span><strong>{$remoteTotalLabel}</strong><small>{$dmcaTotalLabel} DMCA cases</small></div>
+        <div class="admin-overview-stat"><span>Domains</span><strong>{$activeDomainTotalLabel}</strong><small>{$domainTotalLabel} mapped total</small></div>
+        <div class="admin-overview-stat"><span>Payout pressure</span><strong>{$payoutOpenTotalLabel}</strong><small>{$payoutTotalLabel} requests total</small></div>
+        <div class="admin-overview-stat"><span>API requests today</span><strong>{$apiRequestsTodayLabel}</strong><small>{$apiRequestsHourLabel} in the last hour</small></div>
+        <div class="admin-overview-stat"><span>Live viewers</span><strong>{$liveViewersLabel}</strong><small>{$sessionCountLabel} tracked sessions shown</small></div>
+    </div>
+    {$detailNavHtml}
+    <div class="admin-group-grid">
+        <div class="admin-group-card">
+            <h6>Account identity</h6>
+            <p>Core record data and account state.</p>
+            <ul>
+                <li><span>User ID</span><strong>#{$detailId}</strong></li>
+                <li><span>Created</span><strong>{$detailCreated}</strong></li>
+                <li><span>Last login</span><strong>{$detailLastLogin}</strong></li>
+                <li><span>Role</span><strong>{$detailRole}</strong></li>
+            </ul>
+        </div>
+        <div class="admin-group-card">
+            <h6>Billing footprint</h6>
+            <p>How this account is configured to receive money.</p>
+            <ul>
+                <li><span>Balance</span><strong>{$detailBalance}</strong></li>
+                <li><span>Payout method</span><strong>{$paymentMethodLabel}</strong></li>
+                <li><span>Payout destination</span><strong>{$maskedDestinationLabel}</strong></li>
+                <li><span>Premium bandwidth</span><strong>{$premiumBandwidthLabel}</strong></li>
+            </ul>
+        </div>
+        <div class="admin-group-card">
+            <h6>API & access</h6>
+            <p>Useful access signals before making support or moderation decisions.</p>
+            <ul>
+                <li><span>API status</span><strong>{$apiStatusLabel}</strong></li>
+                <li><span>API last used</span><strong>{$apiLastUsedLabel}</strong></li>
+                <li><span>Requests today</span><strong>{$apiRequestsTodayLabel}</strong></li>
+                <li><span>Requests last hour</span><strong>{$apiRequestsHourLabel}</strong></li>
+            </ul>
+        </div>
+    </div>
+</div>
+HTML;
+        $activityHtml = <<<HTML
+<div class="admin-subsection" id="users-activity">
+    {$detailNavHtml}
+    <div class="admin-chart-grid-layout">
+        <div class="admin-chart-card">
+            <h5 class="mb-2">Daily views</h5>
+            <p class="admin-chart-copy">View activity for the selected account.</p>
+            {$viewsChart}
+        </div>
+        <div class="admin-chart-card">
+            <h5 class="mb-2">Daily traffic</h5>
+            <p class="admin-chart-copy">Traffic served over the reporting window.</p>
+            {$trafficChart}
+        </div>
+        <div class="admin-chart-card">
+            <h5 class="mb-2">Daily revenue</h5>
+            <p class="admin-chart-copy">Combined direct and referral earnings.</p>
+            {$revenueChart}
+        </div>
+    </div>
+    <div class="admin-detail-panel">
+        <h5>Recent sessions</h5>
+        <div class="settings-table-wrap">
+            <table class="table">
+                <thead><tr><th>Last seen</th><th>IP</th><th>User agent</th><th>Started</th></tr></thead>
+                <tbody>{$sessionRows}</tbody>
+            </table>
+        </div>
+    </div>
+</div>
+HTML;
+        $accessHtml = <<<HTML
+<div class="admin-subsection" id="users-access">
+    {$detailNavHtml}
+    <div class="admin-detail-panels">
+        <div class="admin-detail-panel">
+            <h5>Account controls</h5>
             <form method="POST" action="{$detailActionUrl}" class="admin-stack">
                 <input type="hidden" name="token" value="{$token}">
                 <input type="hidden" name="action" value="save_user">
@@ -5161,83 +5645,56 @@ function ve_admin_render_users_section_deep(): string
                 </div>
                 <div class="admin-actions">
                     <button type="submit" class="btn btn-primary">Save user</button>
-                    <a href="{$closeUrl}" class="btn btn-secondary">Close detail</a>
                 </div>
             </form>
         </div>
+        <div class="admin-detail-panel">
+            <h5>API status</h5>
+            <div class="admin-meta-grid">
+                <div class="admin-meta-item"><span>Status</span><strong>{$apiStatusLabel}</strong></div>
+                <div class="admin-meta-item"><span>Last used</span><strong>{$apiLastUsedLabel}</strong></div>
+                <div class="admin-meta-item"><span>Requests today</span><strong>{$apiRequestsTodayLabel}</strong></div>
+                <div class="admin-meta-item"><span>Requests last hour</span><strong>{$apiRequestsHourLabel}</strong></div>
+                <div class="admin-meta-item"><span>Premium state</span><strong>{$premiumStatusLabel}</strong></div>
+                <div class="admin-meta-item"><span>Premium until</span><strong>{$premiumUntilLabel}</strong></div>
+            </div>
+        </div>
     </div>
-    <div class="admin-overview-grid">
-        <div class="admin-overview-stat"><span>Lifetime views</span><strong>{$viewsTotalLabel}</strong><small>{$trafficTotalLabel} traffic</small></div>
-        <div class="admin-overview-stat"><span>Lifetime revenue</span><strong>{$revenueTotalLabel}</strong><small>{$directRevenueLabel} direct + {$referralRevenueLabel} referral</small></div>
-        <div class="admin-overview-stat"><span>Stored media</span><strong>{$storageLabel}</strong><small>{$videosTotalLabel} files</small></div>
-        <div class="admin-overview-stat"><span>Remote imports</span><strong>{$remoteTotalLabel}</strong><small>{$dmcaTotalLabel} DMCA cases</small></div>
-        <div class="admin-overview-stat"><span>Domains</span><strong>{$activeDomainTotalLabel}</strong><small>{$domainTotalLabel} mapped total</small></div>
-        <div class="admin-overview-stat"><span>Payout pressure</span><strong>{$payoutOpenTotalLabel}</strong><small>{$payoutTotalLabel} requests total</small></div>
-        <div class="admin-overview-stat"><span>API requests today</span><strong>{$apiRequestsTodayLabel}</strong><small>{$apiRequestsHourLabel} in the last hour</small></div>
-        <div class="admin-overview-stat"><span>Live viewers</span><strong>{$liveViewersLabel}</strong><small>{$sessionCountLabel} tracked sessions shown</small></div>
-    </div>
-</div>
-HTML;
-        $chartsHtml = <<<HTML
-<div class="admin-section-grid" id="users-charts">
-    <div class="admin-chart-card">
-        <h5 class="mb-2">Daily views</h5>
-        <p class="admin-chart-copy">View activity for the selected account.</p>
-        {$viewsChart}
-    </div>
-    <div class="admin-chart-card">
-        <h5 class="mb-2">Daily traffic</h5>
-        <p class="admin-chart-copy">Traffic served over the reporting window.</p>
-        {$trafficChart}
-    </div>
-    <div class="admin-chart-card">
-        <h5 class="mb-2">Daily revenue</h5>
-        <p class="admin-chart-copy">Combined direct and referral earnings.</p>
-        {$revenueChart}
-    </div>
-</div>
-HTML;
-        $sessionsHtml = <<<HTML
-<div class="admin-detail-panel" id="users-sessions">
-    <h5>Recent sessions</h5>
-    <div class="settings-table-wrap">
-        <table class="table">
-            <thead><tr><th>Last seen</th><th>IP</th><th>User agent</th><th>Started</th></tr></thead>
-            <tbody>{$sessionRows}</tbody>
-        </table>
-    </div>
-</div>
-HTML;
-        $billingHtml = <<<HTML
-<div class="admin-detail-panel" id="users-billing">
-    <h5>Balance ledger</h5>
-    <div class="settings-table-wrap">
-        <table class="table">
-            <thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Amount</th><th>Description</th></tr></thead>
-            <tbody>{$ledgerRows}</tbody>
-        </table>
+    <div class="admin-detail-panel">
+        <h5>Balance ledger</h5>
+        <div class="settings-table-wrap">
+            <table class="table">
+                <thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Amount</th><th>Description</th></tr></thead>
+                <tbody>{$ledgerRows}</tbody>
+            </table>
+        </div>
     </div>
 </div>
 HTML;
         $relatedHtml = <<<HTML
-<div class="admin-detail-panels" id="users-related">
-    <div class="admin-detail-panel"><h5>Top files</h5><ul class="admin-mini-list admin-list-tight">{$topFilesList}</ul></div>
-    <div class="admin-detail-panel"><h5>Recent files</h5><ul class="admin-mini-list admin-list-tight">{$videoList}</ul></div>
-    <div class="admin-detail-panel"><h5>Remote uploads</h5><ul class="admin-mini-list admin-list-tight">{$remoteList}</ul></div>
-    <div class="admin-detail-panel"><h5>DMCA cases</h5><ul class="admin-mini-list admin-list-tight">{$dmcaList}</ul></div>
-    <div class="admin-detail-panel"><h5>Payouts</h5><ul class="admin-mini-list admin-list-tight">{$payoutList}</ul></div>
-    <div class="admin-detail-panel"><h5>Domains</h5><ul class="admin-mini-list admin-list-tight">{$domainList}</ul></div>
-    <div class="admin-detail-panel"><h5>Audit trail</h5><ul class="admin-mini-list admin-list-tight">{$auditList}</ul></div>
+<div class="admin-subsection" id="users-related">
+    {$detailNavHtml}
+    <div class="admin-detail-panels">
+        <div class="admin-detail-panel"><h5>Top files</h5><ul class="admin-mini-list admin-list-tight">{$topFilesList}</ul></div>
+        <div class="admin-detail-panel"><h5>Recent files</h5><ul class="admin-mini-list admin-list-tight">{$videoList}</ul></div>
+        <div class="admin-detail-panel"><h5>Remote uploads</h5><ul class="admin-mini-list admin-list-tight">{$remoteList}</ul></div>
+        <div class="admin-detail-panel"><h5>DMCA cases</h5><ul class="admin-mini-list admin-list-tight">{$dmcaList}</ul></div>
+        <div class="admin-detail-panel"><h5>Payouts</h5><ul class="admin-mini-list admin-list-tight">{$payoutList}</ul></div>
+        <div class="admin-detail-panel"><h5>Domains</h5><ul class="admin-mini-list admin-list-tight">{$domainList}</ul></div>
+        <div class="admin-detail-panel"><h5>Audit trail</h5><ul class="admin-mini-list admin-list-tight">{$auditList}</ul></div>
+    </div>
 </div>
 HTML;
         $detailPanels = [
             'users-profile' => $profileHtml,
-            'users-charts' => $chartsHtml,
-            'users-sessions' => $sessionsHtml,
-            'users-billing' => $billingHtml,
+            'users-activity' => $activityHtml,
+            'users-access' => $accessHtml,
             'users-related' => $relatedHtml,
+            'users-charts' => $activityHtml,
+            'users-sessions' => $accessHtml,
+            'users-billing' => $accessHtml,
         ];
-        $detailHtml = ve_admin_active_subsection_html($activeSubview, $detailPanels, 'users-profile');
+        $detailHtml = ve_admin_active_subsection_html($activeDetailSubview, $detailPanels, 'users-profile');
     }
 
     $pagination = ve_admin_pagination_html((int) ($list['page'] ?? 1), (int) ($list['total'] ?? 0), (int) ($list['page_size'] ?? ve_admin_page_size()));
@@ -5258,20 +5715,19 @@ HTML;
 </div>
 {$pagination}
 HTML;
-    $bodyHtml = $detailHtml;
-
-    if ($activeSubview === 'users-directory' || $selectedUserId <= 0 || !is_array($detail)) {
-        $bodyHtml = $directoryHtml . ($detailHtml !== '' && $activeSubview !== 'users-directory' ? $detailHtml : '');
-    }
-
-    if ($activeSubview !== 'users-directory' && $selectedUserId > 0 && !is_array($detail)) {
-        $bodyHtml = ve_admin_subsection_notice_html('Select a valid user from the directory to open this subsection.');
-    }
+    $bodyHtml = match ($activeDetailSubview) {
+        'users-segments' => $segmentsHtml,
+        'users-operations' => $operationsHtml,
+        'users-profile', 'users-activity', 'users-access', 'users-related' => is_array($detail)
+            ? $detailHtml
+            : $directoryHtml . ve_admin_subsection_notice_html('Select a user from the directory to open this user-level view.'),
+        default => $directoryHtml,
+    };
 
     return <<<HTML
 <div class="data settings-panel" id="users">
     <div class="settings-panel-title">User management</div>
-    <p class="settings-panel-subtitle">Search for accounts quickly, then open a detailed operator profile with traffic, billing, sessions, and related records.</p>
+    <p class="settings-panel-subtitle">Search, segment, and operate on the account base from one place. User-level tabs only appear once an account is selected so the section navigation stays predictable.</p>
     {$metricsHtml}
     {$bodyHtml}
 </div>
@@ -6755,6 +7211,41 @@ function ve_admin_section_content_html(string $section): string
     };
 }
 
+function ve_admin_request_is_partial(): bool
+{
+    return strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+}
+
+function ve_admin_partial_payload(
+    array $actorUser,
+    array $context,
+    string $activeSection,
+    string $title,
+    string $sidebarIntroHtml,
+    string $menuHtml,
+    string $contentHtml
+): array {
+    return [
+        'status' => 'ok',
+        'title' => $title,
+        'active_section' => $activeSection,
+        'header_nav_html' => (string) ($context['header_nav_html'] ?? ''),
+        'header_action_html' => (string) ($context['header_action_html'] ?? ''),
+        'mobile_nav_html' => (string) ($context['mobile_nav_html'] ?? ''),
+        'sidebar_html' => '<div class="sidebar settings-page">' . $sidebarIntroHtml . '<hr><div class="menu settings_menu"><ul class="p-0 m-0 mb-4">' . $menuHtml . '</ul></div></div>',
+        'content_html' => '<div class="details settings_data">' . $contentHtml . '</div>',
+        'widgets_html' => '',
+        'user_menu_html' => ve_admin_user_dropdown_html([
+            'dmca_url' => ve_h(ve_url('/dmca-manager')),
+            'api_docs_url' => ve_h(ve_url('/api-docs')),
+            'referrals_url' => ve_h(ve_url('/referrals')),
+            'settings_url' => ve_h(ve_url('/settings')),
+            'logout_url' => ve_h(ve_url('/logout')),
+        ]),
+        'username' => ve_h((string) ($context['username'] ?? ($actorUser['username'] ?? 'videoengine'))),
+    ];
+}
+
 function ve_admin_post_redirect_target(): string
 {
     $returnTo = trim((string) ($_POST['return_to'] ?? ''));
@@ -7025,6 +7516,18 @@ function ve_handle_backend_request(): void
     $menuHtml = ve_admin_backend_sidebar_menu_html($actorUser, $activeSection);
     $contentHtml = ve_admin_section_content_html($activeSection);
     $widgetsHtml = '';
+
+    if (ve_admin_request_is_partial()) {
+        ve_json(ve_admin_partial_payload(
+            $actorUser,
+            $context,
+            $activeSection,
+            $title,
+            $sidebarIntroHtml,
+            $menuHtml,
+            $contentHtml
+        ));
+    }
 
     ve_html(ve_rewrite_html_paths(ve_admin_dashboard_shell(
         $context,

@@ -90,46 +90,60 @@ $(document).ready(function() {
         $shell.toggleClass('is-loading', !!isLoading);
     }
 
-    function parseAdminDocument(html) {
-        var parser = new DOMParser();
-        var doc = parser.parseFromString(html, 'text/html');
-
-        return {
-            title: doc.title || document.title,
-            shell: doc.querySelector('[data-admin-shell="1"]'),
-            headerStrip: doc.querySelector('.admin-header-strip'),
-            mobileNav: doc.querySelector('#menu .container-fluid > ul.nav')
-        };
-    }
-
-    function syncAdminShell(parsed, nextUrl, pushState) {
+    function syncAdminShell(payload, nextUrl, pushState) {
         var currentShell = document.querySelector('[data-admin-shell="1"]');
         var currentHeaderStrip = document.querySelector('.admin-header-strip');
         var currentMobileNav = document.querySelector('#menu .container-fluid > ul.nav');
+        var currentSidebar;
+        var currentContent;
+        var $headerNav;
+        var $mobileNav;
+        var $sidebar;
+        var $content;
 
-        if (!parsed.shell || !currentShell) {
+        if (!payload || payload.status !== 'ok' || !currentShell) {
             window.location.href = nextUrl;
             return;
         }
 
-        if (parsed.headerStrip && currentHeaderStrip) {
-            currentHeaderStrip.replaceWith(parsed.headerStrip);
-        } else if (parsed.headerStrip && !currentHeaderStrip) {
+        if (payload.header_nav_html && currentHeaderStrip) {
+            $headerNav = $(currentHeaderStrip).find('.admin-header-nav').first();
+
+            if ($headerNav.length) {
+                $headerNav.html(payload.header_nav_html);
+            }
+        } else if (payload.header_nav_html && !currentHeaderStrip) {
             var navbar = document.querySelector('nav.main-menu');
+            var strip = document.createElement('div');
 
             if (navbar && navbar.parentNode) {
-                navbar.insertAdjacentElement('afterend', parsed.headerStrip);
+                strip.className = 'admin-header-strip d-none d-lg-block';
+                strip.innerHTML = '<div class="container-fluid"><ul class="nav justify-content-center admin-header-nav">' + payload.header_nav_html + '</ul></div>';
+                navbar.insertAdjacentElement('afterend', strip);
             }
-        } else if (!parsed.headerStrip && currentHeaderStrip) {
+        } else if (!payload.header_nav_html && currentHeaderStrip) {
             currentHeaderStrip.remove();
         }
 
-        if (parsed.mobileNav && currentMobileNav) {
-            currentMobileNav.replaceWith(parsed.mobileNav);
+        if (payload.mobile_nav_html && currentMobileNav) {
+            $mobileNav = $(currentMobileNav);
+            $mobileNav.html(payload.mobile_nav_html);
         }
 
-        currentShell.replaceWith(parsed.shell);
-        document.title = parsed.title;
+        currentSidebar = currentShell.querySelector('.sidebar.settings-page');
+        currentContent = currentShell.querySelector('.details.settings_data');
+
+        if (!currentSidebar || !currentContent || !payload.sidebar_html || !payload.content_html) {
+            window.location.href = nextUrl;
+            return;
+        }
+
+        $sidebar = $(payload.sidebar_html);
+        $content = $(payload.content_html);
+
+        $(currentSidebar).replaceWith($sidebar);
+        $(currentContent).replaceWith($content);
+        document.title = payload.title || document.title;
         $('#menu').removeClass('show');
 
         if (pushState) {
@@ -153,13 +167,13 @@ $(document).ready(function() {
         adminRequest = $.ajax({
             url: nextUrl,
             method: 'GET',
+            dataType: 'json',
             headers: {
+                'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             }
-        }).done(function(responseHtml) {
-            var parsed = parseAdminDocument(responseHtml);
-
-            syncAdminShell(parsed, nextUrl, pushState);
+        }).done(function(payload) {
+            syncAdminShell(payload, nextUrl, pushState);
         }).fail(function(xhr, status) {
             if (status !== 'abort') {
                 window.location.href = nextUrl;
