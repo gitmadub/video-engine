@@ -26,6 +26,7 @@ $(document).ready(function() {
     var adminRequest = null;
     var adminPayloadCache = {};
     var adminPrefetchQueue = {};
+    var adminLiveRefreshTimer = null;
 
     function isLogoutHref(href) {
         var logoutUrl = veAppUrl('/logout');
@@ -53,6 +54,19 @@ $(document).ready(function() {
         return veAppUrl('/backend');
     }
 
+    function getAdminBasePathname() {
+        var configured = getAdminBasePath();
+
+        try {
+            configured = new URL(configured, window.location.origin).pathname;
+        } catch (err) {
+            configured = '/backend';
+        }
+
+        configured = (configured || '/backend').replace(/\/+$/, '');
+        return configured || '/backend';
+    }
+
     function hasAdminShell() {
         return $('[data-admin-shell="1"]').length > 0;
     }
@@ -63,7 +77,7 @@ $(document).ready(function() {
 
     function isAdminNavigationHref(href) {
         var url;
-        var backendBase = getAdminBasePath();
+        var backendBase = getAdminBasePathname();
 
         if (!href || href.charAt(0) === '#') {
             return false;
@@ -104,6 +118,7 @@ $(document).ready(function() {
         var config = getAdminConfig();
         var url;
         var path;
+        var basePath = getAdminBasePathname();
         var suffix;
         var segments;
         var firstSegment;
@@ -121,13 +136,13 @@ $(document).ready(function() {
             return null;
         }
 
-        path = url.pathname;
+        path = (url.pathname || '').replace(/\/+$/, '') || '/';
 
-        if (path !== config.base_path && path.indexOf(config.base_path + '/') !== 0) {
+        if (path !== basePath && path.indexOf(basePath + '/') !== 0) {
             return null;
         }
 
-        suffix = path.slice(config.base_path.length).replace(/^\/+/, '');
+        suffix = path.slice(basePath.length).replace(/^\/+/, '');
         segments = suffix ? suffix.split('/').filter(Boolean) : [];
         firstSegment = segments[0] || '';
 
@@ -174,7 +189,7 @@ $(document).ready(function() {
             return '';
         }
 
-        return url.pathname + url.search;
+        return (url.pathname || '').replace(/\/+$/, '') + url.search;
     }
 
     function resolveAdminSidebarSubview(route) {
@@ -493,8 +508,15 @@ $(document).ready(function() {
 
     function renderAdminChart(block) {
         var charts = block.cards || [];
-        var layoutClass = (charts.length > 1 || block.columns === 2) ? 'admin-chart-grid-layout' : '';
+        var layoutClass = '';
         var html = '';
+
+        if (charts.length > 1 || block.columns) {
+            layoutClass = 'admin-chart-grid-layout';
+            if (block.columns) {
+                layoutClass += ' admin-chart-grid-layout--' + String(block.columns);
+            }
+        }
 
         if (block.title || block.subtitle || (block.period && block.period.length)) {
             html += '<div class="admin-actions justify-content-between align-items-start mb-3">';
@@ -543,9 +565,9 @@ $(document).ready(function() {
     function renderAdminChartSvg(chart) {
         var points = chart.points || [];
         var series = chart.series || [];
-        var width = 760;
-        var height = 280;
-        var padding = {left: 24, right: 20, top: 20, bottom: 36};
+        var width = 820;
+        var height = 310;
+        var padding = {left: 54, right: 24, top: 18, bottom: 42};
         var plotWidth = width - padding.left - padding.right;
         var plotHeight = height - padding.top - padding.bottom;
         var maxValue = 0;
@@ -553,7 +575,10 @@ $(document).ready(function() {
         var seriesHtml = '';
         var hitsHtml = '';
         var labelsHtml = '';
+        var axisHtml = '';
         var stepX = points.length > 1 ? plotWidth / (points.length - 1) : 0;
+        var sharedFormat = '';
+        var visibleLabels = {};
 
         series.forEach(function(definition) {
             points.forEach(function(point) {
@@ -566,37 +591,65 @@ $(document).ready(function() {
         }
 
         maxValue = Math.max(maxValue, 1);
+        sharedFormat = series.length && series.every(function(definition) {
+            return (definition.format || 'number') === (series[0].format || 'number');
+        }) ? (series[0].format || 'number') : '';
 
         [0, 1, 2, 3, 4].forEach(function(index) {
+            var value = Math.round(maxValue * ((4 - index) / 4));
             var y = padding.top + ((plotHeight / 4) * index);
             gridHtml += '<line x1="' + padding.left + '" y1="' + y + '" x2="' + (width - padding.right) + '" y2="' + y + '"></line>';
+
+            if (sharedFormat) {
+                axisHtml += '<text x="' + (padding.left - 10) + '" y="' + (y + 4) + '" text-anchor="end">' + escapeHtml(formatChartValue(value, sharedFormat)) + '</text>';
+            }
         });
 
         series.forEach(function(definition) {
             var polylinePoints = [];
+            var pointHtml = '';
 
             points.forEach(function(point, index) {
                 var value = Number(point[definition.key] || 0);
                 var x = padding.left + (stepX * index);
                 var y = padding.top + plotHeight - ((value / maxValue) * plotHeight);
                 polylinePoints.push(x.toFixed(2) + ',' + y.toFixed(2));
-                hitsHtml += '<rect class="admin-chart-hit" x="' + (x - 12) + '" y="' + padding.top + '" width="24" height="' + plotHeight + '" fill="transparent" data-series-label="' + escapeHtml(definition.label || definition.key || '') + '" data-value-label="' + escapeHtml(formatChartValue(value, definition.format || 'number')) + '" data-date-label="' + escapeHtml(String(point.date || '')) + '"></rect>';
+                pointHtml += '<circle cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="3.4" fill="#151515" stroke="' + escapeHtml(definition.stroke || '#ff9900') + '" stroke-width="2"></circle>';
             });
 
             if (definition.fill && definition.fill !== 'none') {
                 seriesHtml += '<polygon points="' + escapeHtml(polylinePoints.concat([(padding.left + (stepX * (points.length - 1))).toFixed(2) + ',' + (padding.top + plotHeight).toFixed(2), padding.left.toFixed(2) + ',' + (padding.top + plotHeight).toFixed(2)]).join(' ')) + '" fill="' + escapeHtml(definition.fill) + '"></polygon>';
             }
 
-            seriesHtml += '<polyline points="' + escapeHtml(polylinePoints.join(' ')) + '" stroke="' + escapeHtml(definition.stroke || '#ff9900') + '" stroke-width="2.5" fill="none"></polyline>';
+            seriesHtml += '<polyline points="' + escapeHtml(polylinePoints.join(' ')) + '" stroke="' + escapeHtml(definition.stroke || '#ff9900') + '" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" fill="none"></polyline>';
+            seriesHtml += pointHtml;
         });
 
         points.forEach(function(point, index) {
-            if (index === 0 || index === points.length - 1 || index === Math.floor(points.length / 2)) {
-                labelsHtml += '<text x="' + (padding.left + (stepX * index)) + '" y="' + (height - 12) + '" text-anchor="middle">' + escapeHtml(String(point.date || '').slice(5)) + '</text>';
+            var x = padding.left + (stepX * index);
+            var tooltipLines = [];
+            var label = String(point.label || point.date || '');
+            var labelKey = String(index);
+
+            series.forEach(function(definition) {
+                tooltipLines.push({
+                    color: definition.stroke || '#ff9900',
+                    label: definition.label || definition.key || '',
+                    value: formatChartValue(Number(point[definition.key] || 0), definition.format || 'number')
+                });
+            });
+
+            hitsHtml += '<rect class="admin-chart-hit" x="' + (x - 14) + '" y="' + padding.top + '" width="28" height="' + plotHeight + '" fill="transparent" data-date-label="' + escapeHtml(String(point.date || point.label || '')) + '" data-tooltip-lines="' + escapeHtml(JSON.stringify(tooltipLines)) + '"></rect>';
+
+            if (index === 0 || index === points.length - 1 || index === Math.floor(points.length / 2) || (points.length > 6 && index % Math.max(1, Math.floor(points.length / 6)) === 0)) {
+                if (!visibleLabels[labelKey]) {
+                    labelsHtml += '<text x="' + x + '" y="' + (height - 12) + '" text-anchor="middle">' + escapeHtml(label) + '</text>';
+                    visibleLabels[labelKey] = true;
+                }
             }
         });
 
-        return '<div class="admin-chart-frame"><svg viewBox="0 0 ' + width + ' ' + height + '" class="admin-chart-svg" preserveAspectRatio="none"><g class="admin-chart-grid">' + gridHtml + '</g><g>' + seriesHtml + '</g><g class="admin-chart-labels">' + labelsHtml + '</g><g>' + hitsHtml + '</g></svg><div class="admin-chart-tooltip" hidden></div></div>';
+        return '<div class="admin-chart-frame"><svg viewBox="0 0 ' + width + ' ' + height + '" class="admin-chart-svg" preserveAspectRatio="xMidYMid meet"><g class="admin-chart-grid">' + gridHtml + '</g><g class="admin-chart-axis">' + axisHtml + '</g><g>' + seriesHtml + '</g><g class="admin-chart-labels">' + labelsHtml + '</g><g>' + hitsHtml + '</g></svg><div class="admin-chart-tooltip" hidden></div></div>';
     }
 
     function formatChartValue(value, format) {
@@ -606,6 +659,10 @@ $(document).ready(function() {
 
         if (format === 'currency') {
             return '$' + (Number(value || 0) / 1000000).toFixed(2);
+        }
+
+        if (format === 'percent') {
+            return Math.round(Number(value || 0)) + '%';
         }
 
         return String(Math.round(Number(value || 0)));
@@ -644,13 +701,28 @@ $(document).ready(function() {
             return;
         }
 
-        adminPayloadCache[key] = payload;
+        adminPayloadCache[key] = {
+            payload: payload,
+            cachedAt: Date.now()
+        };
     }
 
     function getCachedAdminPayload(nextUrl) {
         var key = normalizeAdminUrl(nextUrl);
+        var cached = key && adminPayloadCache[key] ? adminPayloadCache[key] : null;
+        var liveRefreshSeconds;
 
-        return key && adminPayloadCache[key] ? adminPayloadCache[key] : null;
+        if (!cached) {
+            return null;
+        }
+
+        liveRefreshSeconds = Number((cached.payload && cached.payload.view && cached.payload.view.live_refresh_seconds) || 0);
+        if (liveRefreshSeconds > 0 && (Date.now() - cached.cachedAt) > 5000) {
+            delete adminPayloadCache[key];
+            return null;
+        }
+
+        return cached.payload;
     }
 
     function prefetchAdminView(nextUrl) {
@@ -676,7 +748,7 @@ $(document).ready(function() {
     }
 
     function buildAdminSubviewUrl(subview, search) {
-        var base = getAdminBasePath().replace(/\/+$/, '');
+        var base = getAdminBasePathname().replace(/\/+$/, '');
         var path = base + '/' + encodeURIComponent(subview);
 
         return path + (search || '');
@@ -752,15 +824,18 @@ $(document).ready(function() {
 
     function activateAdminRoute(route, sidebarSubview) {
         var sidebarSlug = sidebarSubview || resolveAdminSidebarSubview(route);
+        var $headerLinks = $('.admin-header-nav .nav-link[data-admin-nav="1"]');
+        var $sidebarLinks = $('.settings_menu a[data-admin-nav="1"]');
 
         $('[data-admin-view]').removeClass('is-active');
         $('[data-admin-sidebar-section]').removeClass('active');
-        $('.admin-header-nav .nav-link[data-admin-nav="1"]').removeClass('active');
+        $headerLinks.removeClass('active');
 
         if (route && route.section) {
             $('[data-admin-sidebar-section="' + route.section + '"]').addClass('active');
-            $('.admin-header-nav .nav-link[data-admin-nav="1"]').each(function() {
-                var candidate = getAdminRoute(this.href);
+            $headerLinks.each(function() {
+                var candidateSection = $(this).attr('data-admin-section-link') || '';
+                var candidate = candidateSection ? {section: candidateSection} : getAdminRoute(this.href);
 
                 if (candidate && candidate.section === route.section) {
                     $(this).addClass('active');
@@ -768,9 +843,10 @@ $(document).ready(function() {
             });
         }
 
-        $('.settings_menu a[data-admin-nav="1"]').removeClass('active');
-        $('.settings_menu a[data-admin-nav="1"]').each(function() {
-            var candidate = getAdminRoute(this.href);
+        $sidebarLinks.removeClass('active');
+        $sidebarLinks.each(function() {
+            var candidateSubview = $(this).attr('data-admin-subview-link') || '';
+            var candidate = candidateSubview ? {subview: candidateSubview} : getAdminRoute(this.href);
 
             if (candidate && candidate.subview === sidebarSlug) {
                 $(this).addClass('active');
@@ -780,6 +856,45 @@ $(document).ready(function() {
         if (route && route.subview) {
             $(getAdminPanel(route.subview)).addClass('is-active');
         }
+    }
+
+    function clearAdminLiveRefresh() {
+        if (adminLiveRefreshTimer) {
+            window.clearTimeout(adminLiveRefreshTimer);
+            adminLiveRefreshTimer = null;
+        }
+    }
+
+    function scheduleAdminLiveRefresh(payload, nextUrl) {
+        var refreshSeconds = Number((payload && payload.view && payload.view.live_refresh_seconds) || 0);
+
+        clearAdminLiveRefresh();
+
+        if (!refreshSeconds || refreshSeconds < 5) {
+            return;
+        }
+
+        adminLiveRefreshTimer = window.setTimeout(function() {
+            if (document.hidden) {
+                scheduleAdminLiveRefresh(payload, nextUrl);
+                return;
+            }
+
+            $.ajax({
+                url: nextUrl,
+                method: 'GET',
+                dataType: 'json',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Cache-Control': 'no-cache'
+                }
+            }).done(function(freshPayload) {
+                syncAdminShell(freshPayload, nextUrl, false);
+            }).fail(function() {
+                scheduleAdminLiveRefresh(payload, nextUrl);
+            });
+        }, refreshSeconds * 1000);
     }
 
     function syncAdminShell(payload, nextUrl, pushState) {
@@ -804,6 +919,7 @@ $(document).ready(function() {
         renderAdminView(panel, payload.view || {});
         cacheAdminPayload(nextUrl, payload);
         prefetchAdminSection(route.section, new URL(nextUrl, window.location.origin).search);
+        scheduleAdminLiveRefresh(payload, nextUrl);
         document.title = payload.title || document.title;
         $('#menu').removeClass('show');
 
@@ -871,26 +987,38 @@ $(document).ready(function() {
         var frameRect;
         var left;
         var top;
-        var seriesLabel;
-        var valueLabel;
         var dateLabel;
+        var tooltipLines = [];
+        var tooltipHtml = '';
 
         if (!$frame.length || !$tooltip.length || !$frame[0].getBoundingClientRect) {
             return;
         }
 
         frameRect = $frame[0].getBoundingClientRect();
-        left = (event.clientX || frameRect.left) - frameRect.left;
-        top = (event.clientY || frameRect.top) - frameRect.top;
-        seriesLabel = $hit.attr('data-series-label') || '';
-        valueLabel = $hit.attr('data-value-label') || '';
+        left = Math.max(70, Math.min(frameRect.width - 70, (event.clientX || frameRect.left) - frameRect.left));
+        top = Math.max(38, (event.clientY || frameRect.top) - frameRect.top);
         dateLabel = $hit.attr('data-date-label') || '';
+        try {
+            tooltipLines = JSON.parse($hit.attr('data-tooltip-lines') || '[]');
+        } catch (err) {
+            tooltipLines = [];
+        }
 
-        $tooltip.html(
-            '<span>' + escapeHtml(seriesLabel) + '</span>' +
-            '<strong>' + escapeHtml(valueLabel) + '</strong>' +
-            '<small>' + escapeHtml(dateLabel) + '</small>'
-        );
+        if (!tooltipLines.length) {
+            tooltipLines = [{
+                color: '#ff9900',
+                label: $hit.attr('data-series-label') || '',
+                value: $hit.attr('data-value-label') || ''
+            }];
+        }
+
+        tooltipHtml += '<small>' + escapeHtml(dateLabel) + '</small>';
+        tooltipLines.forEach(function(line, index) {
+            tooltipHtml += '<div class="admin-chart-tooltip-row' + (index === 0 ? ' mt-1' : '') + '"><span><i class="admin-chart-swatch" style="background:' + escapeHtml(line.color || '#ff9900') + ';"></i>' + escapeHtml(line.label || '') + '</span><strong>' + escapeHtml(line.value || '') + '</strong></div>';
+        });
+
+        $tooltip.html(tooltipHtml);
         $tooltip.css({
             left: left + 'px',
             top: top + 'px'
