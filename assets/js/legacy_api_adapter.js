@@ -92,39 +92,37 @@
         var params = new URLSearchParams(url.search);
         var op = params.get('op');
 
-        if (!op || (path !== '/' && path !== '/index.php')) {
-            return null;
-        }
+        if (op && (path === '/' || path === '/index.php')) {
+            params.delete('op');
 
-        params.delete('op');
-
-        switch (op) {
-            case 'videos_json':
-                return buildReplacementUrl('/api/videos/actions', params);
-            case 'remote_upload_json':
-                return buildReplacementUrl('/api/remote/jobs', params);
-            case 'upload_get_srv':
-                return buildReplacementUrl('/api/videos/upload-target', params);
-            case 'pass_file':
-                return buildReplacementUrl('/api/uploads/check', params);
-            case 'upload_results_json':
-                return buildReplacementUrl('/api/uploads/result', params);
-            case 'add_srt':
-                return buildReplacementUrl('/api/videos/subtitles', params);
-            case 'change_thumbnail':
-                return buildReplacementUrl('/api/videos/thumbnail', params);
-            case 'folder_sharing':
-                return buildReplacementUrl('/api/folders/share', params);
-            case 'marker':
-                return buildReplacementUrl('/api/videos/markers', params);
-            case 'dmca_manager':
-                return buildReplacementUrl('/api/dmca', params);
-            case 'payments':
-                return buildReplacementUrl('/api/billing/paypal', params);
-            case 'crypto_payments':
-                return buildReplacementUrl('/api/billing/crypto', params);
-            default:
-                break;
+            switch (op) {
+                case 'videos_json':
+                    return buildReplacementUrl('/api/videos/actions', params);
+                case 'remote_upload_json':
+                    return buildReplacementUrl('/api/remote/jobs', params);
+                case 'upload_get_srv':
+                    return buildReplacementUrl('/api/videos/upload-target', params);
+                case 'pass_file':
+                    return buildReplacementUrl('/api/uploads/check', params);
+                case 'upload_results_json':
+                    return buildReplacementUrl('/api/uploads/result', params);
+                case 'add_srt':
+                    return buildReplacementUrl('/api/videos/subtitles', params);
+                case 'change_thumbnail':
+                    return buildReplacementUrl('/api/videos/thumbnail', params);
+                case 'folder_sharing':
+                    return buildReplacementUrl('/api/folders/share', params);
+                case 'marker':
+                    return buildReplacementUrl('/api/videos/markers', params);
+                case 'dmca_manager':
+                    return buildReplacementUrl('/api/dmca', params);
+                case 'payments':
+                    return buildReplacementUrl('/api/billing/paypal', params);
+                case 'crypto_payments':
+                    return buildReplacementUrl('/api/billing/crypto', params);
+                default:
+                    break;
+            }
         }
 
         return rewriteDirectAppUrl(rawUrl);
