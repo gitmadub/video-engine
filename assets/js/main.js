@@ -24,6 +24,8 @@ $(document).ready(function() {
     var pathname = window.location.pathname;
     var l_first = true;
     var adminRequest = null;
+    var adminPayloadCache = {};
+    var adminPrefetchQueue = {};
 
     function isLogoutHref(href) {
         var logoutUrl = veAppUrl('/logout');
@@ -161,6 +163,18 @@ $(document).ready(function() {
 
     function getAdminPanel(subview) {
         return document.querySelector('[data-admin-view="' + subview + '"]');
+    }
+
+    function normalizeAdminUrl(nextUrl) {
+        var url;
+
+        try {
+            url = new URL(nextUrl, window.location.origin);
+        } catch (err) {
+            return '';
+        }
+
+        return url.pathname + url.search;
     }
 
     function resolveAdminSidebarSubview(route) {
@@ -623,6 +637,68 @@ $(document).ready(function() {
         }
     }
 
+    function cacheAdminPayload(nextUrl, payload) {
+        var key = normalizeAdminUrl(nextUrl);
+
+        if (!key || !payload || payload.status !== 'ok') {
+            return;
+        }
+
+        adminPayloadCache[key] = payload;
+    }
+
+    function getCachedAdminPayload(nextUrl) {
+        var key = normalizeAdminUrl(nextUrl);
+
+        return key && adminPayloadCache[key] ? adminPayloadCache[key] : null;
+    }
+
+    function prefetchAdminView(nextUrl) {
+        var key = normalizeAdminUrl(nextUrl);
+
+        if (!key || adminPayloadCache[key] || adminPrefetchQueue[key] || !isAdminNavigationHref(nextUrl)) {
+            return;
+        }
+
+        adminPrefetchQueue[key] = $.ajax({
+            url: nextUrl,
+            method: 'GET',
+            dataType: 'json',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        }).done(function(payload) {
+            cacheAdminPayload(nextUrl, payload);
+        }).always(function() {
+            delete adminPrefetchQueue[key];
+        });
+    }
+
+    function buildAdminSubviewUrl(subview, search) {
+        var base = getAdminBasePath().replace(/\/+$/, '');
+        var path = base + '/' + encodeURIComponent(subview);
+
+        return path + (search || '');
+    }
+
+    function prefetchAdminSection(section, search) {
+        var config = getAdminConfig();
+        var sectionEntry = config && config.sections ? config.sections[section] : null;
+
+        if (!sectionEntry || !sectionEntry.sidebar_views) {
+            return;
+        }
+
+        (sectionEntry.sidebar_views || []).forEach(function(view) {
+            if (!view || !view.slug) {
+                return;
+            }
+
+            prefetchAdminView(buildAdminSubviewUrl(view.slug, search));
+        });
+    }
+
     function renderAdminBlocks(blocks) {
         var html = '';
 
@@ -726,6 +802,8 @@ $(document).ready(function() {
 
         activateAdminRoute(route, payload.sidebar_subview);
         renderAdminView(panel, payload.view || {});
+        cacheAdminPayload(nextUrl, payload);
+        prefetchAdminSection(route.section, new URL(nextUrl, window.location.origin).search);
         document.title = payload.title || document.title;
         $('#menu').removeClass('show');
 
@@ -739,6 +817,7 @@ $(document).ready(function() {
     function loadAdminView(nextUrl, pushState) {
         var route = getAdminRoute(nextUrl);
         var panel;
+        var cachedPayload;
 
         if (!hasAdminShell() || !isAdminNavigationHref(nextUrl) || !route) {
             window.location.href = nextUrl;
@@ -753,6 +832,13 @@ $(document).ready(function() {
         }
 
         activateAdminRoute(route, resolveAdminSidebarSubview(route));
+
+        cachedPayload = getCachedAdminPayload(nextUrl);
+
+        if (cachedPayload) {
+            syncAdminShell(cachedPayload, nextUrl, pushState);
+            return;
+        }
 
         if (adminRequest && typeof adminRequest.abort === 'function') {
             adminRequest.abort();

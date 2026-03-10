@@ -100,7 +100,13 @@ function ve_url(string $path = '/'): string
 
 function ve_request_path(): string
 {
-    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+    $pathInfo = (string) ($_SERVER['PATH_INFO'] ?? '');
+
+    if ($pathInfo !== '' && $pathInfo[0] === '/') {
+        $path = rawurldecode($pathInfo);
+    } else {
+        $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+    }
 
     if (!is_string($path) || $path === '') {
         return '/';
@@ -111,6 +117,24 @@ function ve_request_path(): string
 
     if ($basePath !== '' && ($path === $basePath || str_starts_with($path, $basePath . '/'))) {
         $path = substr($path, strlen($basePath)) ?: '/';
+    }
+
+    $scriptPath = parse_url((string) ($_SERVER['SCRIPT_NAME'] ?? ''), PHP_URL_PATH);
+
+    if (is_string($scriptPath) && $scriptPath !== '') {
+        $scriptPath = rawurldecode($scriptPath);
+
+        if ($basePath !== '' && ($scriptPath === $basePath || str_starts_with($scriptPath, $basePath . '/'))) {
+            $scriptPath = substr($scriptPath, strlen($basePath)) ?: '/';
+        }
+
+        if ($scriptPath !== '/' && $scriptPath !== '') {
+            if ($path === $scriptPath) {
+                $path = '/';
+            } elseif (str_starts_with($path, $scriptPath . '/')) {
+                $path = substr($path, strlen($scriptPath)) ?: '/';
+            }
+        }
     }
 
     if ($path !== '/') {
