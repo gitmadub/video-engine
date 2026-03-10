@@ -38,6 +38,43 @@
         return appUrl(path) + (query ? '?' + query : '');
     }
 
+    function rewriteDirectAppUrl(rawUrl) {
+        var basePath = window.VE_BASE_PATH || '';
+
+        if (!rawUrl || !basePath) {
+            return null;
+        }
+
+        var url;
+
+        try {
+            url = new URL(rawUrl, window.location.origin);
+        } catch (error) {
+            return null;
+        }
+
+        if (url.origin !== window.location.origin) {
+            return null;
+        }
+
+        var path = url.pathname;
+
+        if (path === basePath || path.indexOf(basePath + '/') === 0) {
+            return null;
+        }
+
+        var knownPrefixes = ['/api/', '/subscene/'];
+        var matchesKnownPrefix = knownPrefixes.some(function (prefix) {
+            return path === prefix.slice(0, -1) || path.indexOf(prefix) === 0;
+        });
+
+        if (!matchesKnownPrefix) {
+            return null;
+        }
+
+        return buildReplacementUrl(path, new URLSearchParams(url.search));
+    }
+
     function rewriteLegacyUrl(rawUrl) {
         if (!rawUrl) {
             return null;
@@ -87,8 +124,10 @@
             case 'crypto_payments':
                 return buildReplacementUrl('/api/billing/crypto', params);
             default:
-                return null;
+                break;
         }
+
+        return rewriteDirectAppUrl(rawUrl);
     }
 
     function installJqueryAdapter() {
