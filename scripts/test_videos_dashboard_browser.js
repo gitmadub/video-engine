@@ -25,16 +25,33 @@ function toolbarButton(page, label) {
   return page.locator('.title_wrap .btn-group .btn').filter({ hasText: label }).first();
 }
 
-async function login(page, username, password) {
-  await page.goto('/', { waitUntil: 'networkidle' });
-  const token = await page.evaluate(() => window.VE_CSRF_TOKEN || '');
+function basePathFromUrl(value) {
+  const pathname = new URL(value).pathname.replace(/\/+$/, '');
+  return pathname === '/' ? '' : pathname;
+}
+
+function appPath(basePath, path) {
+  const suffix = path.startsWith('/') ? path : `/${path}`;
+  return `${basePath}${suffix}` || '/';
+}
+
+async function login(page, username, password, basePath) {
+  await page.goto(appPath(basePath, '/'), { waitUntil: 'networkidle' });
+  const token = await page.evaluate(() => {
+    if (window.VE_CSRF_TOKEN) {
+      return window.VE_CSRF_TOKEN;
+    }
+
+    const field = document.querySelector('input[name="token"]');
+    return field ? field.value : '';
+  });
 
   if (!token) {
     throw new Error('Unable to extract the runtime CSRF token.');
   }
 
   const result = await page.evaluate(async (credentials) => {
-    const response = await fetch('/api/auth/login', {
+    const response = await fetch(credentials.loginPath, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
@@ -52,7 +69,12 @@ async function login(page, username, password) {
       status: response.status,
       payload: await response.json(),
     };
-  }, { username, password, token });
+  }, {
+    username,
+    password,
+    token,
+    loginPath: appPath(basePath, '/api/auth/login'),
+  });
 
   if (result.status !== 200 || result.payload.status !== 'redirect') {
     throw new Error(`Login failed: ${JSON.stringify(result)}`);
@@ -136,6 +158,7 @@ function findVideoManagerInstance(node) {
   const password = requiredEnv('VIDEOS_BROWSER_PASSWORD');
   const sharedFolderName = requiredEnv('VIDEOS_BROWSER_SHARED_FOLDER');
   const targetFolderName = requiredEnv('VIDEOS_BROWSER_TARGET_FOLDER');
+  const basePath = basePathFromUrl(baseURL);
   const browserPath = firstExistingPath([
     process.env.VIDEOS_BROWSER_EXECUTABLE || '',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -163,14 +186,14 @@ function findVideoManagerInstance(node) {
       }
     });
 
-    await login(page, username, password);
+    await login(page, username, password, basePath);
 
-    await page.goto('/dashboard/videos', { waitUntil: 'networkidle' });
+    await page.goto(appPath(basePath, '/dashboard/videos'), { waitUntil: 'networkidle' });
 
     await dismissModalIfVisible(page, '#content_type');
 
-    if (!page.url().endsWith('/videos')) {
-      throw new Error(`Expected /dashboard/videos to redirect to /videos. Received ${page.url()}`);
+    if (!page.url().endsWith(appPath(basePath, '/videos'))) {
+      throw new Error(`Expected /dashboard/videos to redirect to ${appPath(basePath, '/videos')}. Received ${page.url()}`);
     }
 
     await page.waitForFunction(() => {
