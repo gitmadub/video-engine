@@ -63,6 +63,11 @@
             return null;
         }
 
+        var knownExactPaths = ['/', '/index.php'];
+        if (knownExactPaths.indexOf(path) !== -1) {
+            return buildReplacementUrl(path, new URLSearchParams(url.search));
+        }
+
         var knownPrefixes = ['/api/', '/subscene/'];
         var matchesKnownPrefix = knownPrefixes.some(function (prefix) {
             return path === prefix.slice(0, -1) || path.indexOf(prefix) === 0;
