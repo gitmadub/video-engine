@@ -2060,6 +2060,100 @@ function ve_admin_list_custom_domains(string $status = '', string $query = '', i
     ];
 }
 
+function ve_admin_primary_upload_host(): string
+{
+    $statement = ve_db()->query(
+        "SELECT domain
+         FROM processing_nodes
+         WHERE is_enabled = 1
+         ORDER BY
+            CASE provision_status WHEN 'ready' THEN 0 ELSE 1 END,
+            id ASC
+         LIMIT 1"
+    );
+    $host = $statement !== false ? (string) ($statement->fetchColumn() ?: '') : '';
+    $host = strtolower(trim($host));
+
+    return ve_is_valid_domain($host) ? $host : '';
+}
+
+function ve_admin_sync_default_upload_endpoint(): void
+{
+    $uploadHost = ve_admin_primary_upload_host();
+
+    if ($uploadHost === '') {
+        return;
+    }
+
+    $node = ve_db()->query('SELECT * FROM storage_nodes ORDER BY id ASC LIMIT 1')->fetch();
+
+    if (!is_array($node)) {
+        return;
+    }
+
+    $storageNodeId = (int) ($node['id'] ?? 0);
+    $uploadBaseUrl = 'https://' . $uploadHost;
+
+    if (trim((string) ($node['upload_base_url'] ?? '')) !== $uploadBaseUrl) {
+        ve_db()->prepare(
+            'UPDATE storage_nodes
+             SET upload_base_url = :upload_base_url,
+                 updated_at = :updated_at
+             WHERE id = :id'
+        )->execute([
+            ':upload_base_url' => $uploadBaseUrl,
+            ':updated_at' => ve_now(),
+            ':id' => $storageNodeId,
+        ]);
+    }
+
+    $endpoint = ve_db()->prepare(
+        'SELECT id
+         FROM upload_endpoints
+         WHERE storage_node_id = :storage_node_id
+           AND host = :host
+         LIMIT 1'
+    );
+    $endpoint->execute([
+        ':storage_node_id' => $storageNodeId,
+        ':host' => $uploadHost,
+    ]);
+    $existingId = (int) ($endpoint->fetchColumn() ?: 0);
+
+    if ($existingId > 0) {
+        ve_db()->prepare(
+            'UPDATE upload_endpoints
+             SET protocol = "https",
+                 is_active = 1,
+                 updated_at = :updated_at
+             WHERE id = :id'
+        )->execute([
+            ':updated_at' => ve_now(),
+            ':id' => $existingId,
+        ]);
+        return;
+    }
+
+    $code = 'upload-' . substr(preg_replace('/[^a-z0-9]+/i', '-', $uploadHost) ?? 'upload-endpoint', 0, 36);
+    if ($code === 'upload-') {
+        $code = 'upload-endpoint';
+    }
+
+    ve_db()->prepare(
+        'INSERT INTO upload_endpoints (
+            storage_node_id, code, protocol, host, path_prefix, weight, is_active, max_file_size_bytes, accepts_remote_upload, created_at, updated_at
+         ) VALUES (
+            :storage_node_id, :code, "https", :host, "", 100, 1, 0, 1, :created_at, :updated_at
+         )'
+    )->execute([
+        ':storage_node_id' => $storageNodeId,
+        ':code' => $code,
+        ':host' => $uploadHost,
+        ':created_at' => ve_now(),
+        ':updated_at' => ve_now(),
+    ]);
+}
+
 function ve_admin_infrastructure_snapshot(): array
 {
     ve_admin_cleanup_stale_processing_jobs();
@@ -3709,6 +3803,7 @@ function ve_admin_upsert_storage_box(array $payload, int $actorUserId): int
             ]);
         }
 
+        ve_admin_sync_default_upload_endpoint();
         ve_admin_log_event('admin.infrastructure.storage_box_saved', 'storage_volume', $volumeId, is_array($existing) ? $existing : [], ve_admin_storage_box_load($volumeId) ?? [], $actorUserId);
 
         return $volumeId;
@@ -11577,6 +11672,7 @@ function ve_admin_backend_app_view_payload(string $activeSubview): array
 
 function ve_admin_backend_infrastructure_view_payload(string $activeSubview): array
 {
+    ve_admin_sync_default_upload_endpoint();
     $snapshot = ve_admin_infrastructure_snapshot();
     $nodes = (array) ($snapshot['storage_nodes'] ?? []);
     $volumes = (array) ($snapshot['storage_volumes'] ?? []);
