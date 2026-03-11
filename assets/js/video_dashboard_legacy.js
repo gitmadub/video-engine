@@ -224,6 +224,20 @@
         parent.insertBefore(child, reference.nextSibling);
     }
 
+    function legacyDateLabel(date) {
+        var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        var value = date instanceof Date ? date : new Date(date);
+        var day;
+
+        if (!(value instanceof Date) || isNaN(value.getTime())) {
+            value = new Date();
+        }
+
+        day = value.getDate();
+
+        return months[value.getMonth()] + ' ' + (day < 10 ? '0' + day : String(day)) + ', ' + value.getFullYear();
+    }
+
     function updateFolderShareOutput(root) {
         if (!root) {
             return;
@@ -375,13 +389,21 @@
             '.ve-folder-path-card:hover,.ve-folder-path-card:focus-visible{text-decoration:none;outline:none;color:#fff;border-color:#f90;background:rgba(255,153,0,.12)}',
             '.ve-folder-path-card.is-current{color:#f90;border-color:rgba(255,153,0,.58);background:rgba(255,153,0,.08)}',
             '.ve-folder-path-card.ve-drag-folder-target,.ve-folder-path-card.ve-drop-commit{color:#fff;border-color:#f90;background:rgba(255,153,0,.18);transform:translateY(-1px)}',
+            '.file_manager .files ul.file_list li.item{transition:background .14s ease,box-shadow .14s ease,transform .14s ease}',
             '.file_list .item.active{cursor:grab}',
             '.file_list .item.active:active{cursor:grabbing}',
             '.file_list .item.ve-item-pending-move{opacity:0;transform:translateX(32px) scale(.985);pointer-events:none;transition:opacity .16s ease,transform .16s ease}',
-            '.file_list .folder.item.ve-drop-commit{box-shadow:0 0 0 1px rgba(255,153,0,.6) inset;background:rgba(255,153,0,.08)}',
+            '.file_list .folder.item.ve-drag-folder-target,.file_list .folder.item.ve-drop-commit{box-shadow:0 0 0 1px rgba(255,153,0,.65) inset;background:rgba(255,153,0,.10);transform:translateY(-1px)}',
+            '.file_list .folder.item.ve-drag-folder-target .name .title,.file_list .folder.item.ve-drop-commit .name .title{color:#fff}',
             '.ve-drag-ghost{position:fixed;top:-9999px;left:-9999px;max-width:260px;padding:10px 12px;border:1px solid #434645;border-radius:3px;background:#1c1c1c;box-shadow:0 8px 22px rgba(0,0,0,.28);color:#fff;pointer-events:none;z-index:2147483647}',
             '.ve-drag-ghost-count{font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#f90}',
             '.ve-drag-ghost-title{margin-top:4px;font-size:.88rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+            '.ve-folder-public{display:inline-flex;align-items:center;gap:6px;color:rgba(255,255,255,.86);font-weight:600}',
+            '.ve-folder-public i{color:#f90;font-size:.9rem}',
+            '.vue-simple-context-menu{background:#171717!important;border:1px solid rgba(67,70,69,.88)!important;box-shadow:0 18px 44px rgba(0,0,0,.38)!important;border-radius:6px!important;min-width:190px}',
+            '.vue-simple-context-menu__item{color:rgba(255,255,255,.88)!important;padding:9px 14px!important;font-family:inherit!important;font-weight:600!important}',
+            '.vue-simple-context-menu__item:hover{background:rgba(255,153,0,.16)!important;color:#fff!important}',
+            '.vue-simple-context-menu li:first-of-type,.vue-simple-context-menu li:last-of-type{margin:4px 0!important}',
             '@media (max-width:991px){.ve-browser-toolbar{padding:10px 12px}.ve-browser-toolbar-main,.ve-folder-path{width:100%}.ve-folder-path-label{padding-top:0}}'
         ].join('');
         document.head.appendChild(style);
@@ -495,6 +517,16 @@
         return String(target.getAttribute('data-folder') || '0');
     }
 
+    function folderPublicMarkup(folder) {
+        var isShared = !!(folder && folder.share_url);
+
+        return ''
+            + '<span class="ve-folder-public">'
+            + '<i class="fad ' + (isShared ? 'fa-eye' : 'fa-eye-slash') + '"></i>'
+            + '<span>' + (isShared ? 'Yes' : 'No') + '</span>'
+            + '</span>';
+    }
+
     function decorateFolderRows(vm) {
         document.querySelectorAll('.file_list .folder.item').forEach(function (item) {
             var folderId = item.getAttribute('data-folder');
@@ -506,6 +538,7 @@
             var existingDate = item.querySelector(':scope > .date');
             var existingViews = item.querySelector(':scope > .views');
             var existingPublic = item.querySelector(':scope > .public');
+            var mobileColumn = item.querySelector(':scope > .mobile');
 
             if (!existingSize) {
                 existingSize = document.createElement('div');
@@ -525,30 +558,38 @@
                 item.appendChild(existingViews);
             }
 
-            if (existingPublic && existingPublic.parentNode === item) {
-                item.removeChild(existingPublic);
+            if (!existingPublic) {
+                existingPublic = document.createElement('div');
+                existingPublic.className = 'public d-none d-sm-block';
+                item.appendChild(existingPublic);
             }
 
             existingSize.textContent = size;
             existingDate.textContent = created;
             existingViews.textContent = '-';
+            existingPublic.innerHTML = folderPublicMarkup(folder);
 
             if (nameColumn) {
                 insertAfter(item, existingSize, nameColumn);
                 insertAfter(item, existingDate, existingSize);
                 insertAfter(item, existingViews, existingDate);
+                insertAfter(item, existingPublic, existingViews);
+
+                if (mobileColumn) {
+                    insertAfter(item, mobileColumn, existingPublic);
+                }
             }
         });
     }
 
     function decorateDraggableItems() {
         document.querySelectorAll('.file_list .item').forEach(function (item) {
-            Array.prototype.forEach.call(item.children || [], function (child) {
+            Array.prototype.forEach.call(item.querySelectorAll('*'), function (child) {
                 if (!child || typeof child.setAttribute !== 'function') {
                     return;
                 }
 
-                if (isFormControlTarget(child)) {
+                if (child.closest('button, input, label, textarea, select, option, .close, .nav-link, .mobile, [role="button"]')) {
                     child.setAttribute('draggable', 'false');
                     return;
                 }
@@ -564,6 +605,7 @@
 
             if (item.hasAttribute('data-video') || item.hasAttribute('data-folder')) {
                 item.setAttribute('draggable', 'true');
+                item.setAttribute('data-drag-surface', 'true');
                 return;
             }
 
@@ -640,6 +682,23 @@
         return preview;
     }
 
+    function clearSelection(vm) {
+        document.querySelectorAll('.file_list .item.active').forEach(function (item) {
+            setItemSelected(item, false);
+        });
+
+        if (vm) {
+            vm.file_ids = [];
+            vm.folder_ids = [];
+
+            if (vm.__veSelection && typeof vm.__veSelection.clearSelection === 'function') {
+                vm.__veSelection.clearSelection();
+            }
+        }
+
+        syncSelectionFromDom(vm);
+    }
+
     function applyPendingMoveState(vm, selection, targetNode) {
         var items = selectionItemsFromDom(selection);
 
@@ -679,6 +738,104 @@
         }
 
         vm.__vePendingDragMove = null;
+    }
+
+    function removeEmptyFolderBars() {
+        document.querySelectorAll('.d-flex.flex-wrap.align-items-center.justify-content-between.folder').forEach(function (node) {
+            var hasContent;
+            var parentFiles;
+
+            if (!node) {
+                return;
+            }
+
+            hasContent = !!node.querySelector('.item, [data-folder], a, button, .title, h1, h2, h3, h4, h5');
+            parentFiles = node.closest('.files');
+
+            if (!hasContent && String(node.textContent || '').replace(/\s+/g, '') === '') {
+                node.remove();
+                return;
+            }
+
+            if (parentFiles && !parentFiles.querySelector('.file_list .folder.item[data-folder]') && !hasContent) {
+                node.remove();
+            }
+        });
+    }
+
+    function optimisticFolderPayload(name) {
+        return {
+            fld_id: 'tmp-folder-' + String(Date.now()) + '-' + String(Math.floor(Math.random() * 10000)),
+            fld_code: '',
+            fld_name: String(name || '').trim(),
+            siz: '0 B',
+            siz_bytes: 0,
+            cre: legacyDateLabel(new Date()),
+            share_url: '',
+            __veOptimistic: true
+        };
+    }
+
+    function ensureFolderCollection(vm) {
+        if (!vm.data || typeof vm.data !== 'object') {
+            vm.data = {};
+        }
+
+        if (!Array.isArray(vm.data.folders)) {
+            vm.data.folders = [];
+        }
+
+        return vm.data.folders;
+    }
+
+    function insertOptimisticFolder(vm, folder) {
+        var folders = ensureFolderCollection(vm);
+
+        folders.unshift(folder);
+
+        if (typeof vm.$forceUpdate === 'function') {
+            vm.$forceUpdate();
+        }
+
+        afterRender(vm);
+    }
+
+    function replaceOptimisticFolder(vm, tempId, folder) {
+        var folders = ensureFolderCollection(vm);
+        var index = folders.findIndex(function (item) {
+            return item && String(item.fld_id || '') === String(tempId || '');
+        });
+
+        if (index === -1) {
+            folders.unshift(folder);
+        } else {
+            folders.splice(index, 1, folder);
+        }
+
+        if (typeof vm.$forceUpdate === 'function') {
+            vm.$forceUpdate();
+        }
+
+        afterRender(vm);
+    }
+
+    function removeOptimisticFolder(vm, tempId) {
+        var folders = ensureFolderCollection(vm);
+        var index = folders.findIndex(function (item) {
+            return item && String(item.fld_id || '') === String(tempId || '');
+        });
+
+        if (index === -1) {
+            return;
+        }
+
+        folders.splice(index, 1);
+
+        if (typeof vm.$forceUpdate === 'function') {
+            vm.$forceUpdate();
+        }
+
+        afterRender(vm);
     }
 
     function hideLegacyBackButtons() {
@@ -1158,12 +1315,17 @@
         document.addEventListener('click', function (event) {
             var shareLink = event.target && event.target.closest('[data-folder-share]');
             var pathCard = event.target && event.target.closest('[data-folder-path-card]');
+            var item = event.target && event.target.closest('.file_list .item');
 
             if (!shareLink) {
                 if (pathCard) {
                     event.preventDefault();
                     vm.open_folder(String(pathCard.getAttribute('data-folder-id') || '0'));
                     return;
+                }
+
+                if (!item && !event.target.closest('.vue-simple-context-menu, .modal, .modal-backdrop') && !isFormControlTarget(event.target)) {
+                    clearSelection(vm);
                 }
 
                 return;
@@ -1196,6 +1358,7 @@
             decorateFolderRows(vm);
             decorateDraggableItems();
             hideLegacyBackButtons();
+            removeEmptyFolderBars();
             hydrateSavedContentType(vm);
             installSelection(vm);
             installDropZone(vm);
@@ -1468,6 +1631,13 @@
             }
 
             if (option === 'get-links') {
+                syncSelectionFromDom(vm);
+
+                if (Array.isArray(vm.file_ids) && vm.file_ids.length > 1 && normalizeIdList(vm.file_ids).indexOf(String(fileId)) !== -1) {
+                    vm.export_files();
+                    return;
+                }
+
                 vm.file_ids2 = fileId;
                 vm.export_files2();
             }
@@ -1497,21 +1667,41 @@
 
         target.add_folder = function () {
             var vm = this;
+            var folderName = String(vm.new_folder || '').trim();
+            var optimisticFolder;
+
+            if (!folderName) {
+                showToast('info', 'Please enter a folder name.');
+                return;
+            }
+
+            optimisticFolder = optimisticFolderPayload(folderName);
+            window.jQuery('#add_folder').modal('hide');
+            vm.new_folder = '';
+            insertOptimisticFolder(vm, optimisticFolder);
 
             requestJson('post', ENDPOINTS.actions, {
                 fld_id: vm.current_folder,
-                create_new_folder: vm.new_folder,
+                create_new_folder: folderName,
                 token: vm.token
             }, function (response) {
-                if (response.status === 'fail') {
-                    window.jQuery('#add_folder').modal('hide');
+                if (response && response.status === 'fail') {
+                    removeOptimisticFolder(vm, optimisticFolder.fld_id);
                     showToast('error', response.message);
                     return;
                 }
 
-                window.jQuery('#add_folder').modal('hide');
-                vm.new_folder = '';
-                vm.update();
+                if (Array.isArray(response) && response[0]) {
+                    replaceOptimisticFolder(vm, optimisticFolder.fld_id, response[0]);
+                } else {
+                    replaceOptimisticFolder(vm, optimisticFolder.fld_id, Object.assign({}, optimisticFolder, {
+                        __veOptimistic: false
+                    }));
+                }
+
+                window.setTimeout(function () {
+                    vm.update();
+                }, 0);
             });
         };
 
