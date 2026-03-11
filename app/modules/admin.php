@@ -2751,6 +2751,18 @@ function ve_admin_upsert_processing_node(array $payload, int $actorUserId): int
     $ipAddress = trim((string) ($payload['ip_address'] ?? ''));
     $sshUsername = trim((string) ($payload['ssh_username'] ?? 'root'));
     $sshPassword = trim((string) ($payload['ssh_password'] ?? ''));
+
+    if ($id <= 0 && $domain !== '') {
+        $existingStatement = ve_db()->prepare('SELECT id FROM processing_nodes WHERE domain = :domain LIMIT 1');
+        $existingStatement->execute([':domain' => $domain]);
+        $existingId = (int) ($existingStatement->fetchColumn() ?: 0);
+
+        if ($existingId > 0) {
+            $id = $existingId;
+            $before = ve_admin_processing_node_load($id);
+        }
+    }
+
     $existingEncryptedPassword = is_array($before) ? trim((string) ($before['ssh_password_encrypted'] ?? '')) : '';
     $encryptedPassword = $sshPassword !== '' ? ve_encrypt_string($sshPassword) : $existingEncryptedPassword;
 
