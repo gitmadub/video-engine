@@ -3271,7 +3271,7 @@ function ve_admin_upsert_storage_box(array $payload, int $actorUserId): int
             . ' && /tmp/ve-storage-box/storage_box_delivery_agent.sh install'
             . ' --storage-host ' . escapeshellarg($host)
             . ' --storage-username ' . escapeshellarg($boxUsername)
-            . ' --storage-password ' . escapeshellarg($boxPassword)
+            . ' --storage-password-b64 ' . escapeshellarg(base64_encode($boxPassword))
             . ' --mount-path ' . escapeshellarg($mountPath)
             . ' --library-root ' . escapeshellarg(ve_admin_storage_box_library_root($volume)),
             1200

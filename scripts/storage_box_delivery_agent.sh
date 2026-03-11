@@ -7,6 +7,7 @@ shift || true
 STORAGE_HOST=""
 STORAGE_USERNAME=""
 STORAGE_PASSWORD=""
+STORAGE_PASSWORD_B64=""
 MOUNT_PATH=""
 LIBRARY_ROOT=""
 CONFIG_PATH="/etc/video-engine/storage-box-agent.env"
@@ -17,6 +18,7 @@ usage() {
     cat <<'TXT'
 Usage:
   storage_box_delivery_agent.sh install --storage-host <host> --storage-username <user> --storage-password <pass> --mount-path <path> --library-root <path>
+  storage_box_delivery_agent.sh install --storage-host <host> --storage-username <user> --storage-password-b64 <base64> --mount-path <path> --library-root <path>
   storage_box_delivery_agent.sh snapshot [--mount-path <path>] [--library-root <path>]
   storage_box_delivery_agent.sh ensure-mounted [--mount-path <path>]
 TXT
@@ -66,6 +68,10 @@ parse_args() {
                 ;;
             --storage-password)
                 STORAGE_PASSWORD="${2:-}"
+                shift 2
+                ;;
+            --storage-password-b64)
+                STORAGE_PASSWORD_B64="${2:-}"
                 shift 2
                 ;;
             --mount-path)
@@ -177,6 +183,10 @@ ensure_mount() {
 install_agent() {
     require_root
     parse_args "$@"
+
+    if [ -z "$STORAGE_PASSWORD" ] && [ -n "$STORAGE_PASSWORD_B64" ]; then
+        STORAGE_PASSWORD="$(printf '%s' "$STORAGE_PASSWORD_B64" | base64 -d)"
+    fi
 
     if [ -z "$STORAGE_HOST" ] || [ -z "$STORAGE_USERNAME" ] || [ -z "$STORAGE_PASSWORD" ] || [ -z "$MOUNT_PATH" ] || [ -z "$LIBRARY_ROOT" ]; then
         echo "All install arguments are required." >&2
