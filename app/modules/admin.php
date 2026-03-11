@@ -5093,6 +5093,9 @@ function ve_admin_dashboard_shell(
     </style>
 CSS;
 
+    $navTextLogo = ve_runtime_text_logo_html('nav');
+    $footerTextLogo = ve_runtime_text_logo_html('footer');
+
     return <<<HTML
 <!doctype html>
 <html lang="en">
@@ -5119,7 +5122,7 @@ CSS;
     <nav class="navbar navbar-expand-lg main-menu">
         <div class="container-fluid">
             <a href="{$currentUser['home_url']}" class="navbar-brand">
-                <img src="{$currentUser['logo_url']}" height="30" alt="" class="d-inline-block align-top">
+                {$navTextLogo}
             </a>
 
             <ul class="notifications-mobile d-block d-sm-none m-0 p-0 ml-auto">
@@ -5180,7 +5183,7 @@ CSS;
     <footer class="footer mt-4">
         <div class="container">
             <div class="row">
-                <div class="col-md-2"><img class="logo" src="{$currentUser['logo_url']}" alt="Logo"></div>
+                <div class="col-md-2">{$footerTextLogo}</div>
                 <div class="col-md-10 text-right">
                     <ul class="menu m-0 p-0 d-flex align-items-center justify-content-center justify-content-sm-end flex-wrap">
                         <li><a href="{$currentUser['home_url']}">Home</a></li>

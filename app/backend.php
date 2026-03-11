@@ -4204,7 +4204,11 @@ function ve_handle_delete_account(): void
 
 function ve_runtime_script_tag(): string
 {
-    return '<script>window.VE_BASE_PATH=' . json_encode(ve_base_path(), JSON_UNESCAPED_SLASHES) . ';window.VE_CSRF_TOKEN=' . json_encode(ve_csrf_token(), JSON_UNESCAPED_SLASHES) . ';</script>';
+    return '<script>'
+        . 'window.VE_BASE_PATH=' . json_encode(ve_base_path(), JSON_UNESCAPED_SLASHES) . ';'
+        . 'window.VE_CSRF_TOKEN=' . json_encode(ve_csrf_token(), JSON_UNESCAPED_SLASHES) . ';'
+        . ve_runtime_text_logo_script_body()
+        . '</script>';
 }
 
 function ve_site_page_key(string $relativePath): string
@@ -4465,6 +4469,59 @@ function ve_runtime_text_logo_style_tag(): string
 }
 </style>
 HTML;
+}
+
+function ve_runtime_text_logo_script_body(): string
+{
+    return <<<'JS'
+(function () {
+    function textLogoHtml(context) {
+        var modifier = context === 'footer' ? ' ve-text-logo--footer' : ' ve-text-logo--nav';
+        return '<span class="ve-text-logo' + modifier + '" aria-label="FileHost.net">FileHost<span class="ve-text-logo__accent">.net</span></span>';
+    }
+
+    function replaceHeaderFooterLogos(root) {
+        var scope = root && root.querySelectorAll ? root : document;
+
+        scope.querySelectorAll('a.navbar-brand img[src*="/assets/img/logo-s.png"]').forEach(function (img) {
+            var anchor = img.closest('a.navbar-brand');
+            if (!anchor || anchor.querySelector('.ve-text-logo')) {
+                return;
+            }
+
+            anchor.innerHTML = textLogoHtml('nav');
+        });
+
+        scope.querySelectorAll('footer img.logo[src*="/assets/img/logo-s.png"], .footer img.logo[src*="/assets/img/logo-s.png"]').forEach(function (img) {
+            if (img.parentElement && img.parentElement.querySelector('.ve-text-logo')) {
+                img.remove();
+                return;
+            }
+
+            img.insertAdjacentHTML('afterend', textLogoHtml('footer'));
+            img.remove();
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        replaceHeaderFooterLogos(document);
+
+        if (!window.MutationObserver) {
+            return;
+        }
+
+        new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                mutation.addedNodes.forEach(function (node) {
+                    if (node && node.nodeType === 1) {
+                        replaceHeaderFooterLogos(node);
+                    }
+                });
+            });
+        }).observe(document.body, { childList: true, subtree: true });
+    });
+}());
+JS;
 }
 
 function ve_runtime_text_logo_html(string $context = 'nav'): string
