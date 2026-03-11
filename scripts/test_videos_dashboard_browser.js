@@ -490,7 +490,7 @@ function findVideoManagerInstance(node) {
       throw new Error(`Shared folder row was not rendered with a folder id: ${sharedFolderName}`);
     }
 
-    await page.evaluate((folderId) => {
+    await page.waitForFunction((folderId) => {
       const app = document.getElementById('app');
       const root = app && app.__vue__;
 
@@ -509,17 +509,45 @@ function findVideoManagerInstance(node) {
       }
 
       const vm = findVideoManagerInstance(root);
+      const cache = vm && vm.__veFolderResponseCache ? vm.__veFolderResponseCache : {};
 
-      if (!vm) {
-        throw new Error('Unable to locate the video manager instance for shared folder navigation.');
-      }
-
-      vm.open_folder(String(folderId || '0'));
+      return Object.keys(cache).some((key) => key.includes(`|${String(folderId || '0')}|`));
     }, sharedFolderId);
+
+    const publicBadgeParity = await page.evaluate((folderName) => {
+      const videoPublic = document.querySelector('.file_list .video.item .public');
+      const folderRow = Array.from(document.querySelectorAll('.file_list .folder.item')).find((node) =>
+        (node.textContent || '').includes(folderName)
+      );
+      const folderPublic = folderRow ? folderRow.querySelector('.public') : null;
+
+      return {
+        video: videoPublic ? (videoPublic.textContent || '').replace(/\s+/g, ' ').trim() : '',
+        folder: folderPublic ? (folderPublic.textContent || '').replace(/\s+/g, ' ').trim() : '',
+      };
+    }, sharedFolderName);
+
+    if (!(publicBadgeParity.video && publicBadgeParity.video === publicBadgeParity.folder)) {
+      throw new Error(`Folder and video public badges should match visually. Received: ${JSON.stringify(publicBadgeParity)}`);
+    }
+
+    seenRequests.length = 0;
+
+    await page.locator('.file_list .folder.item').filter({ hasText: sharedFolderName }).locator('.name').click();
+
     await page.waitForFunction((name) => {
       const videoTitle = document.querySelector('.file_list .video.item h4 a');
       return Boolean(videoTitle && videoTitle.textContent && videoTitle.textContent.includes(name));
     }, 'Shared Folder Clip');
+
+    const sharedFolderRequests = seenRequests.filter((entry) =>
+      entry.includes('/videos/actions')
+      && entry.includes(`fld_id=${String(sharedFolderId)}`)
+    );
+
+    if (sharedFolderRequests.length > 1) {
+      throw new Error(`Opening a folder should issue at most one /videos/actions request. Seen: ${JSON.stringify(sharedFolderRequests)}`);
+    }
 
     const breadcrumbLabelsInsideFolder = await page.locator('[data-folder-path-card]').allTextContents();
 
@@ -571,10 +599,167 @@ function findVideoManagerInstance(node) {
     }
 
     await dismissModalIfVisible(page, '#sharing');
+    seenRequests.length = 0;
     await page.locator('[data-folder-path-card][data-folder-id="0"]').click();
     await page.waitForFunction((name) => {
       return Array.from(document.querySelectorAll('.file_list .folder.item .title')).some((node) => (node.textContent || '').includes(name));
     }, targetFolderName);
+
+    const rootFolderRequests = seenRequests.filter((entry) =>
+      entry.includes('/videos/actions')
+      && entry.includes('fld_id=0')
+    );
+
+    if (rootFolderRequests.length > 1) {
+      throw new Error(`Breadcrumb navigation should issue at most one /videos/actions request. Seen: ${JSON.stringify(rootFolderRequests)}`);
+    }
+
+    await page.evaluate(() => {
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+
+        while (queue.length > 0) {
+          const child = queue.shift();
+
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+
+        return null;
+      }
+
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+      const vm = findVideoManagerInstance(root);
+      const firstVideo = vm && vm.data && Array.isArray(vm.data.videos) ? vm.data.videos[0] : null;
+      const firstFolder = vm && vm.data && Array.isArray(vm.data.folders) ? vm.data.folders[0] : null;
+
+      if (!vm || !firstVideo || !firstFolder) {
+        throw new Error('Unable to prepare the visibility toggle regression.');
+      }
+
+      vm.file_ids = [String(firstVideo.id)];
+      vm.folder_ids = [];
+      vm.set_private();
+    });
+    await page.waitForFunction(() => {
+      const videoPublic = document.querySelector('.file_list .video.item .public');
+      return Boolean(videoPublic && (videoPublic.textContent || '').replace(/\s+/g, ' ').includes('No'));
+    });
+    await page.evaluate(() => {
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+
+        while (queue.length > 0) {
+          const child = queue.shift();
+
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+
+        return null;
+      }
+
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+      const vm = findVideoManagerInstance(root);
+      const firstVideo = vm && vm.data && Array.isArray(vm.data.videos) ? vm.data.videos[0] : null;
+
+      if (!vm || !firstVideo) {
+        throw new Error('Unable to restore video visibility in the regression.');
+      }
+
+      vm.file_ids = [String(firstVideo.id)];
+      vm.folder_ids = [];
+      vm.set_public();
+    });
+    await page.waitForFunction(() => {
+      const videoPublic = document.querySelector('.file_list .video.item .public');
+      return Boolean(videoPublic && (videoPublic.textContent || '').replace(/\s+/g, ' ').includes('Yes'));
+    });
+
+    await page.evaluate(() => {
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+
+        while (queue.length > 0) {
+          const child = queue.shift();
+
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+
+        return null;
+      }
+
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+      const vm = findVideoManagerInstance(root);
+      const firstFolder = vm && vm.data && Array.isArray(vm.data.folders) ? vm.data.folders[0] : null;
+
+      if (!vm || !firstFolder) {
+        throw new Error('Unable to prepare the folder visibility regression.');
+      }
+
+      vm.file_ids = [];
+      vm.folder_ids = [String(firstFolder.fld_id)];
+      vm.set_private();
+    });
+    await page.waitForFunction(() => {
+      const folderPublic = document.querySelector('.file_list .folder.item .public');
+      return Boolean(folderPublic && (folderPublic.textContent || '').replace(/\s+/g, ' ').includes('No'));
+    });
+    await page.evaluate(() => {
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+
+        while (queue.length > 0) {
+          const child = queue.shift();
+
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+
+        return null;
+      }
+
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+      const vm = findVideoManagerInstance(root);
+      const firstFolder = vm && vm.data && Array.isArray(vm.data.folders) ? vm.data.folders[0] : null;
+
+      if (!vm || !firstFolder) {
+        throw new Error('Unable to restore folder visibility in the regression.');
+      }
+
+      vm.file_ids = [];
+      vm.folder_ids = [String(firstFolder.fld_id)];
+      vm.set_public();
+    });
+    await page.waitForFunction(() => {
+      const folderPublic = document.querySelector('.file_list .folder.item .public');
+      return Boolean(folderPublic && (folderPublic.textContent || '').replace(/\s+/g, ' ').includes('Yes'));
+    });
 
     await page.evaluate(() => {
       const app = document.getElementById('app');
@@ -1028,6 +1213,59 @@ function findVideoManagerInstance(node) {
         return name === 'dropped.mp4';
       });
     });
+
+    await page.evaluate((folderName) => {
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+
+        while (queue.length > 0) {
+          const child = queue.shift();
+
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+
+        return null;
+      }
+
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+      const vm = findVideoManagerInstance(root);
+      const folderIndex = vm && vm.data && Array.isArray(vm.data.folders)
+        ? vm.data.folders.findIndex((folder) => String(folder && folder.fld_name || '') === folderName)
+        : -1;
+
+      if (!vm || folderIndex < 0) {
+        throw new Error(`Unable to open the folder share regression for ${folderName}.`);
+      }
+
+      vm.folder_clicked({
+        option: { slug: 'sharing' },
+        item: folderIndex,
+      });
+    }, sharedFolderName);
+    await page.waitForTimeout(1500);
+
+    if (!seenRequests.some((requestLine) => requestLine.includes('/videos/share'))) {
+      throw new Error(`Folder sharing did not call /videos/share: ${JSON.stringify(seenRequests)}`);
+    }
+
+    const shareOutput = page.locator('#sharing [data-share-folder-output]');
+
+    if (await shareOutput.count()) {
+      const shareValue = (await shareOutput.inputValue().catch(async () => shareOutput.textContent())) || '';
+
+      if (!String(shareValue).includes('/videos/shared/')) {
+        throw new Error(`Folder sharing modal did not render the shared folder link. Received: ${String(shareValue || '(empty)')}`);
+      }
+    }
+
+    await dismissModalIfVisible(page, '#sharing');
 
     const forbiddenPaths = [
       '/api/videos/actions',

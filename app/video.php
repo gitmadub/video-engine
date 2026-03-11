@@ -1375,6 +1375,37 @@ function ve_video_folder_tree_for_user(int $userId, array $excludedFolderIds = [
     return $buildTree(0);
 }
 
+function ve_video_folder_options_for_user(int $userId, array $excludedFolderIds = []): array
+{
+    $options = [];
+    $appendOptions = static function (array $folders, array $pathParts = []) use (&$appendOptions, &$options): void {
+        foreach ($folders as $folder) {
+            if (!is_array($folder)) {
+                continue;
+            }
+
+            $folderId = (int) ($folder['id'] ?? 0);
+            $folderName = trim((string) ($folder['name'] ?? ''));
+
+            if ($folderId <= 0 || $folderName === '') {
+                continue;
+            }
+
+            $currentPath = array_merge($pathParts, [$folderName]);
+            $options[] = [
+                'fld_id' => $folderId,
+                'fld_name' => implode(' / ', $currentPath),
+            ];
+
+            $appendOptions((array) ($folder['sub_folders'] ?? []), $currentPath);
+        }
+    };
+
+    $appendOptions(ve_video_folder_tree_for_user($userId, $excludedFolderIds));
+
+    return $options;
+}
+
 function ve_video_legacy_sort_column(string $sortField): string
 {
     return match ($sortField) {

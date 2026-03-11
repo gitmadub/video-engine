@@ -145,6 +145,22 @@ function dashboard_api_find_listening_pid(int $port): ?int
     return null;
 }
 
+function dashboard_api_pick_port(): int
+{
+    $server = @stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+
+    if (!is_resource($server)) {
+        throw new RuntimeException('Unable to allocate dashboard API test port: ' . $errstr);
+    }
+
+    $address = stream_socket_get_name($server, false);
+    fclose($server);
+
+    dashboard_api_assert(is_string($address) && preg_match('/:(\d+)$/', $address, $matches) === 1, 'Unable to resolve dashboard API test port.');
+
+    return (int) $matches[1];
+}
+
 function dashboard_api_insert_ready_video(PDO $pdo, int $userId, string $publicId, string $title, int $sizeBytes): int
 {
     $now = ve_now();
@@ -194,7 +210,7 @@ $root = dirname(__DIR__);
 $php = 'C:\\xampp\\php\\php.exe';
 $dbPath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'dashboard-test.sqlite';
 $cookiePath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'dashboard-test.cookie';
-$port = 18081;
+$port = dashboard_api_pick_port();
 $baseUrl = 'http://127.0.0.1:' . $port;
 
 @unlink($dbPath);
@@ -279,10 +295,11 @@ try {
         $envPrefix .= 'set "' . $key . '=' . str_replace('"', '""', $value) . '" && ';
     }
 
-    $command = 'cmd /c "' . $envPrefix . 'cd /d "' . $root . '" && start "" /b "' . $php . '" -S 127.0.0.1:' . $port . ' router.php"';
+    $command = 'cmd /c "' . $envPrefix . 'cd /d "' . $root . '" && start "" /b cmd /c ""' . $php . '" -S 127.0.0.1:' . $port . ' router.php >NUL 2>&1"""';
     pclose(popen($command, 'r'));
     dashboard_api_wait_for_server($baseUrl);
     $serverPid = dashboard_api_find_listening_pid($port);
+    dashboard_api_assert(is_int($serverPid) && $serverPid > 0, 'Dashboard API test server PID could not be resolved.');
     echo "server ready\n";
 
     $client = new DashboardApiHttpClient($baseUrl, $cookiePath);

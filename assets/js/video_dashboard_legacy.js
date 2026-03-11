@@ -170,7 +170,7 @@
         }
     }
 
-    function requestJson(method, url, data, onSuccess) {
+    function requestJson(method, url, data, onSuccess, onError, onComplete) {
         if (!window.jQuery) {
             return;
         }
@@ -181,7 +181,9 @@
             data: data,
             dataType: 'json',
             cache: false,
-            success: onSuccess
+            success: onSuccess,
+            error: onError,
+            complete: onComplete
         });
     }
 
@@ -305,6 +307,14 @@
             .replace(/'/g, '&#39;');
     }
 
+    function clonePlainData(value) {
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (error) {
+            return value;
+        }
+    }
+
     function hydrateSavedContentType(vm) {
         if (!vm) {
             return;
@@ -399,14 +409,17 @@
             '.ve-drag-ghost{position:fixed;top:-9999px;left:-9999px;max-width:260px;padding:10px 12px;border:1px solid #434645;border-radius:3px;background:#1c1c1c;box-shadow:0 8px 22px rgba(0,0,0,.28);color:#fff;pointer-events:none;z-index:2147483647}',
             '.ve-drag-ghost-count{font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#f90}',
             '.ve-drag-ghost-title{margin-top:4px;font-size:.88rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-            '.ve-folder-public{display:inline-flex;align-items:center;gap:6px;color:rgba(255,255,255,.86);font-weight:600}',
-            '.ve-folder-public i{color:#f90;font-size:.9rem}',
+            '.ve-item-public{display:inline-flex;align-items:center;justify-content:flex-end;gap:6px;font-weight:600;color:rgba(255,255,255,.86)}',
+            '.ve-item-public i{font-size:.9rem}',
+            '.ve-item-public.is-public i{color:#f90}',
+            '.ve-item-public.is-private i{color:rgba(255,255,255,.45)}',
             '.vue-simple-context-menu{background:#171717!important;border:1px solid rgba(67,70,69,.88)!important;box-shadow:0 18px 44px rgba(0,0,0,.38)!important;border-radius:6px!important;min-width:190px}',
             '.vue-simple-context-menu__item{display:flex!important;align-items:center!important;gap:12px!important;color:rgba(255,255,255,.88)!important;padding:9px 14px!important;font-family:inherit!important;font-weight:600!important}',
             '.vue-simple-context-menu__item i,.vue-simple-context-menu__item svg,.vue-simple-context-menu__item .icon{position:static!important;left:auto!important;right:auto!important;top:auto!important;transform:none!important;flex:0 0 16px;width:16px!important;min-width:16px;height:16px!important;line-height:16px!important;margin:0!important;text-align:center}',
             '.vue-simple-context-menu__item span,.vue-simple-context-menu__item strong{position:static!important;transform:none!important;flex:1 1 auto;min-width:0}',
             '.vue-simple-context-menu__item:hover{background:rgba(255,153,0,.16)!important;color:#fff!important}',
             '.vue-simple-context-menu li:first-of-type,.vue-simple-context-menu li:last-of-type{margin:4px 0!important}',
+            '.iziToast-wrapper-topRight,.iziToast-wrapper-topLeft,.iziToast-wrapper-topCenter{top:68px!important}',
             '@media (max-width:991px){.ve-browser-toolbar{padding:10px 12px}.ve-browser-toolbar-main,.ve-folder-path{width:100%}.ve-folder-path-label{padding-top:0}}'
         ].join('');
         document.head.appendChild(style);
@@ -480,6 +493,7 @@
         vm.per_page = normalized;
         vm.page = 1;
         persistPerPage(normalized);
+        invalidateFolderRequestState(vm);
         vm.update();
     }
 
@@ -520,14 +534,64 @@
         return String(target.getAttribute('data-folder') || '0');
     }
 
-    function folderPublicMarkup(folder) {
-        var isShared = !!(folder && folder.share_url);
+    function publicIndicatorMarkup(isPublic) {
+        var shared = !!isPublic;
 
         return ''
-            + '<span class="ve-folder-public">'
-            + '<i class="fad ' + (isShared ? 'fa-eye' : 'fa-eye-slash') + '"></i>'
-            + '<span>' + (isShared ? 'Yes' : 'No') + '</span>'
+            + '<span class="ve-item-public ' + (shared ? 'is-public' : 'is-private') + '">'
+            + '<i class="fad ' + (shared ? 'fa-eye' : 'fa-eye-slash') + '"></i>'
+            + '<span>' + (shared ? 'Yes' : 'No') + '</span>'
             + '</span>';
+    }
+
+    function videoPayloadById(vm, videoId) {
+        var videos = (vm && vm.data && Array.isArray(vm.data.videos)) ? vm.data.videos : [];
+        var normalizedId = String(videoId || '');
+
+        for (var index = 0; index < videos.length; index += 1) {
+            var video = videos[index];
+
+            if (video && String(video.id || '') === normalizedId) {
+                return video;
+            }
+        }
+
+        return null;
+    }
+
+    function isFolderPublic(folder) {
+        if (!folder) {
+            return false;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(folder, 'pub')) {
+            return Number(folder.pub || 0) === 1;
+        }
+
+        return !!(folder.fld_code || folder.share_url);
+    }
+
+    function isVideoPublic(video) {
+        if (!video) {
+            return false;
+        }
+
+        return Number(video.pub || 0) === 1;
+    }
+
+    function decorateVideoRows(vm) {
+        document.querySelectorAll('.file_list .video.item').forEach(function (item) {
+            var videoId = item.getAttribute('data-video');
+            var video = videoPayloadById(vm, videoId);
+            var publicColumn = item.querySelector(':scope > .public');
+
+            if (!publicColumn || !video) {
+                return;
+            }
+
+            publicColumn.className = 'public d-none d-sm-block';
+            publicColumn.innerHTML = publicIndicatorMarkup(isVideoPublic(video));
+        });
     }
 
     function decorateFolderRows(vm) {
@@ -570,7 +634,7 @@
             existingSize.textContent = size;
             existingDate.textContent = created;
             existingViews.textContent = '-';
-            existingPublic.innerHTML = folderPublicMarkup(folder);
+            existingPublic.innerHTML = publicIndicatorMarkup(isFolderPublic(folder));
 
             if (nameColumn) {
                 insertAfter(item, existingSize, nameColumn);
@@ -801,6 +865,349 @@
         }
 
         return vm.data.videos;
+    }
+
+    function buildFolderRequestPayload(vm, overrides) {
+        var payload = {
+            page: vm.page,
+            per_page: vm.per_page,
+            sort: vm.sort,
+            fld_id: vm.current_folder,
+            key: vm.$root.search_filter || vm.search || '',
+            sort_field: vm.sort_field,
+            sort_order: vm.sort_order
+        };
+
+        if (overrides && typeof overrides === 'object') {
+            Object.keys(overrides).forEach(function (key) {
+                payload[key] = overrides[key];
+            });
+        }
+
+        payload.page = Math.max(1, parseInt(payload.page, 10) || 1);
+        payload.per_page = String(payload.per_page || '25');
+        payload.fld_id = String(payload.fld_id || '0');
+        payload.key = String(payload.key || '');
+        payload.sort_field = String(payload.sort_field || 'file_created');
+        payload.sort_order = String(payload.sort_order || 'down');
+
+        return payload;
+    }
+
+    function folderRequestKey(payload) {
+        return [
+            String(payload.page || 1),
+            String(payload.per_page || '25'),
+            String(payload.fld_id || '0'),
+            String(payload.key || ''),
+            String(payload.sort_field || 'file_created'),
+            String(payload.sort_order || 'down')
+        ].join('|');
+    }
+
+    function ensureFolderResponseCache(vm) {
+        if (!vm.__veFolderResponseCache || typeof vm.__veFolderResponseCache !== 'object') {
+            vm.__veFolderResponseCache = Object.create(null);
+        }
+
+        return vm.__veFolderResponseCache;
+    }
+
+    function invalidateFolderRequestState(vm) {
+        if (!vm) {
+            return;
+        }
+
+        vm.__veFolderRequestVersion = Number(vm.__veFolderRequestVersion || 0) + 1;
+        vm.__veFolderResponseCache = Object.create(null);
+        vm.__vePendingFolderRequests = Object.create(null);
+    }
+
+    function ensurePendingFolderRequests(vm) {
+        if (!vm.__vePendingFolderRequests || typeof vm.__vePendingFolderRequests !== 'object') {
+            vm.__vePendingFolderRequests = Object.create(null);
+        }
+
+        return vm.__vePendingFolderRequests;
+    }
+
+    function cacheFolderResponse(vm, payload, response, source) {
+        var cache = ensureFolderResponseCache(vm);
+        var key = folderRequestKey(payload);
+
+        cache[key] = {
+            payload: clonePlainData(payload),
+            response: clonePlainData(response),
+            source: source || 'network',
+            storedAt: Date.now()
+        };
+
+        return cache[key];
+    }
+
+    function getCachedFolderResponse(vm, payload) {
+        var cache = ensureFolderResponseCache(vm);
+        return cache[folderRequestKey(payload)] || null;
+    }
+
+    function shouldUsePreloadedFolder(vm, payload, cached) {
+        if (!cached || !cached.response) {
+            return false;
+        }
+
+        return String(payload.page || '1') === '1'
+            && String(payload.per_page || '25') === String((cached.response && cached.response.per_page) || payload.per_page || '25')
+            && String(payload.key || '') === '';
+    }
+
+    function applyVideosResponse(vm, response) {
+        vm.data = response;
+        vm.loaded = true;
+        vm.loading = false;
+        vm.total_videos = response.total_videos;
+        vm.token = response.token;
+        vm.per_page = String(response.per_page || vm.per_page || '25');
+        vm.current_folder = String(response.folder_id || vm.current_folder || '0');
+        vm.folder_ids = [];
+        vm.file_ids = [];
+        vm.folders = [];
+
+        if (/^(1|2|3)$/.test(String(response.uploader_type || ''))) {
+            vm.content_type = String(response.uploader_type);
+            setCurrentUploaderType(vm.content_type);
+        }
+
+        if (Array.isArray(response.folders)) {
+            response.folders.forEach(function (folder) {
+                vm.folders.push({ id: folder.fld_id, title: folder.fld_name });
+            });
+        }
+
+        afterRender(vm);
+    }
+
+    function preloadDirectChildFolders(vm, parentPayload, response) {
+        var pending = ensurePendingFolderRequests(vm);
+        var folders = Array.isArray(response && response.folders) ? response.folders : [];
+
+        if (!vm || String(parentPayload.page || '1') !== '1' || String(parentPayload.key || '') !== '') {
+            return;
+        }
+
+        folders.forEach(function (folder) {
+            var payload;
+            var key;
+
+            if (!folder || !folder.fld_id) {
+                return;
+            }
+
+            payload = buildFolderRequestPayload(vm, {
+                page: 1,
+                per_page: '25',
+                fld_id: String(folder.fld_id || '0'),
+                key: ''
+            });
+            key = folderRequestKey(payload);
+
+            if (getCachedFolderResponse(vm, payload) || pending[key]) {
+                return;
+            }
+
+            pending[key] = {
+                mode: 'prefetch',
+                version: Number(vm.__veFolderRequestVersion || 0)
+            };
+            requestJson('get', ENDPOINTS.actions, payload, function (prefetchedResponse) {
+                var pendingEntry = pending[key];
+
+                delete pending[key];
+
+                if (!pendingEntry || pendingEntry.version !== Number(vm.__veFolderRequestVersion || 0)) {
+                    return;
+                }
+
+                cacheFolderResponse(vm, payload, prefetchedResponse, 'prefetch');
+
+                if (pendingEntry.promoted && pendingEntry.promoted.requestId === Number(vm.__veUpdateRequestId || 0)) {
+                    applyVideosResponse(vm, clonePlainData(prefetchedResponse));
+                    preloadDirectChildFolders(vm, payload, prefetchedResponse);
+                }
+            }, function () {
+                delete pending[key];
+            }, function () {
+                delete pending[key];
+            });
+        });
+    }
+
+    function ensureContextOptionCaches(vm) {
+        if (!vm.__veBaseVideoOptions && Array.isArray(vm.video_options)) {
+            vm.__veBaseVideoOptions = clonePlainData(vm.video_options);
+        }
+
+        if (!vm.__veBaseFolderOptions && Array.isArray(vm.folder_options)) {
+            vm.__veBaseFolderOptions = clonePlainData(vm.folder_options);
+        }
+    }
+
+    function visibilityOptionForState(isPublic) {
+        return {
+            name: isPublic ? 'Make Private' : 'Make Public',
+            slug: isPublic ? 'make-private' : 'make-public',
+            class: isPublic ? 'make_private' : 'make_public'
+        };
+    }
+
+    function configureContextOptions(vm, kind, item) {
+        var base;
+        var nextOptions;
+        var visibilityOption;
+        var deleteIndex;
+        var isPublic;
+
+        if (!vm) {
+            return;
+        }
+
+        ensureContextOptionCaches(vm);
+        base = kind === 'folder' ? vm.__veBaseFolderOptions : vm.__veBaseVideoOptions;
+        nextOptions = clonePlainData(Array.isArray(base) ? base : []);
+
+        nextOptions = nextOptions.filter(function (option) {
+            return option && option.slug !== 'make-public' && option.slug !== 'make-private';
+        });
+
+        isPublic = kind === 'folder' ? isFolderPublic(item) : isVideoPublic(item);
+        visibilityOption = visibilityOptionForState(isPublic);
+        deleteIndex = nextOptions.findIndex(function (option) {
+            return option && option.slug === 'delete';
+        });
+
+        if (deleteIndex === -1) {
+            nextOptions.push(visibilityOption);
+        } else {
+            nextOptions.splice(deleteIndex, 0, visibilityOption);
+        }
+
+        if (kind === 'folder') {
+            vm.folder_options = nextOptions;
+            return;
+        }
+
+        vm.video_options = nextOptions;
+    }
+
+    function selectionForContextItem(vm, kind, item) {
+        var itemId;
+        var selectedFileIds;
+        var selectedFolderIds;
+
+        syncSelectionFromDom(vm);
+        itemId = kind === 'folder' ? String(item && item.fld_id || '') : String(item && item.id || '');
+        selectedFileIds = normalizeIdList(vm.file_ids);
+        selectedFolderIds = normalizeIdList(vm.folder_ids);
+
+        if (kind === 'folder') {
+            return {
+                fileIds: selectedFolderIds.indexOf(itemId) !== -1 ? selectedFileIds : [],
+                folderIds: selectedFolderIds.indexOf(itemId) !== -1 ? selectedFolderIds : [itemId]
+            };
+        }
+
+        return {
+            fileIds: selectedFileIds.indexOf(itemId) !== -1 ? selectedFileIds : [itemId],
+            folderIds: selectedFileIds.indexOf(itemId) !== -1 ? selectedFolderIds : []
+        };
+    }
+
+    function applyVisibilityState(vm, selection, isPublic) {
+        var fileLookup = Object.create(null);
+        var folderLookup = Object.create(null);
+
+        normalizeIdList(selection && selection.fileIds).forEach(function (id) {
+            fileLookup[String(id)] = true;
+        });
+
+        normalizeIdList(selection && selection.folderIds).forEach(function (id) {
+            folderLookup[String(id)] = true;
+        });
+
+        ensureVideoCollection(vm).forEach(function (video) {
+            if (video && fileLookup[String(video.id || '')]) {
+                video.pub = isPublic ? 1 : 0;
+            }
+        });
+
+        ensureFolderCollection(vm).forEach(function (folder) {
+            if (folder && folderLookup[String(folder.fld_id || '')]) {
+                folder.pub = isPublic ? 1 : 0;
+
+                if (!isPublic) {
+                    folder.share_url = '';
+                    folder.fld_code = '';
+                }
+            }
+        });
+
+        if (typeof vm.$forceUpdate === 'function') {
+            vm.$forceUpdate();
+        }
+
+        afterRender(vm);
+    }
+
+    function submitVisibilityChange(vm, selection, isPublic) {
+        var payload = {
+            token: vm.token
+        };
+
+        if (!vm) {
+            return;
+        }
+
+        selection = selection || {
+            fileIds: normalizeIdList(vm.file_ids),
+            folderIds: normalizeIdList(vm.folder_ids)
+        };
+
+        selection.fileIds = normalizeIdList(selection.fileIds);
+        selection.folderIds = normalizeIdList(selection.folderIds);
+
+        if (!selection.fileIds.length && !selection.folderIds.length) {
+            showToast('info', 'Please select folders or files first');
+            return;
+        }
+
+        if (isPublic) {
+            payload.set_public = 1;
+        } else {
+            payload.set_private = 1;
+        }
+
+        if (selection.fileIds.length) {
+            payload.file_id = selection.fileIds;
+        }
+
+        if (selection.folderIds.length) {
+            payload.folder_id = selection.folderIds;
+        }
+
+        requestJson('post', ENDPOINTS.actions, payload, function (response) {
+            if (!response || response.status === 'fail') {
+                showToast('error', response && response.message ? response.message : 'Unable to update visibility.');
+                return;
+            }
+
+            applyVisibilityState(vm, selection, isPublic);
+            invalidateFolderRequestState(vm);
+            showToast('success', response.message || 'Visibility updated.');
+            vm.file_ids = [];
+            vm.folder_ids = [];
+            vm.update({ silent: true, force: true, useCache: false });
+        }, function () {
+            showToast('error', 'Unable to update visibility.');
+        });
     }
 
     function insertOptimisticFolder(vm, folder) {
@@ -1080,6 +1487,7 @@
 
         function finalize() {
             if (!failed && successMessages.length) {
+                invalidateFolderRequestState(vm);
                 showToast('success', successMessages.join(' '));
             }
 
@@ -1451,6 +1859,7 @@
             wirePerPageControls(vm);
             ensureToolbarLabels(vm);
             ensureActionButtonTypes();
+            decorateVideoRows(vm);
             decorateFolderRows(vm);
             decorateDraggableItems();
             hideLegacyBackButtons();
@@ -1464,6 +1873,9 @@
     }
 
     function wrapMethods(target) {
+        var originalVideoMenu = target && target.videoMenu;
+        var originalFolderMenu = target && target.folderMenu;
+
         if (!target || target.__veLegacyDashboardPatched) {
             return;
         }
@@ -1494,15 +1906,42 @@
             var vm = this;
             var silent = !!(options && options.silent);
             var requestId = (Number(vm.__veUpdateRequestId || 0) + 1);
-            var payload = {
-                page: vm.page,
-                per_page: vm.per_page,
-                sort: vm.sort,
-                fld_id: vm.current_folder,
-                key: vm.$root.search_filter || vm.search || '',
-                sort_field: vm.sort_field,
-                sort_order: vm.sort_order
-            };
+            var payload = buildFolderRequestPayload(vm, options && options.overrides);
+            var pending = ensurePendingFolderRequests(vm);
+            var requestKey = folderRequestKey(payload);
+            var pendingEntry = pending[requestKey];
+            var requestVersion = Number(vm.__veFolderRequestVersion || 0);
+            var cached;
+
+            if (pendingEntry) {
+                if (pendingEntry.mode === 'prefetch') {
+                    vm.__veUpdateRequestId = requestId;
+
+                    if (!silent) {
+                        vm.loading = false;
+                        vm.loaded = false;
+                    }
+
+                    pendingEntry.promoted = {
+                        requestId: requestId
+                    };
+                }
+
+                return;
+            }
+
+            if (options && options.useCache !== false) {
+                cached = getCachedFolderResponse(vm, payload);
+
+                if (shouldUsePreloadedFolder(vm, payload, cached)) {
+                    vm.__veUpdateRequestId = requestId;
+                    applyVideosResponse(vm, clonePlainData(cached.response));
+
+                    if (!(options && options.force)) {
+                        return;
+                    }
+                }
+            }
 
             vm.__veUpdateRequestId = requestId;
 
@@ -1511,33 +1950,30 @@
                 vm.loaded = false;
             }
 
+            pending[requestKey] = {
+                mode: 'update',
+                requestId: requestId,
+                version: requestVersion
+            };
             requestJson('get', ENDPOINTS.actions, payload, function (response) {
+                var currentEntry = pending[requestKey];
+
+                delete pending[requestKey];
+
+                if (!currentEntry || currentEntry.version !== Number(vm.__veFolderRequestVersion || 0)) {
+                    return;
+                }
+
                 if (requestId !== Number(vm.__veUpdateRequestId || 0)) {
                     return;
                 }
 
-                vm.data = response;
-                vm.loaded = true;
+                cacheFolderResponse(vm, payload, response, 'network');
+                applyVideosResponse(vm, response);
+                preloadDirectChildFolders(vm, payload, response);
+            }, function () {
+                delete pending[requestKey];
                 vm.loading = false;
-                vm.total_videos = response.total_videos;
-                vm.token = response.token;
-                vm.per_page = String(response.per_page || vm.per_page || '25');
-                vm.folder_ids = [];
-                vm.file_ids = [];
-                vm.folders = [];
-
-                if (/^(1|2|3)$/.test(String(response.uploader_type || ''))) {
-                    vm.content_type = String(response.uploader_type);
-                    setCurrentUploaderType(vm.content_type);
-                }
-
-                if (Array.isArray(response.folders)) {
-                    response.folders.forEach(function (folder) {
-                        vm.folders.push({ id: folder.fld_id, title: folder.fld_name });
-                    });
-                }
-
-                afterRender(vm);
             });
         };
 
@@ -1564,6 +2000,8 @@
                 if (payload.del_selected) {
                     vm.file_ids = [];
                 }
+
+                invalidateFolderRequestState(vm);
 
                 if (shouldRefresh) {
                     vm.update();
@@ -1756,6 +2194,14 @@
                 vm.file_ids2 = fileId;
                 vm.export_files2();
             }
+
+            if (option === 'make-public') {
+                submitVisibilityChange(vm, selectionForContextItem(vm, 'video', video), true);
+            }
+
+            if (option === 'make-private') {
+                submitVisibilityChange(vm, selectionForContextItem(vm, 'video', video), false);
+            }
         };
 
         target.folder_clicked = function (payload) {
@@ -1777,6 +2223,14 @@
 
             if (option === 'sharing') {
                 openFolderShare(vm, folder.fld_id);
+            }
+
+            if (option === 'make-public') {
+                submitVisibilityChange(vm, selectionForContextItem(vm, 'folder', folder), true);
+            }
+
+            if (option === 'make-private') {
+                submitVisibilityChange(vm, selectionForContextItem(vm, 'folder', folder), false);
             }
         };
 
@@ -1805,6 +2259,8 @@
                     showToast('error', response.message);
                     return;
                 }
+
+                invalidateFolderRequestState(vm);
 
                 if (Array.isArray(response) && response[0]) {
                     replaceOptimisticFolder(vm, optimisticFolder.fld_id, response[0]);
@@ -1835,6 +2291,7 @@
 
             requestJson('post', ENDPOINTS.actions, payload, function () {
                 window.jQuery('#rename').modal('hide');
+                invalidateFolderRequestState(vm);
                 vm.update();
             });
         };
@@ -1868,21 +2325,37 @@
         };
 
         target.set_public = function () {
+            var existingFileIds = normalizeIdList(this.file_ids);
+            var existingFolderIds = normalizeIdList(this.folder_ids);
+
             syncSelectionFromDom(this);
-            this.ajax({
-                set_public: 1,
-                file_id: normalizeIdList(this.file_ids),
-                token: this.token
-            });
+
+            if (!this.file_ids.length && !this.folder_ids.length) {
+                this.file_ids = existingFileIds;
+                this.folder_ids = existingFolderIds;
+            }
+
+            submitVisibilityChange(this, {
+                fileIds: normalizeIdList(this.file_ids),
+                folderIds: normalizeIdList(this.folder_ids)
+            }, true);
         };
 
         target.set_private = function () {
+            var existingFileIds = normalizeIdList(this.file_ids);
+            var existingFolderIds = normalizeIdList(this.folder_ids);
+
             syncSelectionFromDom(this);
-            this.ajax({
-                set_private: 1,
-                file_id: normalizeIdList(this.file_ids),
-                token: this.token
-            });
+
+            if (!this.file_ids.length && !this.folder_ids.length) {
+                this.file_ids = existingFileIds;
+                this.folder_ids = existingFolderIds;
+            }
+
+            submitVisibilityChange(this, {
+                fileIds: normalizeIdList(this.file_ids),
+                folderIds: normalizeIdList(this.folder_ids)
+            }, false);
         };
 
         target.add_content_type = function () {
@@ -1905,9 +2378,48 @@
         };
 
         target.open_folder = function (folderId) {
-            this.current_folder = folderId;
+            var normalizedFolderId = String(folderId || '0');
+            var payload;
+            var cached;
+
+            this.current_folder = normalizedFolderId;
             this.page = 1;
-            this.update();
+            payload = buildFolderRequestPayload(this, {
+                page: 1,
+                fld_id: normalizedFolderId
+            });
+            cached = getCachedFolderResponse(this, payload);
+
+            if (shouldUsePreloadedFolder(this, payload, cached)) {
+                applyVideosResponse(this, clonePlainData(cached.response));
+                return;
+            }
+
+            this.update({ overrides: { page: 1, fld_id: normalizedFolderId } });
+        };
+
+        target.videoMenu = function (event, index, mobile) {
+            var video = this && this.data && Array.isArray(this.data.videos) ? this.data.videos[index] : null;
+
+            configureContextOptions(this, 'video', video);
+
+            if (typeof originalVideoMenu === 'function') {
+                return originalVideoMenu.call(this, event, index, mobile);
+            }
+
+            return undefined;
+        };
+
+        target.folderMenu = function (event, index) {
+            var folder = this && this.data && Array.isArray(this.data.folders) ? this.data.folders[index] : null;
+
+            configureContextOptions(this, 'folder', folder);
+
+            if (typeof originalFolderMenu === 'function') {
+                return originalFolderMenu.call(this, event, index);
+            }
+
+            return undefined;
         };
 
         target.__veLegacyDashboardPatched = true;
@@ -1954,6 +2466,48 @@
         wrapMethods(options.methods);
     }
 
+    function hasVisibleModal() {
+        return Array.prototype.some.call(document.querySelectorAll('.modal'), function (modal) {
+            if (!modal) {
+                return false;
+            }
+
+            var style = window.getComputedStyle(modal);
+            return modal.classList.contains('show') || style.display !== 'none';
+        });
+    }
+
+    function hasActiveLegacyVideoJobs(instance) {
+        var data = instance && instance.data;
+        var videos = data && Array.isArray(data.videos) ? data.videos : [];
+
+        return videos.some(function (video) {
+            return video && (video.status === 'queued' || video.status === 'processing');
+        });
+    }
+
+    function installLiveRefresh(instance) {
+        if (!instance || instance.__veLiveRefreshTimer) {
+            return;
+        }
+
+        instance.__veLiveRefreshTimer = window.setInterval(function () {
+            if (document.hidden || hasVisibleModal() || !hasActiveLegacyVideoJobs(instance)) {
+                return;
+            }
+
+            if (typeof instance.update !== 'function' || instance.__veAutoRefreshPending) {
+                return;
+            }
+
+            instance.__veAutoRefreshPending = true;
+            instance.update({ silent: true });
+            window.setTimeout(function () {
+                instance.__veAutoRefreshPending = false;
+            }, 1200);
+        }, 3000);
+    }
+
     function patchMountedInstance() {
         var app = document.getElementById('app');
         var root = app && app.__vue__;
@@ -1966,6 +2520,7 @@
         wrapMethods(instance);
         hydrateSavedContentType(instance);
         afterRender(instance);
+        installLiveRefresh(instance);
         return true;
     }
 

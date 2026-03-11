@@ -147,6 +147,22 @@ function videos_actions_find_listening_pid(int $port): ?int
     return null;
 }
 
+function videos_actions_pick_port(): int
+{
+    $server = @stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+
+    if (!is_resource($server)) {
+        throw new RuntimeException('Unable to allocate videos actions test port: ' . $errstr);
+    }
+
+    $address = stream_socket_get_name($server, false);
+    fclose($server);
+
+    videos_actions_assert(is_string($address) && preg_match('/:(\d+)$/', $address, $matches) === 1, 'Unable to resolve videos actions test port.');
+
+    return (int) $matches[1];
+}
+
 function videos_actions_insert_ready_video(PDO $pdo, int $userId, string $publicId, string $title, int $sizeBytes): int
 {
     $now = ve_now();
@@ -185,9 +201,10 @@ function videos_actions_insert_ready_video(PDO $pdo, int $userId, string $public
 
 $root = dirname(__DIR__);
 $php = 'C:\\xampp\\php\\php.exe';
-$dbPath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'videos-actions-test.sqlite';
-$cookiePath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'videos-actions-test.cookie';
-$port = 18151;
+$runId = bin2hex(random_bytes(4));
+$dbPath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'videos-actions-test-' . $runId . '.sqlite';
+$cookiePath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'videos-actions-test-' . $runId . '.cookie';
+$port = videos_actions_pick_port();
 $baseUrl = 'http://127.0.0.1:' . $port;
 
 @unlink($dbPath);
@@ -210,7 +227,9 @@ $_SERVER['REQUEST_METHOD'] = 'GET';
 require dirname(__DIR__) . '/app/frontend.php';
 
 $pdo = ve_db();
-$user = ve_create_user('videos_actions', 'videos-actions@example.com', 'DashPass123');
+$actionsUsername = 'videos_actions_' . $runId;
+$actionsEmail = 'videos-actions-' . $runId . '@example.com';
+$user = ve_create_user($actionsUsername, $actionsEmail, 'DashPass123');
 $userId = (int) ($user['id'] ?? 0);
 videos_actions_assert($userId > 0, 'Videos actions test user should be created.');
 
@@ -232,23 +251,17 @@ $bulkVideoId = videos_actions_insert_ready_video($pdo, $userId, 'bulkvideo02', '
 $serverPid = null;
 
 try {
-    $existingPid = videos_actions_find_listening_pid($port);
-
-    if (is_int($existingPid) && $existingPid > 0) {
-        shell_exec('taskkill /PID ' . $existingPid . ' /T /F >NUL 2>NUL');
-        usleep(250000);
-    }
-
     $envPrefix = '';
 
     foreach ($env as $key => $value) {
         $envPrefix .= 'set "' . $key . '=' . str_replace('"', '""', $value) . '" && ';
     }
 
-    $command = 'cmd /c "' . $envPrefix . 'cd /d "' . $root . '" && start "" /b "' . $php . '" -S 127.0.0.1:' . $port . ' router.php"';
+    $command = 'cmd /c "' . $envPrefix . 'cd /d "' . $root . '" && start "" /b cmd /c ""' . $php . '" -S 127.0.0.1:' . $port . ' router.php >NUL 2>&1"""';
     pclose(popen($command, 'r'));
     videos_actions_wait_for_server($baseUrl);
     $serverPid = videos_actions_find_listening_pid($port);
+    videos_actions_assert(is_int($serverPid) && $serverPid > 0, 'Videos actions test server PID could not be resolved.');
     echo "videos actions server ready\n";
 
     $client = new VideosDashboardHttpClient($baseUrl, $cookiePath);
@@ -258,7 +271,7 @@ try {
 
     $login = videos_actions_json($client->request('POST', '/api/auth/login', [
         'form' => [
-            'login' => 'videos_actions',
+            'login' => $actionsUsername,
             'password' => 'DashPass123',
             'token' => $csrf,
         ],
@@ -385,6 +398,7 @@ try {
     videos_actions_assert((string) ($folderActions['per_page'] ?? '') === '50', 'Videos actions should honor the requested results-per-page value.');
     videos_actions_assert(count((array) ($folderActions['folder_path'] ?? [])) === 1, 'The current folder payload should include a single breadcrumb segment for the parent folder.');
     videos_actions_assert((string) (($folderActions['folder_path'][0]['name'] ?? '')) === 'QA Folder Alpha', 'Folder path should expose the current folder name.');
+    videos_actions_assert((int) (($folderActions['current_folder']['pub'] ?? 0)) === 1, 'Folder payload should expose the public folder flag.');
 
     $nestedTree = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
@@ -454,6 +468,64 @@ try {
     ]));
     videos_actions_assert((int) (($publicActions['videos'][0]['pub'] ?? 0)) === 1, 'Legacy set_public should restore the video visibility flag.');
 
+    $setFolderPrivate = videos_actions_json($client->request('POST', '/videos/actions', [
+        'form' => [
+            'token' => $pageToken,
+            'set_private' => '1',
+            'folder_id' => [$folderAId],
+        ],
+    ]));
+    videos_actions_assert(($setFolderPrivate['status'] ?? null) === 'ok', 'Legacy folder set_private should succeed.');
+
+    $rootAfterFolderPrivate = videos_actions_json($client->request('GET', '/videos/actions', [
+        'query' => [
+            'page' => 1,
+            'fld_id' => 0,
+            'sort_field' => 'file_created',
+            'sort_order' => 'down',
+        ],
+    ]));
+    $privateFolderPayload = null;
+
+    foreach ((array) ($rootAfterFolderPrivate['folders'] ?? []) as $folderPayload) {
+        if ((int) ($folderPayload['fld_id'] ?? 0) === $folderAId) {
+            $privateFolderPayload = $folderPayload;
+            break;
+        }
+    }
+
+    videos_actions_assert(is_array($privateFolderPayload), 'Root listing should still include the folder after making it private.');
+    videos_actions_assert((int) (($privateFolderPayload['pub'] ?? 1)) === 0, 'Legacy set_private should update the folder visibility flag.');
+
+    $setFolderPublic = videos_actions_json($client->request('POST', '/videos/actions', [
+        'form' => [
+            'token' => $pageToken,
+            'set_public' => '1',
+            'folder_id' => [$folderAId],
+        ],
+    ]));
+    videos_actions_assert(($setFolderPublic['status'] ?? null) === 'ok', 'Legacy folder set_public should succeed.');
+
+    $rootAfterFolderPublic = videos_actions_json($client->request('GET', '/videos/actions', [
+        'query' => [
+            'page' => 1,
+            'fld_id' => 0,
+            'sort_field' => 'file_created',
+            'sort_order' => 'down',
+        ],
+    ]));
+    $publicFolderPayload = null;
+
+    foreach ((array) ($rootAfterFolderPublic['folders'] ?? []) as $folderPayload) {
+        if ((int) ($folderPayload['fld_id'] ?? 0) === $folderAId) {
+            $publicFolderPayload = $folderPayload;
+            break;
+        }
+    }
+
+    videos_actions_assert(is_array($publicFolderPayload), 'Root listing should still include the folder after making it public again.');
+    videos_actions_assert((int) (($publicFolderPayload['pub'] ?? 0)) === 1, 'Legacy set_public should restore the folder visibility flag.');
+
     $subtitleList = videos_actions_json($client->request('POST', '/videos/subtitles', [
         'form' => [
             'token' => $pageToken,
@@ -502,7 +574,7 @@ try {
     videos_actions_assert(str_contains($sharing['body'], 'Show Title'), 'Folder sharing modal endpoint should expose the Show Title toggle.');
     videos_actions_assert(str_contains($sharing['body'], 'data-share-folder-toggle'), 'Folder sharing modal endpoint should expose the share title toggle hook.');
 
-    $publicFolderPath = (string) parse_url((string) ($folderActions['current_folder']['share_url'] ?? ''), PHP_URL_PATH);
+    $publicFolderPath = (string) parse_url((string) ($publicFolderPayload['share_url'] ?? ''), PHP_URL_PATH);
     videos_actions_assert($publicFolderPath !== '', 'Folder sharing payload should expose a valid share path.');
     $publicFolder = $client->request('GET', $publicFolderPath);
     videos_actions_assert($publicFolder['status'] === 200 && str_contains($publicFolder['body'], 'Root Video Renamed'), 'Public folder page should render the public video listing.');

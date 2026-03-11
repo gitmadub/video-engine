@@ -2371,6 +2371,18 @@ function ve_admin_normalize_app_setting_value(string $key, string $value): strin
 
 function ve_admin_save_app_settings(array $payload, int $actorUserId): void
 {
+function ve_admin_normalize_app_setting_value(string $key, string $value): string
+{
+    return match ($key) {
+        'payout_minimum_micro_usd' => (string) max(1000000, min(1000000000, (int) $value)),
+        'admin_default_page_size' => (string) max(10, min(200, (int) $value)),
+        'admin_recent_audit_limit' => (string) max(1, min(100, (int) $value)),
+        'remote_max_queue_per_user' => (string) max(1, min(500, (int) $value)),
+        'remote_default_quality' => in_array((int) $value, ve_remote_quality_options(), true) ? (string) (int) $value : '1080',
+        default => trim($value),
+    };
+}
+
     $before = [];
     $after = [];
 
@@ -7526,6 +7538,13 @@ function ve_admin_render_app_section_deep(): string
             . '</tr>';
     }
 
+    $qualityOptionsHtml = '';
+
+    foreach (ve_remote_quality_options() as $quality) {
+        $selected = ((string) ($settings['remote_default_quality'] ?? '1080')) === (string) $quality ? ' selected' : '';
+        $qualityOptionsHtml .= '<option value="' . ve_h((string) $quality) . '"' . $selected . '>' . ve_h((string) $quality . 'p') . '</option>';
+    }
+
     $permissionRows = '';
 
     foreach (ve_admin_permission_catalog() as $code => $meta) {
@@ -7582,6 +7601,10 @@ HTML,
         'app-roles' => <<<HTML
 <div class="admin-subsection" id="app-roles">
     <h5>Role catalog</h5>
+            <div class="form-group">
+                <label>Remote default quality</label>
+                <select name="remote_default_quality" class="form-control">{$qualityOptionsHtml}</select>
+            </div>
     <div class="settings-table-wrap">
         <table class="table">
             <thead><tr><th>Code</th><th>Label</th><th>Permissions</th></tr></thead>
@@ -9739,11 +9762,19 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                 ve_admin_text_cell(ve_human_bytes((int) ($row['used_bytes'] ?? 0)) . ' / ' . ve_human_bytes((int) ($row['capacity_bytes'] ?? 0))),
             ]];
         }
+    $qualityOptions = [];
 
         foreach ($nodeEndpoints as $row) {
             if (!is_array($row)) {
                 continue;
             }
+
+    foreach (ve_remote_quality_options() as $quality) {
+        $qualityOptions[] = [
+            'value' => (string) $quality,
+            'label' => (string) $quality . 'p',
+        ];
+    }
 
             $endpointRows[] = ['cells' => [
                 ve_admin_code_cell((string) ($row['code'] ?? '')),
@@ -9801,6 +9832,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                         ['label' => 'API requests / hour', 'value' => (string) ($hostCurrent['api_requests_last_hour'] ?? 0)],
                     ]],
                     ['title' => 'Ingest plane', 'items' => [
+                    ve_admin_form_field('select', 'remote_default_quality', 'Remote default quality', $settings['remote_default_quality'] ?? '1080', ['options' => $qualityOptions]),
                         ['label' => 'Encoding now', 'value' => (string) ($hostCurrent['processing_videos'] ?? 0)],
                         ['label' => 'Queued files', 'value' => (string) ($hostCurrent['queued_videos'] ?? 0)],
                         ['label' => 'Remote jobs', 'value' => (string) ($hostCurrent['active_remote_jobs'] ?? 0)],

@@ -72,6 +72,22 @@ function videos_browser_find_listening_pid(int $port): ?int
     return null;
 }
 
+function videos_browser_pick_port(): int
+{
+    $server = @stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+
+    if (!is_resource($server)) {
+        throw new RuntimeException('Unable to allocate videos browser test port: ' . $errstr);
+    }
+
+    $address = stream_socket_get_name($server, false);
+    fclose($server);
+
+    videos_browser_assert(is_string($address) && preg_match('/:(\d+)$/', $address, $matches) === 1, 'Unable to resolve videos browser test port.');
+
+    return (int) $matches[1];
+}
+
 function videos_browser_insert_ready_video(PDO $pdo, int $userId, int $folderId, string $publicId, string $title, int $sizeBytes): int
 {
     $now = ve_now();
@@ -112,8 +128,9 @@ function videos_browser_insert_ready_video(PDO $pdo, int $userId, int $folderId,
 $root = dirname(__DIR__);
 $php = 'C:\\xampp\\php\\php.exe';
 $node = 'node';
-$dbPath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'videos-browser.sqlite';
-$port = 18152;
+$runId = bin2hex(random_bytes(4));
+$dbPath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'videos-browser-' . $runId . '.sqlite';
+$port = videos_browser_pick_port();
 $baseUrl = 'http://127.0.0.1:' . $port;
 
 @unlink($dbPath);
@@ -135,7 +152,9 @@ $_SERVER['REQUEST_METHOD'] = 'GET';
 require dirname(__DIR__) . '/app/frontend.php';
 
 $pdo = ve_db();
-$user = ve_create_user('videos_browser', 'videos-browser@example.com', 'DashPass123');
+$browserUsername = 'videos_browser_' . $runId;
+$browserEmail = 'videos-browser-' . $runId . '@example.com';
+$user = ve_create_user($browserUsername, $browserEmail, 'DashPass123');
 $userId = (int) ($user['id'] ?? 0);
 videos_browser_assert($userId > 0, 'Videos browser test user should be created.');
 
@@ -188,15 +207,16 @@ try {
         $envPrefix .= 'set "' . $key . '=' . str_replace('"', '""', $value) . '" && ';
     }
 
-    $command = 'cmd /c "' . $envPrefix . 'cd /d "' . $root . '" && start "" /b "' . $php . '" -S 127.0.0.1:' . $port . ' router.php"';
+    $command = 'cmd /c "' . $envPrefix . 'cd /d "' . $root . '" && start "" /b cmd /c ""' . $php . '" -S 127.0.0.1:' . $port . ' router.php >NUL 2>&1"""';
     pclose(popen($command, 'r'));
     videos_browser_wait_for_server($baseUrl);
     $serverPid = videos_browser_find_listening_pid($port);
+    videos_browser_assert(is_int($serverPid) && $serverPid > 0, 'Videos browser test server PID could not be resolved.');
     echo "videos browser server ready\n";
 
     $browserEnv = [
         'VIDEOS_BROWSER_BASE_URL' => $baseUrl,
-        'VIDEOS_BROWSER_USER' => 'videos_browser',
+        'VIDEOS_BROWSER_USER' => $browserUsername,
         'VIDEOS_BROWSER_PASSWORD' => 'DashPass123',
         'VIDEOS_BROWSER_SHARED_FOLDER' => 'Shared Folder',
         'VIDEOS_BROWSER_TARGET_FOLDER' => 'Moved Folder',

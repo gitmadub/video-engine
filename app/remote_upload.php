@@ -58,7 +58,12 @@ function ve_remote_config(): array
         'php_binary' => ve_video_find_php_binary(),
         'python_binary' => $pythonBinary,
         'yt_dlp_binary' => $ytDlpBinary,
-        'max_queue_per_user' => max(1, (int) (getenv('VE_REMOTE_MAX_QUEUE_PER_USER') ?: 25)),
+        'max_queue_per_user' => ve_get_app_setting_int(
+            'remote_max_queue_per_user',
+            max(1, (int) (getenv('VE_REMOTE_MAX_QUEUE_PER_USER') ?: 25)),
+            1,
+            500
+        ),
         'worker_stale_after' => max(900, (int) (getenv('VE_REMOTE_STALE_AFTER') ?: 7200)),
         'connect_timeout' => max(5, (int) (getenv('VE_REMOTE_CONNECT_TIMEOUT') ?: 20)),
         'request_timeout' => max(15, (int) (getenv('VE_REMOTE_REQUEST_TIMEOUT') ?: 60)),
@@ -68,6 +73,46 @@ function ve_remote_config(): array
     ];
 
     return $config;
+}
+
+function ve_remote_quality_options(): array
+{
+    return [2160, 1440, 1080, 720, 480, 360, 240];
+}
+
+function ve_remote_default_quality_height(): int
+{
+    $default = ve_get_app_setting_int('remote_default_quality', 1080, 240, 2160);
+
+    if (in_array($default, ve_remote_quality_options(), true)) {
+        return $default;
+    }
+
+    return 1080;
+}
+
+function ve_remote_yt_dlp_format_limit_clause(): string
+{
+    return '[height<=' . ve_remote_default_quality_height() . ']';
+}
+
+function ve_remote_yt_dlp_mp4_format(bool $preferSeparateStreams = false): string
+{
+    $limit = ve_remote_yt_dlp_format_limit_clause();
+
+    if ($preferSeparateStreams) {
+        return 'bv*[ext=mp4]' . $limit . '+ba[ext=m4a]'
+            . '/b[ext=mp4]' . $limit
+            . '/best' . $limit
+            . '/bv*[ext=mp4]+ba[ext=m4a]'
+            . '/b[ext=mp4]'
+            . '/best';
+    }
+
+    return 'best[ext=mp4]' . $limit
+        . '/best' . $limit
+        . '/best[ext=mp4]'
+        . '/best';
 }
 
 function ve_remote_yt_dlp_command(): array
@@ -467,6 +512,63 @@ function ve_remote_filename_from_content_disposition(string $header): string
     }
 
     return '';
+}
+
+function ve_remote_resolve_download_filename(array $source, string $downloadPath, string $fallback = 'video.mp4'): string
+{
+    $requested = trim((string) ($source['filename'] ?? ''));
+    $actualName = basename($downloadPath);
+    $actualExtension = strtolower(pathinfo($actualName, PATHINFO_EXTENSION));
+    $requestedBase = $requested !== ''
+        ? trim((string) pathinfo($requested, PATHINFO_FILENAME))
+        : trim((string) pathinfo($actualName, PATHINFO_FILENAME));
+
+    if ($requestedBase === '') {
+        $requestedBase = trim((string) pathinfo($fallback, PATHINFO_FILENAME));
+    }
+
+    if ($requestedBase === '') {
+        $requestedBase = 'video';
+    }
+
+    if ($actualExtension === '') {
+        $actualExtension = strtolower(pathinfo($requested !== '' ? $requested : $fallback, PATHINFO_EXTENSION));
+    }
+
+    if ($actualExtension === '') {
+        $actualExtension = strtolower(pathinfo($fallback, PATHINFO_EXTENSION));
+    }
+
+    if ($actualExtension === '') {
+        $actualExtension = 'mp4';
+    }
+
+    return ve_remote_sanitize_filename($requestedBase . '.' . $actualExtension, $fallback);
+}
+
+function ve_remote_finalize_downloaded_file(array $source, string $downloadPath, string $fallback = 'video.mp4'): array
+{
+    $directory = dirname($downloadPath);
+    $finalFilename = ve_remote_resolve_download_filename($source, $downloadPath, $fallback);
+    $finalPath = $directory . DIRECTORY_SEPARATOR . $finalFilename;
+
+    if (strcasecmp($downloadPath, $finalPath) !== 0) {
+        @unlink($finalPath);
+
+        if (!@rename($downloadPath, $finalPath)) {
+            if (@copy($downloadPath, $finalPath)) {
+                @unlink($downloadPath);
+            } else {
+                $finalPath = $downloadPath;
+                $finalFilename = basename($downloadPath);
+            }
+        }
+    }
+
+    return [
+        'path' => $finalPath,
+        'filename' => $finalFilename,
+    ];
 }
 
 function ve_remote_extension_from_content_type(string $contentType): string
@@ -1069,12 +1171,16 @@ function ve_remote_download_via_ytdlp(int $jobId, array $source): array
         throw new RuntimeException('yt-dlp could not download the remote video. ' . trim($output));
     }
 
+    $finalized = ve_remote_finalize_downloaded_file($source, $path, 'yt-dlp-download.mp4');
+    $path = (string) ($finalized['path'] ?? $path);
+    $filename = (string) ($finalized['filename'] ?? basename($path));
+
     $size = (int) (filesize($path) ?: 0);
     ve_remote_update_progress($jobId, $size, $size, 0, 100);
 
     return [
         'path' => $path,
-        'filename' => basename($path),
+        'filename' => $filename,
         'size' => $size,
         'content_type' => '',
         'effective_url' => (string) ($source['download_url'] ?? ''),
@@ -1253,6 +1359,7 @@ function ve_remote_create_job(
     string $errorMessage = ''
 ): array {
     $now = ve_now();
+    $folderId = ve_video_normalize_folder_id($userId, $folderId);
     $stmt = ve_db()->prepare(
         'INSERT INTO remote_uploads (
             user_id, source_url, normalized_url, resolved_url, host_key, folder_id,
@@ -1670,8 +1777,17 @@ function ve_remote_clear_all_jobs(int $userId): int
     return (int) $update->rowCount();
 }
 
-function ve_remote_status_for_ui(string $status): string
+function ve_remote_status_for_ui(string $status, ?array $linkedVideo = null): string
 {
+    if ((string) ($status ?? '') === VE_REMOTE_STATUS_COMPLETE && is_array($linkedVideo)) {
+        return match ((string) ($linkedVideo['status'] ?? '')) {
+            VE_VIDEO_STATUS_QUEUED => 'PENDING',
+            VE_VIDEO_STATUS_PROCESSING => 'WORKING2',
+            VE_VIDEO_STATUS_FAILED => 'ERROR',
+            default => 'COMPLETE',
+        };
+    }
+
     return match ($status) {
         VE_REMOTE_STATUS_PENDING, VE_REMOTE_STATUS_RESOLVING => 'PENDING',
         VE_REMOTE_STATUS_DOWNLOADING => 'WORKING',
@@ -1681,9 +1797,29 @@ function ve_remote_status_for_ui(string $status): string
     };
 }
 
-function ve_remote_status_message_html(array $job): string
+function ve_remote_status_message_html(array $job, ?array $linkedVideo = null): string
 {
-    $message = trim((string) ($job['status'] === VE_REMOTE_STATUS_ERROR ? ($job['error_message'] ?? '') : ($job['status_message'] ?? '')));
+    $jobStatus = (string) ($job['status'] ?? VE_REMOTE_STATUS_PENDING);
+
+    if ($jobStatus === VE_REMOTE_STATUS_COMPLETE && is_array($linkedVideo)) {
+        $videoStatus = (string) ($linkedVideo['status'] ?? '');
+        $videoMessage = trim((string) ($linkedVideo['status_message'] ?? ''));
+        $videoError = trim((string) ($linkedVideo['processing_error'] ?? ''));
+
+        $message = match ($videoStatus) {
+            VE_VIDEO_STATUS_QUEUED => $videoMessage !== '' ? $videoMessage : 'Imported. Video is queued for processing.',
+            VE_VIDEO_STATUS_PROCESSING => $videoMessage !== '' ? $videoMessage : 'Imported. Video is processing.',
+            VE_VIDEO_STATUS_FAILED => $videoError !== '' ? $videoError : ($videoMessage !== '' ? $videoMessage : 'Imported, but video processing failed.'),
+            VE_VIDEO_STATUS_READY => 'Remote file imported successfully. Video is ready to stream.',
+            default => '',
+        };
+
+        if ($message !== '') {
+            return nl2br(ve_h($message));
+        }
+    }
+
+    $message = trim((string) ($jobStatus === VE_REMOTE_STATUS_ERROR ? ($job['error_message'] ?? '') : ($job['status_message'] ?? '')));
 
     if ($message === '') {
         $message = trim((string) ($job['status_message'] ?? ''));
@@ -1701,7 +1837,7 @@ function ve_remote_format_megabytes(int $bytes): string
     return number_format(max(0, $bytes) / 1048576, 2, '.', '');
 }
 
-function ve_remote_payload_from_row(array $job): array
+function ve_remote_payload_from_row(array $job, ?array $linkedVideo = null): array
 {
     $status = (string) ($job['status'] ?? VE_REMOTE_STATUS_PENDING);
     $progress = max(0, min(100, (int) round((float) ($job['progress_percent'] ?? 0))));
@@ -1717,12 +1853,12 @@ function ve_remote_payload_from_row(array $job): array
         'url' => $filename !== '' ? $filename : $sourceUrl,
         'fcurl' => $resolvedUrl !== '' ? $resolvedUrl : ($normalizedUrl !== '' ? $normalizedUrl : $sourceUrl),
         'created' => (string) ($job['created_at'] ?? ''),
-        'status' => ve_remote_status_for_ui($status),
+        'status' => ve_remote_status_for_ui($status, $linkedVideo),
         'pro' => $status === VE_REMOTE_STATUS_COMPLETE ? 100 : $progress,
         'szd' => ve_remote_format_megabytes($bytesDownloaded),
         'szf' => ve_remote_format_megabytes($bytesTotal),
         'speed' => number_format(max(0, (int) ($job['speed_bytes_per_second'] ?? 0)) / 1024, 0, '.', ''),
-        'st' => ve_remote_status_message_html($job),
+        'st' => ve_remote_status_message_html($job, $linkedVideo),
         'restart' => $status === VE_REMOTE_STATUS_ERROR,
     ];
 }
@@ -1732,13 +1868,37 @@ function ve_remote_list_payload(int $userId): array
     $rows = ve_remote_list_for_user($userId);
     $list = [];
     $broken = [];
+    $linkedVideoIds = [];
 
     foreach ($rows as $row) {
         if (!is_array($row)) {
             continue;
         }
 
-        $payload = ve_remote_payload_from_row($row);
+        $videoId = (int) ($row['video_id'] ?? 0);
+
+        if ($videoId > 0) {
+            $linkedVideoIds[$videoId] = $videoId;
+        }
+    }
+
+    $linkedVideos = [];
+
+    foreach (array_values($linkedVideoIds) as $videoId) {
+        $video = ve_video_get_by_id($videoId);
+
+        if (is_array($video)) {
+            $linkedVideos[$videoId] = $video;
+        }
+    }
+
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $linkedVideo = $linkedVideos[(int) ($row['video_id'] ?? 0)] ?? null;
+        $payload = ve_remote_payload_from_row($row, is_array($linkedVideo) ? $linkedVideo : null);
         $list[] = $payload;
 
         if ((string) ($row['status'] ?? '') === VE_REMOTE_STATUS_ERROR) {
@@ -1749,7 +1909,7 @@ function ve_remote_list_payload(int $userId): array
     return [
         'list' => $list,
         'bli' => $broken,
-        'folders_tree' => [],
+        'folders_tree' => ve_video_folder_options_for_user($userId),
         'slo' => ve_remote_remaining_slots($userId),
         'max' => (int) ve_remote_config()['max_queue_per_user'],
     ];
@@ -2215,6 +2375,18 @@ function ve_remote_download_to_file(int $jobId, array $source): array
     ];
 }
 
+function ve_remote_import_downloaded_video(array $job, array $download): array
+{
+    return ve_video_queue_local_source(
+        (int) ($job['user_id'] ?? 0),
+        (string) ($download['path'] ?? ''),
+        (string) ($download['filename'] ?? 'video.mp4'),
+        null,
+        false,
+        (int) ($job['folder_id'] ?? 0)
+    );
+}
+
 function ve_remote_process_job(int $jobId): void
 {
     $job = ve_remote_get_by_id($jobId);
@@ -2252,11 +2424,7 @@ function ve_remote_process_job(int $jobId): void
             'updated_at' => ve_now(),
         ]);
 
-        $video = ve_video_queue_local_source(
-            (int) ($job['user_id'] ?? 0),
-            (string) $download['path'],
-            (string) ($download['filename'] ?? 'video.mp4')
-        );
+        $video = ve_remote_import_downloaded_video($job, $download);
 
         ve_remote_update_job($jobId, [
             'status' => VE_REMOTE_STATUS_COMPLETE,

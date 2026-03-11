@@ -9,7 +9,7 @@ function ve_remote_youtube_match(string $url): bool
 
 function ve_remote_youtube_resolve(string $url): array
 {
-    $format = 'bv*[ext=mp4]+ba[ext=m4a]/best[ext=mp4]/best';
+    $format = ve_remote_yt_dlp_mp4_format(true);
     $extraArgs = ['--extractor-args', 'youtube:player_client=android'];
     $info = ve_remote_yt_dlp_extract_info($url, [
         'format' => $format,

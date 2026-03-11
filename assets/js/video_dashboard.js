@@ -849,8 +849,8 @@
             return item.status === "queued" || item.status === "uploading";
         });
 
-        if (hasActiveVideo || hasActiveUpload) {
+        if (!document.hidden && (hasActiveVideo || hasActiveUpload)) {
             loadVideos(true);
         }
-    }, 8000);
+    }, 3000);
 }());
