@@ -234,9 +234,25 @@ function ve_remote_yt_dlp_strip_plugin_args(array $arguments): array
     return $stripped;
 }
 
-function ve_remote_yt_dlp_has_plugin_args(array $arguments): bool
+function ve_remote_yt_dlp_disable_plugins(array $arguments): array
 {
-    return in_array('--plugin-dirs', $arguments, true);
+    $disabled = ve_remote_yt_dlp_strip_plugin_args($arguments);
+
+    if (in_array('--no-plugin-dirs', $disabled, true)) {
+        return $disabled;
+    }
+
+    $insertAt = 1;
+    $second = strtolower((string) ($disabled[1] ?? ''));
+    $third = strtolower((string) ($disabled[2] ?? ''));
+
+    if ($second === '-m' && ($third === 'yt_dlp' || $third === 'yt-dlp')) {
+        $insertAt = 3;
+    }
+
+    array_splice($disabled, $insertAt, 0, ['--no-plugin-dirs']);
+
+    return $disabled;
 }
 
 function ve_remote_yt_dlp_plugin_is_incompatible_output(string $output): bool
@@ -286,15 +302,11 @@ function ve_remote_yt_dlp_run(array $arguments): array
 {
     [$exitCode, $output] = ve_video_run_command($arguments);
 
-    if (
-        $exitCode === 0
-        || !ve_remote_yt_dlp_has_plugin_args($arguments)
-        || !ve_remote_yt_dlp_plugin_is_incompatible_output($output)
-    ) {
+    if ($exitCode === 0 || !ve_remote_yt_dlp_plugin_is_incompatible_output($output)) {
         return [$exitCode, $output];
     }
 
-    $fallbackArguments = ve_remote_yt_dlp_strip_plugin_args($arguments);
+    $fallbackArguments = ve_remote_yt_dlp_disable_plugins($arguments);
 
     if ($fallbackArguments === $arguments) {
         return [$exitCode, $output];
@@ -489,6 +501,7 @@ function ve_remote_yt_dlp_extract_info(string $url, array $options = []): array
     }
 
     $args = array_merge($command, [
+        '--ignore-config',
         '--skip-download',
         '--dump-single-json',
         '--no-warnings',
@@ -1399,6 +1412,7 @@ function ve_remote_download_via_ytdlp(int $jobId, array $source): array
 
     $outputTemplate = $directory . DIRECTORY_SEPARATOR . 'yt-dlp-download.%(ext)s';
     $args = array_merge($command, [
+        '--ignore-config',
         '--no-warnings',
         '--no-progress',
         '--no-playlist',
