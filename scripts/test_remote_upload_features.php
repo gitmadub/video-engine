@@ -58,7 +58,39 @@ ve_set_app_setting('remote_youtube_extractor_args', 'youtube:player_client=defau
 ve_set_app_setting('remote_ytdlp_plugin_dirs', "/opt/bgutil-ytdlp-pot-provider/plugin\n/opt/custom/plugin");
 remote_features_assert(ve_remote_ytdlp_plugin_dirs() === ['/opt/bgutil-ytdlp-pot-provider/plugin', '/opt/custom/plugin'], 'Remote yt-dlp plugin dirs should accept newline-separated paths.');
 remote_features_assert(ve_remote_yt_dlp_plugin_args() === ['--plugin-dirs', '/opt/bgutil-ytdlp-pot-provider/plugin', '--plugin-dirs', '/opt/custom/plugin'], 'Remote yt-dlp plugin args should expand every configured plugin directory.');
+remote_features_assert(ve_remote_yt_dlp_strip_plugin_args(['yt-dlp', '--plugin-dirs', '/opt/plugin', '--dump-single-json']) === ['yt-dlp', '--dump-single-json'], 'Remote yt-dlp plugin stripping should remove every plugin directory flag pair.');
+remote_features_assert(ve_remote_yt_dlp_plugin_is_incompatible_output("ERROR: debug() got an unexpected keyword argument 'once'"), 'Remote yt-dlp plugin incompatibility detection should catch logger signature mismatches.');
+remote_features_assert(ve_remote_yt_dlp_clean_output("null\nDeprecated Feature: Support for Python version 3.9 has been deprecated. Please update to Python 3.10 or above\nERROR: actual failure") === 'ERROR: actual failure', 'Remote yt-dlp error cleanup should drop standalone null output and Python deprecation noise.');
 ve_set_app_setting('remote_ytdlp_plugin_dirs', '');
+
+$ytDlpRetryFixture = ve_storage_path('private', 'remote_uploads', 'qa-fake-ytdlp-retry.php');
+file_put_contents($ytDlpRetryFixture, <<<'PHP'
+<?php
+$arguments = $_SERVER['argv'] ?? [];
+
+if (in_array('--plugin-dirs', $arguments, true)) {
+    fwrite(STDERR, "Deprecated Feature: Support for Python version 3.9 has been deprecated. Please update to Python 3.10 or above\n");
+    fwrite(STDERR, "ERROR: debug() got an unexpected keyword argument 'once'\n");
+    exit(1);
+}
+
+echo json_encode([
+    'status' => 'ok',
+    'arguments' => array_slice($arguments, 1),
+], JSON_UNESCAPED_SLASHES) . PHP_EOL;
+PHP);
+
+[$retryExitCode, $retryOutput] = ve_remote_yt_dlp_run([
+    PHP_BINARY,
+    $ytDlpRetryFixture,
+    '--plugin-dirs',
+    '/opt/bgutil-ytdlp-pot-provider/plugin',
+    '--dump-single-json',
+]);
+$retryPayload = ve_remote_command_output_last_json($retryOutput);
+remote_features_assert($retryExitCode === 0, 'Remote yt-dlp should retry without plugin dirs when a plugin crashes due to the logger once-argument mismatch.');
+remote_features_assert(is_array($retryPayload), 'Remote yt-dlp retry fixture should emit JSON on the fallback run.');
+remote_features_assert(!in_array('--plugin-dirs', (array) ($retryPayload['arguments'] ?? []), true), 'Remote yt-dlp fallback runs should remove plugin directory arguments before retrying.');
 
 $cookieFixturePath = ve_storage_path('private', 'remote_uploads', 'qa-cookies.txt');
 file_put_contents($cookieFixturePath, "# Netscape HTTP Cookie File\n");

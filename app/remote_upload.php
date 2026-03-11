@@ -217,6 +217,98 @@ function ve_remote_yt_dlp_plugin_args(): array
     return $args;
 }
 
+function ve_remote_yt_dlp_strip_plugin_args(array $arguments): array
+{
+    $stripped = [];
+    $count = count($arguments);
+
+    for ($index = 0; $index < $count; $index++) {
+        if (($arguments[$index] ?? null) === '--plugin-dirs') {
+            $index++;
+            continue;
+        }
+
+        $stripped[] = $arguments[$index];
+    }
+
+    return $stripped;
+}
+
+function ve_remote_yt_dlp_has_plugin_args(array $arguments): bool
+{
+    return in_array('--plugin-dirs', $arguments, true);
+}
+
+function ve_remote_yt_dlp_plugin_is_incompatible_output(string $output): bool
+{
+    $normalized = strtolower(trim($output));
+
+    if ($normalized === '') {
+        return false;
+    }
+
+    return str_contains($normalized, "unexpected keyword argument 'once'")
+        || str_contains($normalized, 'unexpected keyword argument "once"')
+        || (
+            str_contains($normalized, 'got an unexpected keyword argument')
+            && str_contains($normalized, 'once')
+        );
+}
+
+function ve_remote_yt_dlp_clean_output(string $output): string
+{
+    $lines = preg_split('/\r\n|\r|\n/', trim($output)) ?: [];
+    $cleaned = [];
+
+    foreach ($lines as $line) {
+        $line = trim((string) $line);
+
+        if ($line === '' || strtolower($line) === 'null') {
+            continue;
+        }
+
+        $normalized = strtolower($line);
+
+        if (
+            str_starts_with($normalized, 'deprecated feature:')
+            && str_contains($normalized, 'support for python version')
+        ) {
+            continue;
+        }
+
+        $cleaned[] = $line;
+    }
+
+    return trim(implode(' ', $cleaned));
+}
+
+function ve_remote_yt_dlp_run(array $arguments): array
+{
+    [$exitCode, $output] = ve_video_run_command($arguments);
+
+    if (
+        $exitCode === 0
+        || !ve_remote_yt_dlp_has_plugin_args($arguments)
+        || !ve_remote_yt_dlp_plugin_is_incompatible_output($output)
+    ) {
+        return [$exitCode, $output];
+    }
+
+    $fallbackArguments = ve_remote_yt_dlp_strip_plugin_args($arguments);
+
+    if ($fallbackArguments === $arguments) {
+        return [$exitCode, $output];
+    }
+
+    [$fallbackExitCode, $fallbackOutput] = ve_video_run_command($fallbackArguments);
+
+    if ($fallbackOutput === '') {
+        return [$fallbackExitCode, $output];
+    }
+
+    return [$fallbackExitCode, $fallbackOutput];
+}
+
 function ve_remote_youtube_extractor_args(): array
 {
     $value = ve_remote_youtube_extractor_args_value();
@@ -267,7 +359,7 @@ function ve_remote_yt_dlp_cookie_args(): array
 
 function ve_remote_yt_dlp_failure_message(string $action, string $output): string
 {
-    $trimmedOutput = trim($output);
+    $trimmedOutput = ve_remote_yt_dlp_clean_output($output);
     $normalizedOutput = strtolower($trimmedOutput);
 
     $needsCookies = $normalizedOutput !== ''
@@ -289,7 +381,9 @@ function ve_remote_yt_dlp_failure_message(string $action, string $output): strin
         return $trimmedOutput !== '' ? $message . ' ' . $trimmedOutput : $message;
     }
 
-    return 'yt-dlp could not ' . $action . ' the remote URL. ' . $trimmedOutput;
+    return $trimmedOutput !== ''
+        ? 'yt-dlp could not ' . $action . ' the remote URL. ' . $trimmedOutput
+        : 'yt-dlp could not ' . $action . ' the remote URL.';
 }
 
 function ve_remote_yt_dlp_command(): array
@@ -427,7 +521,7 @@ function ve_remote_yt_dlp_extract_info(string $url, array $options = []): array
 
     $args[] = $url;
 
-    [$exitCode, $output] = ve_video_run_command($args);
+    [$exitCode, $output] = ve_remote_yt_dlp_run($args);
     $info = ve_remote_command_output_last_json($output);
 
     if ($exitCode !== 0 || !is_array($info)) {
@@ -1345,7 +1439,7 @@ function ve_remote_download_via_ytdlp(int $jobId, array $source): array
 
     $args[] = (string) ($source['download_url'] ?? '');
 
-    [$exitCode, $output] = ve_video_run_command($args);
+    [$exitCode, $output] = ve_remote_yt_dlp_run($args);
     $path = ve_remote_find_downloaded_file($directory);
 
     if ($exitCode !== 0 || !is_string($path) || $path === '' || !is_file($path)) {
