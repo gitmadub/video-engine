@@ -4337,7 +4337,7 @@ function ve_dashboard_runtime_transform_logged_in_html(string $html): string
 function ve_runtime_html_transform(string $html, string $relativePath = ''): string
 {
     $runtimeScript = ve_runtime_script_tag();
-    $mainScriptUrl = ve_h(ve_url('/assets/js/main.js'));
+    $mainScriptUrl = ve_h(ve_url('/assets/js/main.js?v=' . rawurlencode((string) (@filemtime(ve_root_path('assets', 'js', 'main.js')) ?: '1'))));
     $legacyAdapterTag = '<script src="' . ve_h(ve_url('/assets/js/legacy_api_adapter.js')) . '"></script>';
     $textLogoStyleTag = ve_runtime_text_logo_style_tag();
     $canonicalLinkReplacements = [
@@ -5990,7 +5990,7 @@ function ve_render_reset_password_page(string $token): void
     $reset = ve_get_valid_reset_token($token);
     $homeUrl = ve_url('/');
     $resetUrl = ve_url('/api/auth/reset');
-    $mainJsUrl = ve_url('/assets/js/main.js');
+    $mainJsUrl = ve_url('/assets/js/main.js?v=' . rawurlencode((string) (@filemtime(ve_root_path('assets', 'js', 'main.js')) ?: '1')));
     $bootstrapCss = ve_url('/assets/css/bootstrap.min.css');
     $styleCss = ve_url('/assets/css/style.min.css');
 

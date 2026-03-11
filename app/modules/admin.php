@@ -5585,7 +5585,7 @@ function ve_admin_dashboard_shell_context(array $currentUser): array
     return [
         'bootstrap_css' => ve_h(ve_url('/assets/css/bootstrap.min.css')),
         'panel_css' => ve_h(ve_url('/assets/css/panel.min__q_e2207d238712.css')),
-        'main_js_url' => ve_h(ve_url('/assets/js/main.js')),
+        'main_js_url' => ve_h(ve_url('/assets/js/main.js?v=' . rawurlencode((string) (@filemtime(ve_root_path('assets', 'js', 'main.js')) ?: '1')))),
         'dood_load_url' => ve_h(ve_url('/assets/js/dood_load.js')),
         'home_url' => ve_h(ve_url('/')),
         'logo_url' => ve_h(ve_url('/assets/img/logo-s.png')),
