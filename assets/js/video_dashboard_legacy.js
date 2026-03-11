@@ -351,6 +351,42 @@
         return items;
     }
 
+    function isFormControlTarget(node) {
+        return !!(node && node.closest('a, button, input, label, textarea, select, option, .close, .nav-link, .mobile, [role="button"]'));
+    }
+
+    function ensureBrowserToolbarStyles() {
+        var existing = document.getElementById('ve-browser-toolbar-style');
+        var style;
+
+        if (existing) {
+            return;
+        }
+
+        style = document.createElement('style');
+        style.id = 've-browser-toolbar-style';
+        style.textContent = [
+            '.ve-browser-toolbar{margin:0 0 12px;padding:12px 15px;background:#1c1c1c;border:1px solid rgba(67,70,69,.7);border-radius:3px}',
+            '.ve-browser-toolbar-main{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;min-width:0}',
+            '.ve-folder-path-label{padding-top:9px;color:#434645;font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}',
+            '.ve-folder-path{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}',
+            '.ve-folder-path-separator{color:#434645;font-size:.75rem;font-weight:700}',
+            '.ve-folder-path-card{display:inline-flex;align-items:center;min-height:38px;padding:8px 12px;border:1px solid #434645;border-radius:3px;background:rgba(67,70,69,.18);color:rgba(255,255,255,.82);font-size:.9rem;font-weight:600;line-height:1;transition:border-color .16s ease,background .16s ease,color .16s ease,transform .16s ease}',
+            '.ve-folder-path-card:hover,.ve-folder-path-card:focus-visible{text-decoration:none;outline:none;color:#fff;border-color:#f90;background:rgba(255,153,0,.12)}',
+            '.ve-folder-path-card.is-current{color:#f90;border-color:rgba(255,153,0,.58);background:rgba(255,153,0,.08)}',
+            '.ve-folder-path-card.ve-drag-folder-target,.ve-folder-path-card.ve-drop-commit{color:#fff;border-color:#f90;background:rgba(255,153,0,.18);transform:translateY(-1px)}',
+            '.file_list .item.active{cursor:grab}',
+            '.file_list .item.active:active{cursor:grabbing}',
+            '.file_list .item.ve-item-pending-move{opacity:0;transform:translateX(32px) scale(.985);pointer-events:none;transition:opacity .16s ease,transform .16s ease}',
+            '.file_list .folder.item.ve-drop-commit{box-shadow:0 0 0 1px rgba(255,153,0,.6) inset;background:rgba(255,153,0,.08)}',
+            '.ve-drag-ghost{position:fixed;top:-9999px;left:-9999px;max-width:260px;padding:10px 12px;border:1px solid #434645;border-radius:3px;background:#1c1c1c;box-shadow:0 8px 22px rgba(0,0,0,.28);color:#fff;pointer-events:none;z-index:2147483647}',
+            '.ve-drag-ghost-count{font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#f90}',
+            '.ve-drag-ghost-title{margin-top:4px;font-size:.88rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+            '@media (max-width:991px){.ve-browser-toolbar{padding:10px 12px}.ve-browser-toolbar-main,.ve-folder-path{width:100%}.ve-folder-path-label{padding-top:0}}'
+        ].join('');
+        document.head.appendChild(style);
+    }
+
     function renderBrowserToolbar(vm) {
         var filesPane = document.querySelector('.files');
         var list = filesPane ? filesPane.querySelector('.file_list') : null;
@@ -388,21 +424,9 @@
 
         toolbar.innerHTML = ''
             + '<div class="ve-browser-toolbar-main">'
-            + '  <button type="button" class="btn btn-white btn-sm ve-go-back" data-action="go-back"' + (currentFolderId === '0' ? ' disabled' : '') + '>Go Back</button>'
+            + '  <div class="ve-folder-path-label">Path</div>'
             + '  <div class="ve-folder-path" data-folder-path>' + pathMarkup + '</div>'
-            + '</div>'
-            + '<label class="ve-results-control">'
-            + '  <span>Results per page</span>'
-            + '  <select data-results-per-page>'
-            + '      <option value="25">25</option>'
-            + '      <option value="50">50</option>'
-            + '      <option value="100">100</option>'
-            + '      <option value="500">500</option>'
-            + '      <option value="1000">1000</option>'
-            + '  </select>'
-            + '</label>';
-
-        wirePerPageControls(vm);
+            + '</div>';
     }
 
     function isPerPageSelect(select) {
@@ -519,6 +543,20 @@
 
     function decorateDraggableItems() {
         document.querySelectorAll('.file_list .item').forEach(function (item) {
+            Array.prototype.forEach.call(item.children || [], function (child) {
+                if (!child || typeof child.setAttribute !== 'function') {
+                    return;
+                }
+
+                if (isFormControlTarget(child)) {
+                    child.setAttribute('draggable', 'false');
+                    return;
+                }
+
+                child.setAttribute('draggable', item.hasAttribute('data-video') || item.hasAttribute('data-folder') ? 'true' : 'false');
+                child.setAttribute('data-drag-surface', 'true');
+            });
+
             if (item.classList.contains('header')) {
                 item.removeAttribute('draggable');
                 return;
@@ -530,6 +568,132 @@
             }
 
             item.removeAttribute('draggable');
+        });
+    }
+
+    function itemDisplayTitle(item) {
+        var titleNode = item && item.querySelector('h4 a, a.name .title, a.name, .title, .name');
+        return titleNode ? String(titleNode.textContent || '').trim() : 'Selected item';
+    }
+
+    function selectionItemsFromDom(selection) {
+        var fileLookup = Object.create(null);
+        var folderLookup = Object.create(null);
+
+        (selection && selection.fileIds || []).forEach(function (id) {
+            fileLookup[String(id)] = true;
+        });
+
+        (selection && selection.folderIds || []).forEach(function (id) {
+            folderLookup[String(id)] = true;
+        });
+
+        return Array.from(document.querySelectorAll('.file_list .item')).filter(function (item) {
+            if (item.classList.contains('header')) {
+                return false;
+            }
+
+            if (item.hasAttribute('data-video')) {
+                return !!fileLookup[String(item.getAttribute('data-video') || '')];
+            }
+
+            if (item.hasAttribute('data-folder')) {
+                return !!folderLookup[String(item.getAttribute('data-folder') || '')];
+            }
+
+            return false;
+        });
+    }
+
+    function dragSummaryForItems(items, selection) {
+        var total = (selection && selection.fileIds ? selection.fileIds.length : 0) + (selection && selection.folderIds ? selection.folderIds.length : 0);
+        var primary = items.length ? itemDisplayTitle(items[0]) : 'Selected items';
+        var suffix = total > 1 ? ' and ' + String(total - 1) + ' more' : '';
+
+        return {
+            total: total || items.length || 1,
+            primary: primary,
+            secondary: suffix ? primary + suffix : primary
+        };
+    }
+
+    function destroyDragPreview(vm) {
+        if (vm && vm.__veDragPreview && vm.__veDragPreview.parentNode) {
+            vm.__veDragPreview.parentNode.removeChild(vm.__veDragPreview);
+        }
+
+        if (vm) {
+            vm.__veDragPreview = null;
+        }
+    }
+
+    function createDragPreview(vm, summary) {
+        var preview = document.createElement('div');
+
+        destroyDragPreview(vm);
+        preview.className = 've-drag-ghost';
+        preview.innerHTML = ''
+            + '<div class="ve-drag-ghost-count">' + escapeHtml(String(summary.total)) + ' item' + (summary.total === 1 ? '' : 's') + '</div>'
+            + '<div class="ve-drag-ghost-title">' + escapeHtml(summary.secondary) + '</div>';
+        document.body.appendChild(preview);
+        vm.__veDragPreview = preview;
+        return preview;
+    }
+
+    function applyPendingMoveState(vm, selection, targetNode) {
+        var items = selectionItemsFromDom(selection);
+
+        if (!items.length) {
+            return null;
+        }
+
+        items.forEach(function (item) {
+            item.classList.add('ve-item-pending-move');
+        });
+
+        if (targetNode) {
+            targetNode.classList.add('ve-drop-commit');
+        }
+
+        vm.__vePendingDragMove = {
+            items: items,
+            targetNode: targetNode || null
+        };
+
+        return vm.__vePendingDragMove;
+    }
+
+    function clearPendingMoveState(vm) {
+        var state = vm && vm.__vePendingDragMove;
+
+        if (!state) {
+            return;
+        }
+
+        (state.items || []).forEach(function (item) {
+            item.classList.remove('ve-item-pending-move');
+        });
+
+        if (state.targetNode) {
+            state.targetNode.classList.remove('ve-drop-commit');
+        }
+
+        vm.__vePendingDragMove = null;
+    }
+
+    function hideLegacyBackButtons() {
+        document.querySelectorAll('.files button, .files a, .files .btn').forEach(function (node) {
+            var text;
+
+            if (!node || node.closest('[data-videos-browser-toolbar]')) {
+                return;
+            }
+
+            text = String(node.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+            if (text === 'go back') {
+                node.remove();
+            }
         });
     }
 
@@ -793,7 +957,7 @@
                     return true;
                 }
 
-                return !source.closest('a, button, input, label, textarea, .close, .nav-link, .mobile');
+                return !isFormControlTarget(source);
             })
             .on('start', function (event) {
                 if (!event.oe.ctrlKey && !event.oe.metaKey) {
@@ -838,6 +1002,7 @@
             root.classList.remove('ve-drag-over');
             root.querySelectorAll('.ve-drag-folder-target').forEach(function (node) {
                 node.classList.remove('ve-drag-folder-target');
+                node.classList.remove('ve-drop-commit');
             });
         }
 
@@ -886,12 +1051,15 @@
         root.addEventListener('dragstart', function (event) {
             var item = event.target && event.target.closest('.file_list .item');
             var selection;
+            var items;
+            var preview;
 
             if (!item || item.classList.contains('header') || (!item.hasAttribute('data-video') && !item.hasAttribute('data-folder'))) {
                 return;
             }
 
             selection = selectionFromItem(vm, item);
+            items = selectionItemsFromDom(selection);
 
             vm.__veInternalDrag = {
                 fileIds: selection.fileIds,
@@ -900,17 +1068,28 @@
 
             if (event.dataTransfer) {
                 event.dataTransfer.effectAllowed = 'move';
+                preview = createDragPreview(vm, dragSummaryForItems(items, vm.__veInternalDrag));
 
                 try {
                     event.dataTransfer.setData('text/plain', JSON.stringify(vm.__veInternalDrag));
                 } catch (error) {
                     // Ignore browsers that block custom drag data here.
                 }
+
+                if (preview && typeof event.dataTransfer.setDragImage === 'function') {
+                    event.dataTransfer.setDragImage(preview, 18, 18);
+                }
             }
         });
 
         root.addEventListener('dragend', function () {
             vm.__veInternalDrag = null;
+
+            if (!vm.__vePendingDragMove) {
+                clearPendingMoveState(vm);
+            }
+
+            destroyDragPreview(vm);
             clearHighlight();
         });
 
@@ -922,11 +1101,25 @@
             clearHighlight();
 
             if (vm.__veInternalDrag) {
-                moveItemsToFolder(vm, vm.__veInternalDrag, targetFolderId, function () {
+                if (String(targetFolderId) === String(vm.current_folder || '0')) {
+                    vm.__veInternalDrag = null;
+                    destroyDragPreview(vm);
+                    return;
+                }
+
+                applyPendingMoveState(vm, vm.__veInternalDrag, folderTarget);
+                moveItemsToFolder(vm, vm.__veInternalDrag, targetFolderId, function (failed) {
+                    if (failed) {
+                        clearPendingMoveState(vm);
+                    } else {
+                        vm.__vePendingDragMove = null;
+                    }
+
                     vm.__veInternalDrag = null;
                     vm.__vePendingMove = null;
                     vm.file_ids = [];
                     vm.folder_ids = [];
+                    destroyDragPreview(vm);
                     vm.update();
                 });
                 return;
@@ -965,18 +1158,12 @@
         document.addEventListener('click', function (event) {
             var shareLink = event.target && event.target.closest('[data-folder-share]');
             var pathCard = event.target && event.target.closest('[data-folder-path-card]');
-            var goBackButton = event.target && event.target.closest('[data-action="go-back"]');
 
             if (!shareLink) {
                 if (pathCard) {
                     event.preventDefault();
                     vm.open_folder(String(pathCard.getAttribute('data-folder-id') || '0'));
                     return;
-                }
-
-                if (goBackButton && !goBackButton.disabled) {
-                    event.preventDefault();
-                    vm.open_folder(String(vm.data && vm.data.fld_parent_id || '0'));
                 }
 
                 return;
@@ -1001,11 +1188,14 @@
 
     function afterRender(vm) {
         window.setTimeout(function () {
+            ensureBrowserToolbarStyles();
             renderBrowserToolbar(vm);
+            wirePerPageControls(vm);
             ensureToolbarLabels(vm);
             ensureActionButtonTypes();
             decorateFolderRows(vm);
             decorateDraggableItems();
+            hideLegacyBackButtons();
             hydrateSavedContentType(vm);
             installSelection(vm);
             installDropZone(vm);
