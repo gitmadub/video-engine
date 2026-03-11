@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>API Documentation - DoodStream</title>
+    <title>API Documentation - FileHost.net</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
     <link rel="stylesheet" href="/assets/css/bootstrap.min.css">
@@ -113,7 +113,7 @@ a {
 
     <div id="api_doc" class="d-flex flex-wrap justify-content-between">
         <div class="api-sidebar">
-            <a class="navbar-brand w-100" href="../index.html"><img style="width:120px" src="/assets/img/logo-s.png"></a>
+            <a class="navbar-brand w-100" href="/"><img style="width:120px" src="/assets/img/logo-s.png"></a>
             <h4 class="title d-block w-100">API Documentation</h4>
             <nav class="nav api-menu mt-3">
                 <ul class="the-menu p-0 m-0">
@@ -180,7 +180,7 @@ a {
                     </li>
 
                     <li class="nav-item mt-4">
-                        <a class="nav-link" href="#clients">Clients</a>
+                        <a class="nav-link" href="#clients">Official clients</a>
                         <div class="nav sub-menu long-menu2">
                             <a href="#php" class="nav-link">PHP</a>
                             <a href="#python" class="nav-link">Python</a>
@@ -196,9 +196,9 @@ a {
 
             	<h2 id="intro" class="px-3 mt-3">Introduction</h2>
             	<p class="px-3 ml-3 mt-1"></br>
-                DoodStream provides a simple HTTP API to integrate ours into your business or application. </br>
+                FileHost.net provides a simple HTTP API to integrate ours into your business or application. </br>
                 All requests to the API should be only <b>GET</b> or <b>POST</b></br>
-                You can find your API key here - <a href="https://doodstream.com/settings" target="_blank">https://doodstream.com/settings</a>
+                You can find your API key here - <a href="https://filehost.net/settings" target="_blank">https://filehost.net/settings</a>
 
 
                 <h2 id="account" class="px-3 cat-open">Rate limits</h2>
@@ -218,7 +218,7 @@ a {
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/account/info?key={your_api_key}
+                        https://filehost.net/api/account/info?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -248,14 +248,14 @@ a {
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": {
       "email": "email@test.com",
       "balance": "0.00000",
       "storage_used" :"24186265",
       "storage_left": 128824832615,
-      "premim_expire": "2025-10-24 21:00:00
+      "premim_expire": "2026-03-12 21:00:00
   }
 }</pre>
                     </div>
@@ -269,7 +269,7 @@ a {
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/account/stats?key={your_api_key}
+                        https://filehost.net/api/account/stats?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -335,21 +335,21 @@ a {
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": [
     {
       "profit_views": "0.00000",
       "downloads": "0",
       "views": "0",
-      "day": "2017-08-11",
+      "day": "2026-03-12",
       "profit_total": "0.00000"
     },
     {
       "profit_views": "0.00000",
       "downloads": "0",
       "views": "0",
-      "day": "2017-08-12",
+      "day": "2026-03-12",
       "profit_total": "0.00000"
     }
   ]
@@ -364,7 +364,7 @@ a {
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/dmca/list?key={your_api_key}
+                        https://filehost.net/api/dmca/list?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -418,16 +418,16 @@ a {
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": [
     {
-      "reported_on": "2017-08-11 04:30:07",
+      "reported_on": "2026-03-12 04:30:07",
       "protected_download": "yyy",
       "protected_embed": "zzz",
       "file_code": "xxx",
       "fld_id": "0",
-      "disabled_on": "2017-08-11 05:00:07"
+      "disabled_on": "2026-03-12 05:00:07"
     }
   ]
 }</pre>
@@ -443,7 +443,7 @@ a {
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/upload/server?key={your_api_key}
+                        https://filehost.net/api/upload/server?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -473,7 +473,7 @@ a {
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": "https://xxx.cloudatacdn.com/upload/01"
 }</pre>
@@ -494,7 +494,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": [
     {
@@ -506,7 +506,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
       "canplay": 1,
       "size": "123456",
       "length": "123456",
-      "uploaded": "2017-08-11 04:30:07",
+      "uploaded": "2026-03-12 04:30:07",
       "protected_embed": "https://dood.to/e/yyy",
       "protected_dl": "https://dood.to/d/zzz",
       "title": "test_file"
@@ -523,7 +523,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/file/clone?key={your_api_key}
+                        https://filehost.net/api/file/clone?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -577,7 +577,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": {
     "embed_url": "https://dood.la/e/xxx",
@@ -600,7 +600,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/upload/url?key={your_api_key}&url={upload_url}
+                        https://filehost.net/api/upload/url?key={your_api_key}&url={upload_url}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -667,7 +667,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "new_title": "",
   "status": 200,
   "total_slots": "100",
@@ -686,7 +686,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/urlupload/list?key={your_api_key}
+                        https://filehost.net/api/urlupload/list?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -716,12 +716,12 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": [
     {
       "bytes_total": "0",
-      "created": "2017-08-11 04:30:07",
+      "created": "2026-03-12 04:30:07",
       "remote_url": "https://dropbox.com/hukbasd7k3fd",
       "status": "working",
       "file_code": "98zukoh5jqiw",
@@ -741,7 +741,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/urlupload/status?key={your_api_key}
+                        https://filehost.net/api/urlupload/status?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -783,12 +783,12 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": [
     {
       "bytes_total": "0",
-      "created": "2017-08-11 04:30:07",
+      "created": "2026-03-12 04:30:07",
       "remote_url": "https://dropbox.com/hukbasd7k3fd",
       "status": "working",
       "file_code": "hjsnr087johj",
@@ -807,7 +807,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/urlupload/slots?key={your_api_key}
+                        https://filehost.net/api/urlupload/slots?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -837,7 +837,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "total_slots": "100",
   "used_slots": "10"
@@ -852,7 +852,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/urlupload/actions?key={your_api_key}
+                        https://filehost.net/api/urlupload/actions?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -932,7 +932,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "Errors restarted",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200
 }</pre>
                     </div>
@@ -948,7 +948,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/folder/create?key={your_api_key}
+                        https://filehost.net/api/folder/create?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1002,7 +1002,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": {
     "fld_id": "1234567"
@@ -1019,7 +1019,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/folder/rename?key={your_api_key}
+                        https://filehost.net/api/folder/rename?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1074,7 +1074,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": "true"
 }</pre>
@@ -1090,7 +1090,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/folder/list?key={your_api_key}
+                        https://filehost.net/api/folder/list?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1162,14 +1162,14 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                 "canplay": 1,
                 "length": "1234",
                 "views": "1",
-                "uploaded": "2017-08-11 04:30:07",
+                "uploaded": "2026-03-12 04:30:07",
                 "public": "1",
                 "fld_id": "0",
                 "title": "test_file"
               }
             ],
     },
-        "server_time":"2023-10-17 07:31:01"
+        "server_time":"2026-03-12 07:31:01"
 }
 
 
@@ -1188,7 +1188,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/file/list?key={your_api_key}
+                        https://filehost.net/api/file/list?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1255,7 +1255,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                                 <code>created</code>
                             </div>
                             <div class="col-md-6">
-                                Show files uploaded after timestamp (Ex : 2021-10-07 03:15:19) </br>
+                                Show files uploaded after timestamp (Ex : 2026-03-12 03:15:19) </br>
                                 Or specify number to show only files uploaded X minutes ago
                             </div>
                             <div class="col-md-2">
@@ -1267,7 +1267,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": {
     "total_pages": 1,
@@ -1279,7 +1279,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
         "canplay": 1,
         "length": "1234",
         "views": "1",
-        "uploaded": "2017-08-11 04:30:07",
+        "uploaded": "2026-03-12 04:30:07",
         "public": "1",
         "fld_id": "0",
         "title": "test_file"
@@ -1299,7 +1299,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/file/check?key={your_api_key}
+                        https://filehost.net/api/file/check?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1341,7 +1341,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": [
     {
@@ -1360,7 +1360,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/file/info?key={your_api_key}
+                        https://filehost.net/api/file/info?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1402,7 +1402,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": [
     {
@@ -1414,7 +1414,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
       "size": "123456",
       "views": "0",
       "length": "123456",
-      "uploaded": "2017-08-11 04:30:07",
+      "uploaded": "2026-03-12 04:30:07",
       "last_view": "",
       "protected_embed": "/e/yyy",
       "protected_dl": "/d/zzz",
@@ -1433,7 +1433,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/file/image?key={your_api_key}
+                        https://filehost.net/api/file/image?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1475,7 +1475,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": [
     {
@@ -1498,7 +1498,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/file/rename?key={your_api_key}
+                        https://filehost.net/api/file/rename?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1552,7 +1552,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": "true"
 }</pre>
@@ -1568,7 +1568,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/file/move?key={your_api_key}
+                        https://filehost.net/api/file/move?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1622,7 +1622,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": "true"
 }</pre>
@@ -1637,7 +1637,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>GET</code>
-                        https://doodapi.co/api/search/videos?key={your_api_key}
+                        https://filehost.net/api/search/videos?key={your_api_key}
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1679,7 +1679,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                         <pre class="body-return">
 {
   "msg": "OK",
-  "server_time": "2017-08-11 04:30:07",
+  "server_time": "2026-03-12 04:30:07",
   "status": 200,
   "result": "true"
 }</pre>
@@ -1696,7 +1696,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>URL</code>
-                        https://dood.so/e/xxx?c_poster=https://example.com/image.jpg
+                        https://filehost.net/e/xxx?c_poster=https://example.com/image.jpg
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1733,7 +1733,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>URL</code>
-                        https://dood.so/e/xxx?c1_file=https://example.com/sub.vtt&c1_label=English
+                        https://filehost.net/e/xxx?c1_file=https://example.com/sub.vtt&c1_label=English
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1782,7 +1782,7 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                     <div class="d-flex align-items-center code-type px-3">
                         <code>URL</code>
-                        https://dood.so/e/xxx?subtitle_json=https://example.com/sub.json
+                        https://filehost.net/e/xxx?subtitle_json=https://example.com/sub.json
                     </div>
                     <div class="results">
                     <div class="row">
@@ -1818,28 +1818,28 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
                     </div>
                 </div>
 
-            <h2 id="clients" class="px-3 cat-open">Clients</h2>
+                        <h2 id="clients" class="px-3 cat-open">Official clients</h2>
 
             <div class="api-route mb-4">
                     <div class="col-md-12">
-                        <h4 id="php">Unofficial PHP client</h4>
-                    </div>
-                    <div class="d-flex align-items-center code-type px-3">
-                        <code>GITHUB</code>
-                        https://github.com/Marchay/doodstream-PHP-library
+                        <h4 id="php">Official PHP client</h4>
+                        <p>Coming soon.</p>
                     </div>
                 </div>
 
             <div class="api-route mb-4">
                     <div class="col-md-12">
-                        <h4 id="php">Unofficial Python client</h4>
-                    </div>
-                    <div class="d-flex align-items-center code-type px-3">
-                        <code>pypi</code>
-                        https://pypi.org/project/doodstream/
+                        <h4 id="python">Official Python client</h4>
+                        <p>Coming soon.</p>
                     </div>
                 </div>
 
+            <div class="api-route mb-4">
+                    <div class="col-md-12">
+                        <h4 id="support">Contact</h4>
+                        <p>For API access and integration support, contact <a href="mailto:support@filehost.net">support@filehost.net</a>.</p>
+                    </div>
+                </div>
         </div>
     </div>
  
@@ -1851,3 +1851,5 @@ curl -X POST -F 'api_key={your_api_key}' -F 'file=@file.mp4' https://xxx.cloudat
 
 </body>
 </html>
+
+

@@ -9,7 +9,7 @@ This document defines the recommended database layout for this project based on:
 - `docs/api-docs-audit.md`
 - the current shipped dashboard pages under `dashboard/*.html`
 
-It is written for a DoodStream-style product: large video/file uploads, remote uploads, premium plans, referrals, payouts, DMCA handling, public API access, and a multi-file-server deployment that must remain workable as the platform grows to hundreds of thousands of users and very large media libraries.
+It is written for a FileHost.net-style product: large video/file uploads, remote uploads, premium plans, referrals, payouts, DMCA handling, public API access, and a multi-file-server deployment that must remain workable as the platform grows to hundreds of thousands of users and very large media libraries.
 
 This is a product/schema design document, not a literal migration file. It should drive the real migrations.
 
@@ -457,4 +457,4 @@ Build the first real migrations around this exact separation:
 5. DMCA, audit, and API platform
 6. aggregates and external analytics pipeline
 
-That sequence matches the current frontend gaps, the advertised API surface, and the multi-file-server requirements of a DoodStream-scale product.
+That sequence matches the current frontend gaps, the advertised API surface, and the multi-file-server requirements of a FileHost.net-scale product.

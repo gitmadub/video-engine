@@ -7,7 +7,7 @@ File audited: `pages/api-docs.html`
 ## What the page is
 
 - `pages/api-docs.html` is a static documentation page.
-- It documents an external Dood-style API hosted at `https://doodapi.co`, not a local API implemented by this repository.
+- It documents an external FileHost API hosted at `https://filehost.net/api`, not a local API implemented by this repository.
 - The page itself does not call local backend endpoints. It is only rendered as static content at `/api-docs`.
 
 ## API surface claimed by the page
@@ -82,7 +82,7 @@ The current PHP app only exposes `/?op=...` style frontend stubs plus a few util
 
 ## Page-level issues
 
-- The page is branded as DoodStream/DoodAPI rather than this project.
+- The page is branded as FileHost.net/DoodAPI rather than this project.
 - It links users to external settings and external domains for API keys.
 - It contains duplicate anchor ids:
   - `id="account"` is reused

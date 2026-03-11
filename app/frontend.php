@@ -312,6 +312,16 @@ function ve_not_found(): void
     ve_render_file('pages/404.html', 404);
 }
 
+function ve_is_canonical_site_page_path(string $path, string $slug): bool
+{
+    return $path === '/' . $slug;
+}
+
+function ve_is_legacy_site_page_path(string $path, string $slug): bool
+{
+    return $path === '/' . $slug . '.html' || $path === '/pages/' . $slug . '.html';
+}
+
 require __DIR__ . '/backend.php';
 require __DIR__ . '/modules/auth.php';
 require __DIR__ . '/modules/reports.php';
@@ -401,7 +411,7 @@ function ve_render_player_page(string $slug): void
     $ownFile = (bool) ($file['own_file'] ?? false);
     $countdown = max(0, (int) ($file['countdown_seconds'] ?? 5));
 
-    $pageTitle = ve_h($title . ' - DoodStream');
+    $pageTitle = ve_h($title . ' - FileHost.net');
     $safeTitle = ve_h($title);
     $safeLength = ve_h($length);
     $safeSize = ve_h($size);
@@ -437,7 +447,7 @@ HTML;
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>{$pageTitle}</title>
     <meta name="og:title" content="{$safeTitle}">
-    <meta name="og:sitename" content="DoodStream.com">
+    <meta name="og:sitename" content="FileHost.net">
     <meta name="og:image" content="{$safePoster}">
     <meta name="twitter:image" content="{$safePoster}">
     <meta name="robots" content="nofollow, noindex">
@@ -1235,7 +1245,11 @@ function ve_dispatch(): void
         ve_video_stream_segment($matches[1], rawurldecode($matches[2]));
     }
 
-    if (preg_match('#^/join/([A-Za-z0-9_-]+)(?:\.html)?$#', $path, $matches) === 1) {
+    if (preg_match('#^/join/([A-Za-z0-9_-]+)\.html$#', $path, $matches) === 1) {
+        ve_redirect('/join/' . $matches[1], 301);
+    }
+
+    if (preg_match('#^/join/([A-Za-z0-9_-]+)$#', $path, $matches) === 1) {
         if (!ve_is_method('GET')) {
             ve_method_not_allowed(['GET']);
         }
@@ -1243,17 +1257,26 @@ function ve_dispatch(): void
         ve_referral_handle_join($matches[1]);
     }
 
-    if ($path === '/premium-plans' || $path === '/premium-plans.html') {
+    if ($path === '/premium-plans.html') {
+        ve_redirect('/premium-plans', 301);
+    }
+
+    if ($path === '/premium-plans') {
         ve_require_auth();
         ve_render_dashboard_file(VE_DASHBOARD_PAGES['premium-plans']);
     }
 
     if ($path === '/dashboard/videos' || $path === '/dashboard/videos.html') {
         $query = trim((string) ($_SERVER['QUERY_STRING'] ?? ''));
-        ve_redirect('/videos' . ($query !== '' ? '?' . $query : ''));
+        ve_redirect('/videos' . ($query !== '' ? '?' . $query : ''), 301);
     }
 
-    if ($path === '/videos' || $path === '/videos/' || $path === '/videos.html') {
+    if ($path === '/videos.html') {
+        $query = trim((string) ($_SERVER['QUERY_STRING'] ?? ''));
+        ve_redirect('/videos' . ($query !== '' ? '?' . $query : ''), 301);
+    }
+
+    if ($path === '/videos' || $path === '/videos/') {
         ve_require_auth();
         ve_render_videos_dashboard_page();
     }
@@ -1273,24 +1296,37 @@ function ve_dispatch(): void
 
         if ($path === '/' . $legacy || $path === '/' . $legacy . '.html') {
             $query = trim((string) ($_SERVER['QUERY_STRING'] ?? ''));
-            ve_redirect('/dashboard/' . $target . ($query !== '' ? '?' . $query : ''));
+            ve_redirect('/dashboard/' . $target . ($query !== '' ? '?' . $query : ''), 301);
         }
     }
 
     foreach (VE_SITE_PAGES as $slug => $file) {
-        if ($path === '/' . $slug || $path === '/' . $slug . '.html') {
+        if (ve_is_legacy_site_page_path($path, $slug)) {
+            ve_redirect('/' . $slug, 301);
+        }
+
+        if (ve_is_canonical_site_page_path($path, $slug)) {
             ve_render_file($file);
         }
     }
 
-    if ($path === '/dashboard' || $path === '/dashboard/' || $path === '/dashboard/index.html') {
+    if ($path === '/dashboard/index.html') {
+        ve_redirect('/dashboard', 301);
+    }
+
+    if ($path === '/dashboard' || $path === '/dashboard/') {
         ve_require_auth();
         ve_render_dashboard_file(VE_DASHBOARD_PAGES['']);
     }
 
     if (str_starts_with($path, '/dashboard/')) {
         $slug = trim(substr($path, strlen('/dashboard/')), '/');
-        $slug = preg_replace('/\.html$/', '', $slug ?? '');
+
+        if (preg_match('/^(?<slug>[A-Za-z0-9_-]+)\.html$/', $slug ?? '', $matches) === 1) {
+            if (array_key_exists($matches['slug'], VE_DASHBOARD_PAGES)) {
+                ve_redirect('/dashboard/' . $matches['slug'], 301);
+            }
+        }
 
         if (is_string($slug) && array_key_exists($slug, VE_DASHBOARD_PAGES)) {
             ve_require_auth();

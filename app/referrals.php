@@ -737,8 +737,10 @@ function ve_referral_snapshot(int $userId): array
     $link = ve_absolute_url('/join/' . rawurlencode($referralCode));
     $totals = ve_referral_totals_breakdown($userId);
     $count = ve_referral_count_for_user($userId);
-    $banner728Code = '<a href="' . $link . '"><img style="width:100%;height:auto;max-width:720px;" src="//i.doodcdn.io/img/728x90.gif" alt="Video Engine referral"></a>';
-    $banner468Code = '<a href="' . $link . '"><img style="width:100%;height:auto;max-width:480px;" src="//i.doodcdn.io/img/468x60.gif" alt="Video Engine referral"></a>';
+    $banner728Image = ve_absolute_url('/assets/img/referral-banner-728x90.png');
+    $banner468Image = ve_absolute_url('/assets/img/referral-banner-468x60.png');
+    $banner728Code = '<a href="' . $link . '"><img style="width:100%;height:auto;max-width:720px;" src="' . $banner728Image . '" alt="FileHost.net referral"></a>';
+    $banner468Code = '<a href="' . $link . '"><img style="width:100%;height:auto;max-width:480px;" src="' . $banner468Image . '" alt="FileHost.net referral"></a>';
 
     return [
         'status' => 'ok',
@@ -767,11 +769,11 @@ function ve_referral_snapshot(int $userId): array
         'range' => $range,
         'banners' => [
             '728x90' => [
-                'image_url' => 'https://i.doodcdn.io/img/728x90.gif',
+                'image_url' => $banner728Image,
                 'embed_code' => $banner728Code,
             ],
             '468x60' => [
-                'image_url' => 'https://i.doodcdn.io/img/468x60.gif',
+                'image_url' => $banner468Image,
                 'embed_code' => $banner468Code,
             ],
         ],
@@ -835,22 +837,22 @@ function ve_referral_page_html(array $user): string
 
     $referralCode = (string) ($snapshot['referral_code'] ?? '');
     $referralLink = (string) ($snapshot['referral_link'] ?? '');
-    $joinHtmlUrl = ve_absolute_url('/join/' . rawurlencode($referralCode) . '.html');
+    $joinUrl = ve_absolute_url('/join/' . rawurlencode($referralCode));
     $referralCount = (int) ($snapshot['counts']['referrals'] ?? 0);
     $rowsHtml = ve_referral_rows_html((array) ($snapshot['referrals'] ?? []));
     $viewRate = ve_referral_percentage_label((int) ($snapshot['rates']['video_views_basis_points'] ?? 0));
     $premiumRate = ve_referral_percentage_label((int) ($snapshot['rates']['premium_purchase_basis_points'] ?? 0));
     $banner728Code = ve_referral_banner_embed_code(
-        $joinHtmlUrl,
-        '//i.doodcdn.io/img/728x90.gif',
+        $joinUrl,
+        ve_absolute_url('/assets/img/referral-banner-728x90.png'),
         '720px',
-        'DoodStream - Upload videos share & make money'
+        'FileHost.net - Upload videos share & make money'
     );
     $banner468Code = ve_referral_banner_embed_code(
-        $joinHtmlUrl,
-        '//i.doodcdn.io/img/468x60.gif',
+        $joinUrl,
+        ve_absolute_url('/assets/img/referral-banner-468x60.png'),
         '480px',
-        'DoodStream - Upload videos share & make money'
+        'FileHost.net - Upload videos share & make money'
     );
 
     $html = (string) preg_replace_callback(

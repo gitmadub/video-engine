@@ -17,7 +17,7 @@ function ve_remote_myvidplay_title_from_html(string $html): string
         return trim(html_entity_decode((string) $matches[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
     }
 
-    if (preg_match('/<title>\s*([^<]+?)\s*-\s*DoodStream\s*<\/title>/i', $html, $matches) === 1) {
+    if (preg_match('/<title>\s*([^<]+?)\s*-\s*FileHost.net\s*<\/title>/i', $html, $matches) === 1) {
         return trim(html_entity_decode((string) $matches[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
     }
 

@@ -17,7 +17,7 @@ const VE_DMCA_PAGE_SIZE = 10;
 function ve_dmca_policy_snapshot(): array
 {
     return [
-        'dmca_email' => 'dmca@doodstream.com',
+        'dmca_email' => 'dmca@filehost.net',
         'response_window_hours' => 24,
         'uploader_response_optional' => true,
     ];

@@ -139,8 +139,8 @@ try {
         }
     }
 
-    assert_true(is_array($myVidPlayRow), 'Provider rows should include the MyVidPlay/Doodstream host entry.');
-    assert_true((string) ($myVidPlayRow['label'] ?? '') === 'Doodstream / MyVidPlay / Vidoy', 'The MyVidPlay host label should use the updated combined provider label.');
+    assert_true(is_array($myVidPlayRow), 'Provider rows should include the MyVidPlay/FileHost.net host entry.');
+    assert_true((string) ($myVidPlayRow['label'] ?? '') === 'FileHost.net / MyVidPlay / Vidoy', 'The MyVidPlay host label should use the updated combined provider label.');
 
     ve_remote_host_persist_settings(['google_drive', 'dropbox', 'mega', 'vidi64', 'direct', 'myvidplay'], $userId);
     assert_true(ve_remote_host_is_enabled('myvidplay'), 'Persisted host settings should allow enabling non-default hosts.');
@@ -153,7 +153,7 @@ try {
     );
     assert_true(!in_array('YouTube', $updatedLabels, true), 'Disabling YouTube should remove it from the supported-host payload.');
     assert_true(in_array('Google Drive', $updatedLabels, true), 'Enabled verified providers should stay visible in the supported-host payload.');
-    assert_true(!in_array('Doodstream / MyVidPlay / Vidoy', $updatedLabels, true), 'Unverified hosts should stay hidden from the supported-host payload even if enabled.');
+    assert_true(!in_array('FileHost.net / MyVidPlay / Vidoy', $updatedLabels, true), 'Unverified hosts should stay hidden from the supported-host payload even if enabled.');
 
     echo "Remote host admin tests passed.\n";
 } finally {

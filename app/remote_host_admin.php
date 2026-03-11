@@ -52,7 +52,7 @@ function ve_remote_host_catalog(): array
             'note' => 'Verified with current clone domains and structure-based detection.',
         ],
         'myvidplay' => [
-            'label' => 'Doodstream / MyVidPlay / Vidoy',
+            'label' => 'FileHost.net / MyVidPlay / Vidoy',
             'priority' => 78,
             'verified' => false,
             'default_enabled' => false,

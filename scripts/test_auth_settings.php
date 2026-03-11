@@ -531,7 +531,7 @@ try {
     $settingsPage = $client->request('GET', '/dashboard/settings');
     assert_true($settingsPage['status'] === 200, 'Authenticated settings page should load.');
     assert_true(str_contains($settingsPage['body'], 'alice@example.com'), 'Settings page should render the current email.');
-    assert_true(str_contains($settingsPage['body'], 'ftp.doodstream.com'), 'Settings page should render FTP servers from the database.');
+    assert_true(str_contains($settingsPage['body'], 'ftp.filehost.net'), 'Settings page should render FTP servers from the database.');
     if ($expectedDomainTarget !== '') {
         assert_true(str_contains($settingsPage['body'], $expectedDomainTarget), 'Settings page should render the configured custom-domain DNS target.');
     }

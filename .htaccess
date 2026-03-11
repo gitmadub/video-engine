@@ -4,6 +4,9 @@ RewriteEngine On
 
 RewriteRule ^(?:\.git|docs|resources|tools)(?:/|$) - [F,L,NC]
 RewriteRule ^storage/private(?:/|$) - [F,L,NC]
+RewriteRule ^index\.html$ index.php [L,QSA,NC]
+RewriteRule ^pages/(api-docs|contact|copyright|earn-money|premium|terms-and-conditions)\.html$ index.php [L,QSA,NC]
+RewriteRule ^dashboard/(index|videos|settings|reports|remote-upload|referrals|premium-plans|request-payout|dmca-manager)\.html$ index.php [L,QSA,NC]
 
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d

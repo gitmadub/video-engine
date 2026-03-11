@@ -803,12 +803,12 @@ function ve_seed_ftp_servers(PDO $pdo): void
     }
 
     $servers = [
-        ['ftp.doodstream.com', 'Global', 'WW'],
-        ['ftp-uk-eri-1.doodstream.com', 'United Kingdom (Erith)', 'UK'],
-        ['ftp-fr-sbg-1.doodstream.com', 'France (Strasbourg)', 'FR'],
-        ['ftp-fr-gra-1.doodstream.com', 'France (Gravelines)', 'FR'],
-        ['ftp-fr-rbx-1.doodstream.com', 'France (Roubaix)', 'FR'],
-        ['ftp-pol-waw-1.doodstream.com', 'Poland (Warsaw)', 'PL'],
+        ['ftp.filehost.net', 'Global', 'WW'],
+        ['ftp-uk-eri-1.filehost.net', 'United Kingdom (Erith)', 'UK'],
+        ['ftp-fr-sbg-1.filehost.net', 'France (Strasbourg)', 'FR'],
+        ['ftp-fr-gra-1.filehost.net', 'France (Gravelines)', 'FR'],
+        ['ftp-fr-rbx-1.filehost.net', 'France (Roubaix)', 'FR'],
+        ['ftp-pol-waw-1.filehost.net', 'Poland (Warsaw)', 'PL'],
     ];
 
     $stmt = $pdo->prepare('INSERT INTO ftp_servers (hostname, location_name, flag_code, status) VALUES (:hostname, :location_name, :flag_code, :status)');
@@ -4325,6 +4325,24 @@ function ve_runtime_html_transform(string $html, string $relativePath = ''): str
     $runtimeScript = ve_runtime_script_tag();
     $mainScriptUrl = ve_h(ve_url('/assets/js/main.js'));
     $legacyAdapterTag = '<script src="' . ve_h(ve_url('/assets/js/legacy_api_adapter.js')) . '"></script>';
+    $canonicalLinkReplacements = [
+        'href="../index.html"' => 'href="' . ve_url('/') . '"',
+        "href='../index.html'" => "href='" . ve_url('/') . "'",
+        'action="../index.html"' => 'action="' . ve_url('/') . '"',
+        "action='../index.html'" => "action='" . ve_url('/') . "'",
+        'href="api-docs.html"' => 'href="' . ve_url('/api-docs') . '"',
+        "href='api-docs.html'" => "href='" . ve_url('/api-docs') . "'",
+        'href="contact.html"' => 'href="' . ve_url('/contact') . '"',
+        "href='contact.html'" => "href='" . ve_url('/contact') . "'",
+        'href="copyright.html"' => 'href="' . ve_url('/copyright') . '"',
+        "href='copyright.html'" => "href='" . ve_url('/copyright') . "'",
+        'href="earn-money.html"' => 'href="' . ve_url('/earn-money') . '"',
+        "href='earn-money.html'" => "href='" . ve_url('/earn-money') . "'",
+        'href="premium.html"' => 'href="' . ve_url('/premium') . '"',
+        "href='premium.html'" => "href='" . ve_url('/premium') . "'",
+        'href="terms-and-conditions.html"' => 'href="' . ve_url('/terms-and-conditions') . '"',
+        "href='terms-and-conditions.html'" => "href='" . ve_url('/terms-and-conditions') . "'",
+    ];
 
     if (str_contains($html, '</head>')) {
         $html = str_replace('</head>', $runtimeScript . '</head>', $html);
@@ -4387,6 +4405,13 @@ function ve_runtime_html_transform(string $html, string $relativePath = ''): str
     if ($relativePath === 'dashboard/request-payout.html') {
         $html = str_replace('<form method="POST">', '<form method="POST" action="/api/payouts/request">', $html);
     }
+
+    $html = strtr($html, $canonicalLinkReplacements);
+    $html = (string) preg_replace(
+        '#<li>\s*<a[^>]*href=["\']https://help\.filehost\.net/?["\'][^>]*>\s*Help center\s*</a>\s*</li>#i',
+        '',
+        $html
+    );
 
     return $html;
 }
