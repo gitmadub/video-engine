@@ -319,7 +319,7 @@ function ve_video_upload_limit_bytes(): int
     return min($limits);
 }
 
-function ve_video_default_storage_relative_dir(string $publicId): string
+function ve_video_legacy_storage_relative_dir(string $publicId): string
 {
     $publicId = trim($publicId);
 
@@ -335,16 +335,149 @@ function ve_video_default_storage_relative_dir(string $publicId): string
     return implode('/', $segments);
 }
 
+function ve_video_default_storage_relative_dir(string $publicId, ?string $createdAt = null): string
+{
+    $publicId = trim($publicId);
+
+    if ($publicId === '') {
+        return '';
+    }
+
+    $timestamp = $createdAt !== null && trim($createdAt) !== ''
+        ? (strtotime(trim($createdAt) . ' UTC') ?: ve_timestamp())
+        : ve_timestamp();
+
+    return gmdate('Y/m/d', $timestamp) . '/' . $publicId;
+}
+
+function ve_video_storage_record_meta(string $publicId): ?array
+{
+    $publicId = trim($publicId);
+
+    if ($publicId === '') {
+        return null;
+    }
+
+    static $cache = [];
+
+    if (array_key_exists($publicId, $cache)) {
+        return is_array($cache[$publicId]) ? $cache[$publicId] : null;
+    }
+
+    $statement = ve_db()->prepare(
+        'SELECT id, public_id, created_at, storage_volume_id, storage_relative_dir
+         FROM videos
+         WHERE public_id = :public_id
+         LIMIT 1'
+    );
+    $statement->execute([':public_id' => $publicId]);
+    $row = $statement->fetch(PDO::FETCH_ASSOC);
+    $cache[$publicId] = is_array($row) ? $row : null;
+
+    return is_array($cache[$publicId]) ? $cache[$publicId] : null;
+}
+
+function ve_video_storage_relative_dir_for_video(?array $video, string $publicId = ''): string
+{
+    $publicId = $publicId !== '' ? trim($publicId) : trim((string) ($video['public_id'] ?? ''));
+
+    if ($publicId === '') {
+        return '';
+    }
+
+    $storedRelativeDir = trim((string) ($video['storage_relative_dir'] ?? ''));
+
+    if ($storedRelativeDir !== '') {
+        return $storedRelativeDir;
+    }
+
+    $createdAt = trim((string) ($video['created_at'] ?? ''));
+
+    if ($createdAt !== '') {
+        return ve_video_default_storage_relative_dir($publicId, $createdAt);
+    }
+
+    $record = ve_video_storage_record_meta($publicId);
+
+    if (is_array($record)) {
+        $recordRelativeDir = trim((string) ($record['storage_relative_dir'] ?? ''));
+
+        if ($recordRelativeDir !== '') {
+            return $recordRelativeDir;
+        }
+
+        $recordCreatedAt = trim((string) ($record['created_at'] ?? ''));
+
+        if ($recordCreatedAt !== '') {
+            return ve_video_default_storage_relative_dir($publicId, $recordCreatedAt);
+        }
+    }
+
+    return ve_video_default_storage_relative_dir($publicId);
+}
+
 function ve_video_local_library_directory(string $publicId): string
 {
     return ve_video_storage_path('library', $publicId);
 }
 
-function ve_video_library_directory(string $publicId): string
+function ve_video_library_directory_for_video(array $video): string
 {
+    $publicId = trim((string) ($video['public_id'] ?? ''));
+
+    if ($publicId === '') {
+        return ve_video_library_directory('');
+    }
+
     $assignment = [
         'root' => ve_video_storage_path('library'),
-        'relative_dir' => ve_video_default_storage_relative_dir($publicId),
+        'relative_dir' => ve_video_storage_relative_dir_for_video($video, $publicId),
+    ];
+    $legacyDirectory = ve_video_local_library_directory($publicId);
+
+    if (function_exists('ve_admin_storage_box_assignment_for_video')) {
+        try {
+            $resolved = ve_admin_storage_box_assignment_for_video($video, $publicId);
+
+            if (is_array($resolved)) {
+                $assignment['root'] = trim((string) ($resolved['root'] ?? $assignment['root']));
+                $assignment['relative_dir'] = trim((string) ($resolved['relative_dir'] ?? $assignment['relative_dir']));
+            }
+        } catch (Throwable) {
+            // Fall back to the local library path when admin storage helpers are unavailable.
+        }
+    }
+
+    $root = trim((string) ($assignment['root'] ?? ''));
+    $relativeDir = trim((string) ($assignment['relative_dir'] ?? ''));
+
+    if ($root === '') {
+        $root = ve_video_storage_path('library');
+    }
+
+    if ($relativeDir === '') {
+        $relativeDir = ve_video_storage_relative_dir_for_video($video, $publicId);
+    }
+
+    $directory = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relativeDir);
+    $parentDirectory = dirname($directory);
+
+    if (is_dir($legacyDirectory) && !is_dir($parentDirectory)) {
+        return $legacyDirectory;
+    }
+
+    ve_ensure_directory($directory);
+    ve_video_normalize_library_directory($directory);
+
+    return $directory;
+}
+
+function ve_video_library_directory(string $publicId): string
+{
+    $publicId = trim($publicId);
+    $assignment = [
+        'root' => ve_video_storage_path('library'),
+        'relative_dir' => ve_video_storage_relative_dir_for_video(null, $publicId),
     ];
     $legacyDirectory = ve_video_local_library_directory($publicId);
 
@@ -369,7 +502,7 @@ function ve_video_library_directory(string $publicId): string
     }
 
     if ($relativeDir === '') {
-        $relativeDir = ve_video_default_storage_relative_dir($publicId);
+        $relativeDir = ve_video_storage_relative_dir_for_video(null, $publicId);
     }
 
     $directory = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relativeDir);
@@ -389,62 +522,62 @@ function ve_video_source_path(array $video): string
 {
     $extension = strtolower((string) ($video['source_extension'] ?? 'mp4'));
 
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'source.' . $extension;
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'source.' . $extension;
 }
 
 function ve_video_playlist_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'stream.m3u8';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'stream.m3u8';
 }
 
 function ve_video_key_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'stream.key';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'stream.key';
 }
 
 function ve_video_key_info_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'stream.keyinfo';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'stream.keyinfo';
 }
 
 function ve_video_segment_pattern_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'part_%05d.bin';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'part_%05d.bin';
 }
 
 function ve_video_poster_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'poster.jpg';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'poster.jpg';
 }
 
 function ve_video_preview_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'preview.jpg';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'preview.jpg';
 }
 
 function ve_video_preview_sprite_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'preview-sprite.jpg';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'preview-sprite.jpg';
 }
 
 function ve_video_preview_vtt_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'preview.vtt';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'preview.vtt';
 }
 
 function ve_video_download_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'download.mp4';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'download.mp4';
 }
 
 function ve_video_download_lock_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'download.lock';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'download.lock';
 }
 
 function ve_video_download_playlist_path(array $video): string
 {
-    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'download-build.m3u8';
+    return ve_video_library_directory_for_video($video) . DIRECTORY_SEPARATOR . 'download-build.m3u8';
 }
 
 function ve_video_download_session_hash(): string
@@ -837,7 +970,7 @@ function ve_video_prepare_download_path(array $video): ?string
 
     $buildPlaylistPath = ve_video_download_playlist_path($video);
     $segmentAliasPaths = [];
-    $directory = ve_video_library_directory((string) ($video['public_id'] ?? ''));
+    $directory = ve_video_library_directory_for_video($video);
 
     try {
         if (!flock($lockHandle, LOCK_EX)) {
@@ -1914,7 +2047,7 @@ function ve_video_insert_queued_record(int $userId, array $validated, string $ti
     $now = ve_now();
     $folderId = ve_video_normalize_folder_id($userId, $folderId);
     $storageVolumeId = 0;
-    $storageRelativeDir = ve_video_default_storage_relative_dir($publicId);
+    $storageRelativeDir = ve_video_default_storage_relative_dir($publicId, $now);
 
     if (function_exists('ve_admin_storage_box_pick_for_new_video')) {
         try {
@@ -1986,7 +2119,7 @@ function ve_video_queue_local_source(
         throw new RuntimeException('The video record could not be created.');
     }
 
-    $directory = ve_video_library_directory((string) $video['public_id']);
+    $directory = ve_video_library_directory_for_video($video);
     ve_ensure_directory($directory);
 
     $sourcePath = $directory . DIRECTORY_SEPARATOR . 'source.' . (string) $validated['extension'];
@@ -2142,7 +2275,7 @@ function ve_handle_video_delete_api(string $publicId): void
         ], 404);
     }
 
-    $directory = ve_video_library_directory((string) $video['public_id']);
+    $directory = ve_video_library_directory_for_video($video);
     ve_video_delete_directory($directory);
 
     $stmt = ve_db()->prepare('DELETE FROM videos WHERE id = :id');
@@ -2210,17 +2343,111 @@ function ve_video_fetch_user_videos_by_ids(int $userId, array $videoIds): array
 function ve_video_delete_video_rows(array $videos): int
 {
     $videoIds = [];
+    $publicIds = [];
+    $remoteUploadIds = [];
 
     foreach ($videos as $video) {
         if (!is_array($video)) {
             continue;
         }
 
-        $videoIds[] = (int) ($video['id'] ?? 0);
-        ve_video_delete_directory(ve_video_library_directory((string) ($video['public_id'] ?? '')));
+        $videoId = (int) ($video['id'] ?? 0);
+        $publicId = trim((string) ($video['public_id'] ?? ''));
+
+        if ($videoId > 0) {
+            $videoIds[] = $videoId;
+        }
+
+        if ($publicId !== '') {
+            $publicIds[] = $publicId;
+        }
+
+        ve_video_delete_directory(ve_video_library_directory_for_video($video));
     }
 
     $videoIds = ve_video_legacy_normalize_id_list($videoIds);
+    $publicIds = array_values(array_unique(array_filter($publicIds, static fn ($value): bool => is_string($value) && trim($value) !== '')));
+
+    if ($videoIds === [] && $publicIds === []) {
+        return 0;
+    }
+
+    if ($videoIds !== []) {
+        $placeholders = implode(', ', array_fill(0, count($videoIds), '?'));
+
+        $remoteStatement = ve_db()->prepare(
+            'SELECT id
+             FROM remote_uploads
+             WHERE video_id IN (' . $placeholders . ')
+               AND deleted_at IS NULL'
+        );
+        $remoteStatement->execute($videoIds);
+
+        foreach ($remoteStatement->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $remoteUploadId = (int) ($row['id'] ?? 0);
+
+            if ($remoteUploadId > 0) {
+                $remoteUploadIds[] = $remoteUploadId;
+            }
+        }
+
+        ve_db()->prepare(
+            'DELETE FROM processing_node_jobs
+             WHERE video_id IN (' . $placeholders . ')'
+        )->execute($videoIds);
+    }
+
+    if ($publicIds !== []) {
+        $placeholders = implode(', ', array_fill(0, count($publicIds), '?'));
+
+        $remoteByPublicIdStatement = ve_db()->prepare(
+            'SELECT id
+             FROM remote_uploads
+             WHERE video_public_id IN (' . $placeholders . ')
+               AND deleted_at IS NULL'
+        );
+        $remoteByPublicIdStatement->execute($publicIds);
+
+        foreach ($remoteByPublicIdStatement->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $remoteUploadId = (int) ($row['id'] ?? 0);
+
+            if ($remoteUploadId > 0) {
+                $remoteUploadIds[] = $remoteUploadId;
+            }
+        }
+
+        ve_db()->prepare(
+            'DELETE FROM processing_node_jobs
+             WHERE video_public_id IN (' . $placeholders . ')'
+        )->execute($publicIds);
+    }
+
+    $remoteUploadIds = ve_video_legacy_normalize_id_list($remoteUploadIds);
+
+    if ($remoteUploadIds !== []) {
+        $placeholders = implode(', ', array_fill(0, count($remoteUploadIds), '?'));
+        $params = array_merge([ve_now(), ve_now()], $remoteUploadIds);
+        ve_db()->prepare(
+            'UPDATE remote_uploads
+             SET deleted_at = COALESCE(deleted_at, ?),
+                 updated_at = ?,
+                 video_id = NULL,
+                 video_public_id = ""
+             WHERE id IN (' . $placeholders . ')'
+        )->execute($params);
+
+        foreach ($remoteUploadIds as $remoteUploadId) {
+            ve_remote_cleanup_job_files($remoteUploadId);
+        }
+    }
 
     if ($videoIds === []) {
         return 0;
@@ -3339,7 +3566,7 @@ function ve_video_process_pending_jobs(int $maxJobs = 0): int
     $processed = 0;
 
     try {
-        ve_video_cleanup_inactive_zero_view_videos();
+        ve_video_cleanup_inactive_videos();
         ve_video_requeue_stale_jobs();
 
         while ($maxJobs === 0 || $processed < $maxJobs) {
@@ -3365,31 +3592,40 @@ function ve_video_inactive_zero_view_retention_days(): int
     return max(1, (int) (getenv('VE_VIDEO_ZERO_VIEW_RETENTION_DAYS') ?: 30));
 }
 
-function ve_video_cleanup_inactive_zero_view_videos(int $limit = 100): int
+function ve_video_inactive_retention_days(): int
+{
+    return max(1, (int) (getenv('VE_VIDEO_INACTIVE_RETENTION_DAYS') ?: ve_video_inactive_zero_view_retention_days()));
+}
+
+function ve_video_cleanup_inactive_videos(int $limit = 100): int
 {
     $limit = max(1, $limit);
-    $retentionDays = ve_video_inactive_zero_view_retention_days();
-    $cutoff = gmdate('Y-m-d H:i:s', ve_timestamp() - ($retentionDays * 86400));
+    $retentionDays = ve_video_inactive_retention_days();
+    $cutoffDate = gmdate('Y-m-d', ve_timestamp() - ($retentionDays * 86400));
     $sql = <<<SQL
-SELECT videos.*
+SELECT videos.*,
+       COALESCE(stats.last_stat_date, substr(COALESCE(videos.updated_at, videos.ready_at, videos.created_at), 1, 10)) AS last_activity_date,
+       COALESCE(stats.total_views, 0) AS total_views
 FROM videos
 LEFT JOIN (
-    SELECT video_id, COALESCE(SUM(views), 0) AS total_views
+    SELECT video_id,
+           MAX(stat_date) AS last_stat_date,
+           COALESCE(SUM(views), 0) AS total_views
     FROM video_stats_daily
     GROUP BY video_id
 ) AS stats ON stats.video_id = videos.id
 WHERE videos.deleted_at IS NULL
   AND videos.status = :status
-  AND COALESCE(videos.ready_at, videos.created_at) <= :cutoff
-  AND COALESCE(stats.total_views, 0) = 0
-ORDER BY COALESCE(videos.ready_at, videos.created_at) ASC
+  AND COALESCE(stats.last_stat_date, substr(COALESCE(videos.updated_at, videos.ready_at, videos.created_at), 1, 10)) <= :cutoff_date
+ORDER BY COALESCE(stats.last_stat_date, substr(COALESCE(videos.updated_at, videos.ready_at, videos.created_at), 1, 10)) ASC,
+         videos.id ASC
 LIMIT {$limit}
 SQL;
 
     $stmt = ve_db()->prepare($sql);
     $stmt->execute([
         ':status' => VE_VIDEO_STATUS_READY,
-        ':cutoff' => $cutoff,
+        ':cutoff_date' => $cutoffDate,
     ]);
 
     $videos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -3405,12 +3641,14 @@ SQL;
 
         $userId = (int) ($video['user_id'] ?? 0);
         $title = trim((string) ($video['title'] ?? 'Untitled video'));
+        $lastActivityDate = trim((string) ($video['last_activity_date'] ?? ''));
 
         if ($userId > 0) {
             ve_add_notification(
                 $userId,
                 'Inactive video deleted',
-                '"' . $title . '" was deleted automatically after ' . $retentionDays . ' days without any views.'
+                '"' . $title . '" was deleted automatically after ' . $retentionDays . ' days without any activity'
+                . ($lastActivityDate !== '' ? ' since ' . $lastActivityDate : '') . '.'
             );
         }
     }
@@ -3418,9 +3656,14 @@ SQL;
     return ve_video_delete_video_rows($videos);
 }
 
+function ve_video_cleanup_inactive_zero_view_videos(int $limit = 100): int
+{
+    return ve_video_cleanup_inactive_videos($limit);
+}
+
 function ve_video_cleanup_output_files(array $video): void
 {
-    $directory = ve_video_library_directory((string) $video['public_id']);
+    $directory = ve_video_library_directory_for_video($video);
     $items = scandir($directory);
 
     if (!is_array($items)) {
@@ -3937,7 +4180,7 @@ function ve_video_process_job(int $videoId): void
         return;
     }
 
-    $directory = ve_video_library_directory((string) $video['public_id']);
+    $directory = ve_video_library_directory_for_video($video);
     $sourcePath = ve_video_source_path($video);
 
     if (!is_file($sourcePath)) {
@@ -4209,7 +4452,7 @@ function ve_video_process_job_on_processing_node(array $video, string $sourcePat
             throw new RuntimeException('Unable to download encoded artifacts from the processing node. ' . trim($downloadOutput));
         }
 
-        ve_video_extract_tar_archive($localArchive, ve_video_library_directory((string) ($video['public_id'] ?? '')));
+        ve_video_extract_tar_archive($localArchive, ve_video_library_directory_for_video($video));
         @unlink($localArchive);
         ve_admin_processing_node_run_remote($node, ve_admin_processing_node_remote_script_path($node) . ' cleanup --workdir ' . escapeshellarg($remoteWorkdir), 300);
 

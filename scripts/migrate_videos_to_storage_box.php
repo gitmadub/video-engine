@@ -71,8 +71,31 @@ function migrate_copy_tree(string $source, string $target): void
     }
 }
 
+function migrate_resolve_existing_directory(array $video, string $targetRoot): string
+{
+    $publicId = trim((string) ($video['public_id'] ?? ''));
+    $storedRelativeDir = trim((string) ($video['storage_relative_dir'] ?? ''));
+    $legacyDirectory = ve_video_local_library_directory($publicId);
+    $candidates = [];
+
+    if ($storedRelativeDir !== '') {
+        $candidates[] = rtrim($targetRoot, '/\\') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $storedRelativeDir);
+    }
+
+    $candidates[] = $legacyDirectory;
+    $candidates[] = rtrim($targetRoot, '/\\') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, ve_video_legacy_storage_relative_dir($publicId));
+
+    foreach ($candidates as $candidate) {
+        if ($candidate !== '' && is_dir($candidate)) {
+            return $candidate;
+        }
+    }
+
+    return '';
+}
+
 $videos = ve_db()->query(
-    'SELECT id, public_id, storage_volume_id, storage_relative_dir
+    'SELECT id, public_id, storage_volume_id, storage_relative_dir, created_at
      FROM videos
      WHERE deleted_at IS NULL
      ORDER BY id ASC'
@@ -95,23 +118,23 @@ foreach ($videos as $video) {
         continue;
     }
 
-    $relativeDir = ve_video_default_storage_relative_dir($publicId);
-    $legacyDirectory = ve_video_local_library_directory($publicId);
+    $relativeDir = ve_video_default_storage_relative_dir($publicId, (string) ($video['created_at'] ?? ''));
     $targetDirectory = rtrim($targetRoot, '/\\') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativeDir);
+    $sourceDirectory = migrate_resolve_existing_directory($video, $targetRoot);
 
     if ((int) ($video['storage_volume_id'] ?? 0) === (int) ($volume['id'] ?? 0)
         && trim((string) ($video['storage_relative_dir'] ?? '')) === $relativeDir
         && is_dir($targetDirectory)
-        && !is_dir($legacyDirectory)) {
+        && ($sourceDirectory === '' || realpath($sourceDirectory) === realpath($targetDirectory))) {
         $skipped++;
         continue;
     }
 
-    if (is_dir($legacyDirectory)) {
-        migrate_copy_tree($legacyDirectory, $targetDirectory);
+    if ($sourceDirectory !== '' && realpath($sourceDirectory) !== realpath($targetDirectory)) {
+        migrate_copy_tree($sourceDirectory, $targetDirectory);
 
         if (!$keepSource) {
-            ve_video_delete_directory($legacyDirectory);
+            ve_video_delete_directory($sourceDirectory);
         }
 
         $migrated++;

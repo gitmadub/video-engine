@@ -1268,7 +1268,7 @@ function ve_admin_backend_view_definitions(): array
             ['slug' => 'app-permissions', 'label' => 'Permissions', 'icon' => 'fa-key', 'kind' => 'sidebar'],
         ],
         'infrastructure' => [
-            ['slug' => 'infra-nodes', 'label' => 'Nodes', 'icon' => 'fa-server', 'kind' => 'sidebar'],
+            ['slug' => 'infra-nodes', 'label' => 'Overview', 'icon' => 'fa-server', 'kind' => 'sidebar'],
             ['slug' => 'infra-processing', 'label' => 'Processing nodes', 'icon' => 'fa-microchip', 'kind' => 'sidebar'],
             ['slug' => 'infra-storage-boxes', 'label' => 'Storage boxes', 'icon' => 'fa-box-open', 'kind' => 'sidebar'],
             ['slug' => 'infra-volumes', 'label' => 'Volumes', 'icon' => 'fa-hdd', 'kind' => 'sidebar'],
@@ -2063,6 +2063,8 @@ function ve_admin_list_custom_domains(string $status = '', string $query = '', i
 
 function ve_admin_infrastructure_snapshot(): array
 {
+    ve_admin_cleanup_stale_processing_jobs();
+
     return [
         'storage_nodes' => ve_db()->query('SELECT * FROM storage_nodes ORDER BY hostname ASC')->fetchAll() ?: [],
         'storage_volumes' => ve_db()->query('SELECT storage_volumes.*, storage_nodes.hostname FROM storage_volumes INNER JOIN storage_nodes ON storage_nodes.id = storage_volumes.storage_node_id ORDER BY storage_nodes.hostname ASC, storage_volumes.code ASC')->fetchAll() ?: [],
@@ -2071,14 +2073,31 @@ function ve_admin_infrastructure_snapshot(): array
         'maintenance_windows' => ve_db()->query('SELECT storage_maintenance_windows.*, storage_nodes.hostname FROM storage_maintenance_windows INNER JOIN storage_nodes ON storage_nodes.id = storage_maintenance_windows.storage_node_id ORDER BY storage_maintenance_windows.starts_at DESC')->fetchAll() ?: [],
         'processing_nodes' => ve_db()->query('SELECT * FROM processing_nodes ORDER BY domain ASC, id DESC')->fetchAll() ?: [],
         'processing_jobs' => ve_db()->query(
-            'SELECT processing_node_jobs.*, processing_nodes.domain AS node_domain, users.username
+            'SELECT processing_node_jobs.*, processing_nodes.domain AS node_domain, videos.title AS video_title, videos.user_id AS video_owner_id, users.username
              FROM processing_node_jobs
              INNER JOIN processing_nodes ON processing_nodes.id = processing_node_jobs.processing_node_id
-             LEFT JOIN users ON users.id = processing_node_jobs.user_id
+             LEFT JOIN videos ON videos.public_id = processing_node_jobs.video_public_id
+                AND videos.deleted_at IS NULL
+             LEFT JOIN users ON users.id = COALESCE(processing_node_jobs.user_id, videos.user_id)
              ORDER BY processing_node_jobs.updated_at DESC, processing_node_jobs.id DESC
              LIMIT 50'
         )->fetchAll() ?: [],
     ];
+}
+
+function ve_admin_cleanup_stale_processing_jobs(): void
+{
+    ve_db()->exec(
+        'DELETE FROM processing_node_jobs
+         WHERE video_public_id <> ""
+           AND status <> "running"
+           AND NOT EXISTS (
+                SELECT 1
+                FROM videos
+                WHERE videos.public_id = processing_node_jobs.video_public_id
+                  AND videos.deleted_at IS NULL
+           )'
+    );
 }
 
 function ve_admin_processing_node_install_path(): string
@@ -2088,7 +2107,104 @@ function ve_admin_processing_node_install_path(): string
 
 function ve_admin_processing_node_agent_version(): string
 {
-    return '1.0.0';
+    return '1.1.0';
+}
+
+function ve_admin_parse_top_process_output(string $output, int $limit = 8): array
+{
+    $rows = [];
+
+    foreach (preg_split('/\r\n|\r|\n/', trim($output)) ?: [] as $line) {
+        $line = trim((string) $line);
+
+        if ($line === '') {
+            continue;
+        }
+
+        $parts = preg_split('/\s+/', $line, 8);
+
+        if (!is_array($parts) || count($parts) < 8) {
+            continue;
+        }
+
+        $rows[] = [
+            'pid' => (int) $parts[0],
+            'cpu_percent' => (float) $parts[1],
+            'memory_percent' => (float) $parts[2],
+            'rss_kb' => (int) $parts[3],
+            'elapsed_seconds' => (int) $parts[4],
+            'user' => (string) $parts[5],
+            'command' => (string) $parts[6],
+            'args' => trim((string) $parts[7]),
+        ];
+
+        if (count($rows) >= $limit) {
+            break;
+        }
+    }
+
+    return $rows;
+}
+
+function ve_admin_top_process_table_rows(array $processes): array
+{
+    $rows = [];
+
+    foreach ($processes as $process) {
+        if (!is_array($process)) {
+            continue;
+        }
+
+        $rows[] = ['cells' => [
+            ve_admin_text_cell((string) ($process['pid'] ?? 0)),
+            ve_admin_text_cell(ve_admin_number_label((float) ($process['cpu_percent'] ?? 0), 1) . '%'),
+            ve_admin_text_cell(ve_admin_number_label((float) ($process['memory_percent'] ?? 0), 1) . '%'),
+            ve_admin_text_cell(ve_human_bytes(max(0, (int) ($process['rss_kb'] ?? 0)) * 1024)),
+            ve_admin_text_cell(ve_admin_duration_compact_label((int) ($process['elapsed_seconds'] ?? 0))),
+            ve_admin_text_cell((string) ($process['user'] ?? '')),
+            ve_admin_text_cell((string) ($process['command'] ?? ''), (string) ($process['args'] ?? '')),
+        ]];
+    }
+
+    return $rows;
+}
+
+function ve_admin_local_top_processes(int $limit = 8): array
+{
+    if (DIRECTORY_SEPARATOR === '\\') {
+        return [];
+    }
+
+    [$exitCode, $output] = ve_video_run_command([
+        'bash',
+        '-lc',
+        'ps -ww -eo pid=,pcpu=,pmem=,rss=,etimes=,user=,comm=,args= --sort=-pcpu | head -n ' . max(1, $limit),
+    ]);
+
+    if ($exitCode !== 0) {
+        return [];
+    }
+
+    return ve_admin_parse_top_process_output($output, $limit);
+}
+
+function ve_admin_processing_node_top_processes(array $node, int $limit = 8): array
+{
+    try {
+        [$exitCode, $output] = ve_admin_processing_node_run_remote(
+            $node,
+            'ps -ww -eo pid=,pcpu=,pmem=,rss=,etimes=,user=,comm=,args= --sort=-pcpu | head -n ' . max(1, $limit),
+            30
+        );
+    } catch (Throwable) {
+        return [];
+    }
+
+    if ($exitCode !== 0) {
+        return [];
+    }
+
+    return ve_admin_parse_top_process_output($output, $limit);
 }
 
 function ve_admin_processing_node_agent_local_path(): string
@@ -2609,8 +2725,8 @@ function ve_admin_processing_node_history_points(array $samples, int $limit = 24
         $capturedAt = (string) ($sample['captured_at'] ?? ve_now());
         $timestamp = strtotime($capturedAt . ' UTC') ?: ve_timestamp();
         $points[] = [
-            'date' => gmdate('M j, H:i', $timestamp),
-            'label' => gmdate('H:i', $timestamp),
+            'date' => gmdate('M j, H:i:s', $timestamp),
+            'label' => gmdate('H:i:s', $timestamp),
             'cpu_percent' => (int) round((float) ($sample['cpu_percent'] ?? 0)),
             'memory_percent' => (int) round((float) ($sample['memory_percent'] ?? 0)),
             'disk_percent' => (int) round((float) ($sample['disk_percent'] ?? 0)),
@@ -2749,7 +2865,7 @@ function ve_admin_upsert_processing_node(array $payload, int $actorUserId): int
     $before = $id > 0 ? ve_admin_processing_node_load($id) : null;
     $domain = strtolower(trim((string) ($payload['domain'] ?? '')));
     $ipAddress = trim((string) ($payload['ip_address'] ?? ''));
-    $sshUsername = trim((string) ($payload['ssh_username'] ?? 'root'));
+    $sshUsername = trim((string) ($payload['ssh_username'] ?? ($before['ssh_username'] ?? '')));
     $sshPassword = trim((string) ($payload['ssh_password'] ?? ''));
 
     if ($id <= 0 && $domain !== '') {
@@ -2846,10 +2962,14 @@ function ve_admin_delete_processing_node(int $nodeId, int $actorUserId): void
 
 function ve_admin_processing_node_recent_jobs(int $nodeId, int $limit = 12): array
 {
+    ve_admin_cleanup_stale_processing_jobs();
+
     $statement = ve_db()->prepare(
-        'SELECT processing_node_jobs.*, users.username
+        'SELECT processing_node_jobs.*, videos.title AS video_title, videos.user_id AS video_owner_id, users.username
          FROM processing_node_jobs
-         LEFT JOIN users ON users.id = processing_node_jobs.user_id
+         LEFT JOIN videos ON videos.public_id = processing_node_jobs.video_public_id
+            AND videos.deleted_at IS NULL
+         LEFT JOIN users ON users.id = COALESCE(processing_node_jobs.user_id, videos.user_id)
          WHERE processing_node_id = :processing_node_id
          ORDER BY updated_at DESC, id DESC
          LIMIT :limit'
@@ -3020,10 +3140,12 @@ function ve_admin_storage_box_assignment_for_video(?array $video = null, ?string
 {
     $volume = null;
     $relativeDir = '';
+    $createdAt = '';
 
     if (is_array($video)) {
         $volumeId = (int) ($video['storage_volume_id'] ?? 0);
         $relativeDir = trim((string) ($video['storage_relative_dir'] ?? ''));
+        $createdAt = trim((string) ($video['created_at'] ?? ''));
 
         if ($volumeId > 0) {
             $volume = ve_admin_storage_box_load($volumeId);
@@ -3040,7 +3162,7 @@ function ve_admin_storage_box_assignment_for_video(?array $video = null, ?string
         }
 
         $statement = ve_db()->prepare(
-            'SELECT storage_volume_id, storage_relative_dir
+            'SELECT storage_volume_id, storage_relative_dir, created_at
              FROM videos
              WHERE public_id = :public_id
              LIMIT 1'
@@ -3051,6 +3173,7 @@ function ve_admin_storage_box_assignment_for_video(?array $video = null, ?string
         if (is_array($row) && (int) ($row['storage_volume_id'] ?? 0) > 0) {
             $volume = ve_admin_storage_box_load((int) ($row['storage_volume_id'] ?? 0));
             $relativeDir = trim((string) ($row['storage_relative_dir'] ?? ''));
+            $createdAt = trim((string) ($row['created_at'] ?? ''));
         }
     }
 
@@ -3064,6 +3187,10 @@ function ve_admin_storage_box_assignment_for_video(?array $video = null, ?string
     }
 
     $resolvedPublicId = is_string($publicId) ? $publicId : '';
+    if ($relativeDir === '' && function_exists('ve_video_default_storage_relative_dir')) {
+        $relativeDir = ve_video_default_storage_relative_dir($resolvedPublicId, $createdAt !== '' ? $createdAt : null);
+    }
+
     $relativeDir = $relativeDir !== '' ? $relativeDir : $resolvedPublicId;
 
     return [
@@ -3151,7 +3278,7 @@ function ve_admin_upsert_storage_box(array $payload, int $actorUserId): int
     $boxPassword = trim((string) ($payload['storage_box_password'] ?? ''));
     $deliveryDomain = strtolower(trim((string) ($payload['delivery_domain'] ?? '')));
     $deliveryIp = trim((string) ($payload['delivery_ip_address'] ?? ''));
-    $deliveryUser = trim((string) ($payload['delivery_ssh_username'] ?? 'root'));
+    $deliveryUser = trim((string) ($payload['delivery_ssh_username'] ?? ''));
     $deliveryPassword = trim((string) ($payload['delivery_ssh_password'] ?? ''));
 
     if ($host === '' || !ve_is_valid_domain($host)) {
@@ -4792,7 +4919,7 @@ function ve_admin_dashboard_shell(
         }
         .admin-shell .admin-chart-svg {
             width: 100%;
-            height: clamp(240px, 26vw, 300px);
+            height: clamp(220px, 24vw, 280px);
             display: block;
         }
         .admin-shell .admin-chart-hit {
@@ -6640,7 +6767,7 @@ function ve_admin_live_host_sample(?array $previousSample = null): array
     return $sample;
 }
 
-function ve_admin_live_host_telemetry(int $maxSamples = 48, int $minSampleSpacing = 10): array
+function ve_admin_live_host_telemetry(int $maxSamples = 60, int $minSampleSpacing = 10): array
 {
     $cache = ve_admin_read_runtime_cache('admin-live-telemetry');
     $samples = array_values(array_filter((array) ($cache['samples'] ?? []), 'is_array'));
@@ -6673,8 +6800,8 @@ function ve_admin_live_history_points(array $samples, int $limit = 20): array
         $capturedAt = (string) ($sample['captured_at'] ?? ve_now());
         $timestamp = strtotime($capturedAt . ' UTC') ?: ve_timestamp();
         $points[] = [
-            'date' => gmdate('M j, H:i', $timestamp),
-            'label' => gmdate('H:i', $timestamp),
+            'date' => gmdate('M j, H:i:s', $timestamp),
+            'label' => gmdate('H:i:s', $timestamp),
             'cpu_percent' => (int) round((float) ($sample['cpu_percent'] ?? 0)),
             'memory_percent' => (int) round((float) ($sample['memory_percent'] ?? 0)),
             'network_total_rate_bytes' => max(0, (int) ($sample['network_rx_rate_bytes'] ?? 0) + (int) ($sample['network_tx_rate_bytes'] ?? 0)),
@@ -9988,7 +10115,7 @@ function ve_admin_backend_overview_view_payload(string $activeSubview): array
     $trend = ve_admin_service_trend_snapshot($rangeDays);
     $hostTelemetry = ve_admin_live_host_telemetry();
     $hostCurrent = (array) ($hostTelemetry['current'] ?? []);
-    $liveHistoryPoints = ve_admin_live_history_points((array) ($hostTelemetry['samples'] ?? []), 18);
+    $liveHistoryPoints = ve_admin_live_history_points((array) ($hostTelemetry['samples'] ?? []), 30);
     $processingWindow = ve_admin_processing_window_snapshot(24);
     $processingRows = ve_admin_live_processing_rows(8);
     $points = (array) ($trend['points'] ?? []);
@@ -10149,7 +10276,7 @@ function ve_admin_backend_overview_view_payload(string $activeSubview): array
                     ['label' => 'Ready in 24h', 'value' => (string) ($processingWindow['ready_total'] ?? 0), 'color' => '#d6d6d6'],
                     ['label' => 'Remote failures', 'value' => (string) ($processingWindow['remote_failure_total'] ?? 0), 'color' => '#ff6666'],
                 ]],
-                ['title' => 'Live platform pressure', 'subtitle' => 'Recent live players, active encodes, and remote jobs across the sampled backend window.', 'chart' => $chartLivePressure, 'legend' => [
+                ['title' => 'Live platform pressure', 'subtitle' => 'Latest 5 minutes of live players, active encodes, and remote jobs sampled every 10 seconds.', 'chart' => $chartLivePressure, 'legend' => [
                     ['label' => 'Live players now', 'value' => (string) ($hostCurrent['live_player_connections'] ?? 0), 'color' => '#ff9900'],
                     ['label' => 'Encoding now', 'value' => (string) ($hostCurrent['processing_videos'] ?? 0), 'color' => '#8ad0ff'],
                     ['label' => 'Remote jobs now', 'value' => (string) ($hostCurrent['active_remote_jobs'] ?? 0), 'color' => '#d6d6d6'],
@@ -10164,7 +10291,7 @@ function ve_admin_backend_overview_view_payload(string $activeSubview): array
         ],
     ]);
 
-    $payload['live_refresh_seconds'] = 20;
+    $payload['live_refresh_seconds'] = 10;
 
     return $payload;
 }
@@ -11213,7 +11340,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
     $processingJobs = (array) ($snapshot['processing_jobs'] ?? []);
     $hostTelemetry = ve_admin_live_host_telemetry();
     $hostCurrent = (array) ($hostTelemetry['current'] ?? []);
-    $liveHistoryPoints = ve_admin_live_history_points((array) ($hostTelemetry['samples'] ?? []), 20);
+    $liveHistoryPoints = ve_admin_live_history_points((array) ($hostTelemetry['samples'] ?? []), 30);
     $audienceRows = ve_admin_live_video_audience_rows(8);
     $processingRows = ve_admin_live_processing_rows(8);
     $token = ve_csrf_token();
@@ -11269,7 +11396,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
         $current = (array) ($detail['current'] ?? []);
         $history = (array) ($detail['history'] ?? []);
         $jobs = (array) ($detail['jobs'] ?? []);
-        $historyPoints = ve_admin_processing_node_history_points($history, 24);
+        $historyPoints = ve_admin_processing_node_history_points($history, 30);
         $currentCpu = ve_admin_percent_label($current['cpu_percent'] ?? null, 'No sample');
         $currentMemory = ve_admin_percent_label($current['memory_percent'] ?? null, 'No sample');
         $currentDisk = ve_admin_percent_label($current['disk_percent'] ?? null, 'No sample');
@@ -11278,6 +11405,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
         $attachedStorageRows = [];
         $attachedStorageCount = 0;
         $jobRows = [];
+        $topProcessRows = ve_admin_top_process_table_rows(ve_admin_processing_node_top_processes($node, 10));
 
         foreach ($volumes as $volume) {
             if (!is_array($volume)) {
@@ -11310,8 +11438,8 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
             }
 
             $jobRows[] = ['cells' => [
-                ve_admin_text_cell((string) ($row['video_title_snapshot'] ?? $row['video_public_id'] ?? 'Queued encode'), (string) ($row['video_public_id'] ?? '')),
-                ve_admin_text_cell((string) ($row['username'] ?? 'Unknown')),
+                ve_admin_text_cell((string) ($row['video_title'] ?? $row['video_title_snapshot'] ?? $row['video_public_id'] ?? 'Queued encode'), (string) ($row['video_public_id'] ?? '')),
+                ve_admin_text_cell((string) ($row['username'] ?? 'Deleted user')),
                 ve_admin_status_cell((string) ($row['status'] ?? 'queued')),
                 ve_admin_text_cell((string) ($row['stage'] ?? 'queued')),
                 ve_admin_text_cell((string) ($row['message'] ?? '')),
@@ -11388,9 +11516,9 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                             'return_to' => ve_admin_subsection_url('infra-processing-profile', $selectedNodeId, [], true),
                         ]),
                         'fields' => [
-                            ve_admin_form_field('text', 'domain', 'Domain', (string) ($node['domain'] ?? ''), ['help' => 'Used as the public identity for this processing host.']),
-                            ve_admin_form_field('text', 'ip_address', 'IP address', (string) ($node['ip_address'] ?? ''), ['help' => 'Direct server IP used for provisioning and offloaded encode jobs.']),
-                            ve_admin_form_field('text', 'ssh_username', 'SSH user', (string) ($node['ssh_username'] ?? 'root')),
+                            ve_admin_form_field('text', 'domain', 'Domain', (string) ($node['domain'] ?? '')),
+                            ve_admin_form_field('text', 'ip_address', 'IP address', (string) ($node['ip_address'] ?? '')),
+                            ve_admin_form_field('text', 'ssh_username', 'SSH user', (string) ($node['ssh_username'] ?? '')),
                             ve_admin_form_field('text', 'ssh_password', 'SSH password', '', ['placeholder' => 'Leave blank to keep the stored password']),
                         ],
                         'actions' => [['type' => 'submit', 'label' => 'Save and reprovision', 'tone' => 'primary']],
@@ -11426,6 +11554,14 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                             'columns' => ['Code', 'Storage host', 'Health', 'Usage', 'Last check'],
                             'rows' => $attachedStorageRows,
                             'empty' => 'No delivery-mounted storage boxes are attached to this processing node.',
+                        ],
+                    ],
+                    [
+                        'title' => 'Top processes',
+                        'table' => [
+                            'columns' => ['PID', 'CPU', 'RAM', 'RSS', 'Runtime', 'User', 'Command'],
+                            'rows' => $topProcessRows,
+                            'empty' => 'No process snapshot is available from this node yet.',
                         ],
                     ],
                     [
@@ -11478,15 +11614,15 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
             $detailUrl = ve_admin_subsection_url('infra-processing-profile', (int) ($row['processing_node_id'] ?? 0), [], true);
             $jobRows[] = ['cells' => [
                 ve_admin_link_cell((string) ($row['node_domain'] ?? 'Node'), $detailUrl),
-                ve_admin_text_cell((string) ($row['video_title_snapshot'] ?? $row['video_public_id'] ?? 'Encode job'), (string) ($row['video_public_id'] ?? '')),
-                ve_admin_text_cell((string) ($row['username'] ?? 'Unknown')),
+                ve_admin_text_cell((string) ($row['video_title'] ?? $row['video_title_snapshot'] ?? $row['video_public_id'] ?? 'Encode job'), (string) ($row['video_public_id'] ?? '')),
+                ve_admin_text_cell((string) ($row['username'] ?? 'Deleted user')),
                 ve_admin_status_cell((string) ($row['status'] ?? 'queued')),
                 ve_admin_text_cell((string) ($row['stage'] ?? 'queued')),
                 ve_admin_text_cell(ve_format_datetime_label((string) ($row['updated_at'] ?? ''), 'Never')),
             ]];
         }
 
-        return ve_admin_view_base_payload('Processing nodes', 'Register remote encode hosts with only domain, IP, root user, and password. The backend provisions FFmpeg, telemetry, and the processing agent automatically.', $metrics, [], [
+        return ve_admin_view_base_payload('Processing nodes', 'Register remote encode hosts with domain, IP, SSH user, and password. The backend provisions FFmpeg, telemetry, and the processing agent automatically.', $metrics, [], [
             ['type' => 'group_grid', 'cards' => [
                 ['title' => 'Provisioning model', 'description' => 'Each processing host is installed end-to-end from this backend surface.', 'items' => [
                     ['label' => 'Managed nodes', 'value' => (string) $processingNodeCount],
@@ -11511,10 +11647,10 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                         'return_to' => ve_admin_subsection_url('infra-processing', null, [], true),
                     ]),
                     'fields' => [
-                        ve_admin_form_field('text', 'domain', 'Domain', '', ['help' => 'Example: up.filehost.net']),
-                        ve_admin_form_field('text', 'ip_address', 'IP address', '', ['help' => 'Used for SSH provisioning and encode offload.']),
-                        ve_admin_form_field('text', 'ssh_username', 'SSH user', 'root'),
-                        ve_admin_form_field('text', 'ssh_password', 'SSH password', '', ['help' => 'The password is stored encrypted and reused for telemetry + provisioning.']),
+                        ve_admin_form_field('text', 'domain', 'Domain', ''),
+                        ve_admin_form_field('text', 'ip_address', 'IP address', ''),
+                        ve_admin_form_field('text', 'ssh_username', 'SSH user', ''),
+                        ve_admin_form_field('text', 'ssh_password', 'SSH password', ''),
                     ],
                     'actions' => [['type' => 'submit', 'label' => 'Add and provision node', 'tone' => 'primary']],
                 ]],
@@ -11629,13 +11765,13 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                         'return_to' => ve_admin_subsection_url('infra-storage-boxes', null, [], true),
                     ]),
                     'fields' => [
-                        ve_admin_form_field('text', 'storage_box_host', 'Storage Box host', '', ['help' => 'Example: u560296.your-storagebox.de']),
-                        ve_admin_form_field('text', 'storage_box_username', 'Storage Box user', '', ['help' => 'Hetzner Storage Box username.']),
-                        ve_admin_form_field('text', 'storage_box_password', 'Storage Box password', '', ['help' => 'Stored encrypted and used only on the delivery node.']),
-                        ve_admin_form_field('text', 'delivery_domain', 'Delivery domain', '', ['help' => 'Public delivery host that will mount this box internally.']),
-                        ve_admin_form_field('text', 'delivery_ip_address', 'Delivery IP', '', ['help' => 'SSH target used to install the mount agent.']),
-                        ve_admin_form_field('text', 'delivery_ssh_username', 'Delivery SSH user', 'root'),
-                        ve_admin_form_field('text', 'delivery_ssh_password', 'Delivery SSH password', '', ['help' => 'Used only for provisioning and refresh commands.']),
+                        ve_admin_form_field('text', 'storage_box_host', 'Storage Box host', ''),
+                        ve_admin_form_field('text', 'storage_box_username', 'Storage Box user', ''),
+                        ve_admin_form_field('text', 'storage_box_password', 'Storage Box password', ''),
+                        ve_admin_form_field('text', 'delivery_domain', 'Delivery domain', ''),
+                        ve_admin_form_field('text', 'delivery_ip_address', 'Delivery IP', ''),
+                        ve_admin_form_field('text', 'delivery_ssh_username', 'Delivery SSH user', ''),
+                        ve_admin_form_field('text', 'delivery_ssh_password', 'Delivery SSH password', ''),
                     ],
                     'actions' => [['type' => 'submit', 'label' => 'Add and provision storage box', 'tone' => 'primary']],
                 ]]],
@@ -11649,11 +11785,11 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
         $nodeDetail = $selectedNodeId > 0 ? ve_admin_storage_node_detail($selectedNodeId) : null;
 
         if (!is_array($nodeDetail)) {
-            return ve_admin_view_base_payload('Node profile', 'Select a node from the Nodes page to inspect live host state, delivery pressure, and attached infrastructure.', $metrics, [
-                ve_admin_action_link_payload('Back to nodes', ve_admin_subsection_url('infra-nodes'), 'secondary', 'fa-arrow-left'),
+            return ve_admin_view_base_payload('Node profile', 'Select a node from the infrastructure overview to inspect live host state, delivery pressure, and attached infrastructure.', $metrics, [
+                ve_admin_action_link_payload('Back to overview', ve_admin_subsection_url('infra-nodes'), 'secondary', 'fa-arrow-left'),
             ], [[
                 'type' => 'notice',
-                'message' => 'Choose a node from the Nodes list to open its runtime profile.',
+                'message' => 'Choose a node from the overview list to open its runtime profile.',
             ]]);
         }
 
@@ -11666,6 +11802,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
         $nodeMemoryLabel = $isLiveNode ? $memoryLabel : 'No live agent';
         $nodeBandwidthLabel = $isLiveNode ? $bandwidthLabel : 'No live agent';
         $telemetrySource = $isLiveNode ? 'Telemetry is sampled directly from the current backend host.' : 'Live host telemetry is only available for the active control-plane host in this build.';
+        $topProcessRows = $isLiveNode ? ve_admin_top_process_table_rows(ve_admin_local_top_processes(10)) : [];
         $hostChart = ve_admin_chart_payload($liveHistoryPoints, [
             ['key' => 'cpu_percent', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'CPU', 'format' => 'percent'],
             ['key' => 'memory_percent', 'stroke' => '#8ad0ff', 'label' => 'RAM', 'format' => 'percent'],
@@ -11733,7 +11870,8 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                 ve_admin_metric_payload('Live players', (string) ($hostCurrent['live_player_connections'] ?? 0)),
             ],
             [
-                ve_admin_action_link_payload('Back to nodes', ve_admin_subsection_url('infra-nodes'), 'secondary', 'fa-arrow-left'),
+                ve_admin_action_link_payload('Back to overview', ve_admin_subsection_url('infra-nodes'), 'secondary', 'fa-arrow-left'),
+                ve_admin_action_link_payload('Refresh snapshot', ve_admin_subsection_url('infra-node-profile', $selectedNodeId), 'secondary', 'fa-sync'),
             ],
             [
                 ['type' => 'cards', 'layout' => 'grid', 'cards' => [
@@ -11802,6 +11940,11 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                         'columns' => ['Queue', 'Item', 'Owner', 'Status', 'Stage', 'Updated'],
                         'rows' => $processingRows,
                         'empty' => 'No live ingest or encode work is active.',
+                    ]],
+                    ['title' => 'Top processes', 'table' => [
+                        'columns' => ['PID', 'CPU', 'RAM', 'RSS', 'Runtime', 'User', 'Command'],
+                        'rows' => $topProcessRows,
+                        'empty' => $isLiveNode ? 'No process snapshot is available right now.' : 'This node does not expose a local process snapshot in the current build.',
                     ]],
                 ]],
             ]
@@ -11923,7 +12066,24 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
         }
     }
 
-    $payload = ve_admin_view_base_payload('Infrastructure', 'Operate the storage and delivery plane with live runtime data, clickable nodes, and delivery telemetry.', $metrics, [], [
+    $storageBoxInventoryRows = [];
+    foreach ($volumes as $row) {
+        if (!is_array($row) || (string) ($row['backend_type'] ?? '') !== 'webdav_box') {
+            continue;
+        }
+
+        $storageBoxInventoryRows[] = ['cells' => [
+            ve_admin_code_cell((string) ($row['code'] ?? '')),
+            ve_admin_text_cell((string) ($row['remote_host'] ?? ''), (string) ($row['remote_username'] ?? '')),
+            ve_admin_status_cell((string) ($row['health_status'] ?? 'offline')),
+            ve_admin_text_cell(ve_human_bytes((int) ($row['used_bytes'] ?? 0)) . ' / ' . ve_human_bytes((int) ($row['capacity_bytes'] ?? 0))),
+            ve_admin_text_cell((string) ($row['hostname'] ?? ''), (string) ($row['mount_path'] ?? '')),
+        ]];
+    }
+
+    $payload = ve_admin_view_base_payload('Infrastructure overview', 'Operate the storage and delivery plane with live runtime data, clickable nodes, and delivery telemetry.', $metrics, [
+        ve_admin_action_link_payload('Refresh snapshot', ve_admin_subsection_url('infra-nodes'), 'secondary', 'fa-sync'),
+    ], [
         ['type' => 'group_grid', 'cards' => [
             ['title' => 'Host runtime', 'description' => 'Current control-plane host health sampled by the backend.', 'items' => [
                 ['label' => 'CPU', 'value' => $cpuLabel],
@@ -11952,21 +12112,21 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
             ]],
         ]],
         ['type' => 'chart_cards', 'columns' => 3, 'cards' => [
-            ['title' => 'CPU and RAM', 'subtitle' => 'Recent backend-host telemetry samples.', 'chart' => ve_admin_chart_payload($liveHistoryPoints, [
+            ['title' => 'CPU and RAM', 'subtitle' => 'Latest 5 minutes of backend-host telemetry sampled every 10 seconds.', 'chart' => ve_admin_chart_payload($liveHistoryPoints, [
                 ['key' => 'cpu_percent', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'CPU', 'format' => 'percent'],
                 ['key' => 'memory_percent', 'stroke' => '#8ad0ff', 'label' => 'RAM', 'format' => 'percent'],
             ]), 'legend' => [
                 ['label' => 'CPU now', 'value' => $cpuLabel, 'color' => '#ff9900'],
                 ['label' => 'RAM now', 'value' => $memoryLabel, 'color' => '#8ad0ff'],
             ]],
-            ['title' => 'Bandwidth and players', 'subtitle' => 'Current throughput and live viewer count.', 'chart' => ve_admin_chart_payload($liveHistoryPoints, [
+            ['title' => 'Bandwidth and players', 'subtitle' => 'Latest 5 minutes of throughput and live viewer count.', 'chart' => ve_admin_chart_payload($liveHistoryPoints, [
                 ['key' => 'network_total_rate_bytes', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'Bandwidth', 'format' => 'bytes'],
                 ['key' => 'live_player_connections', 'stroke' => '#d6d6d6', 'label' => 'Live players', 'format' => 'number'],
             ]), 'legend' => [
                 ['label' => 'Bandwidth now', 'value' => $bandwidthLabel, 'color' => '#ff9900'],
                 ['label' => 'Live players', 'value' => (string) ($hostCurrent['live_player_connections'] ?? 0), 'color' => '#d6d6d6'],
             ]],
-            ['title' => 'Encode and import load', 'subtitle' => 'Concurrent processing pressure across the backend.', 'chart' => ve_admin_chart_payload($liveHistoryPoints, [
+            ['title' => 'Encode and import load', 'subtitle' => 'Latest 5 minutes of ingest and processing pressure.', 'chart' => ve_admin_chart_payload($liveHistoryPoints, [
                 ['key' => 'processing_videos', 'stroke' => '#ff9900', 'fill' => 'rgba(255,153,0,0.08)', 'label' => 'Encoding', 'format' => 'number'],
                 ['key' => 'active_remote_jobs', 'stroke' => '#8ad0ff', 'label' => 'Remote jobs', 'format' => 'number'],
             ]), 'legend' => [
@@ -11976,57 +12136,19 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
         ]],
         ['type' => 'table', 'columns' => ['Code', 'Hostname', 'Health', 'Capacity', 'Ingest QPS', 'Stream QPS', 'CPU', 'RAM', 'Live players'], 'rows' => $rows, 'empty' => 'No storage nodes configured.'],
         ['type' => 'cards', 'layout' => 'grid', 'cards' => [
-            ['title' => 'Processing node fleet', 'table' => [
-                'columns' => ['Node', 'Provisioning', 'Health', 'CPU', 'RAM', 'Jobs'],
-                'rows' => array_values(array_map(static function ($row) {
-                    if (!is_array($row)) {
-                        return ['cells' => []];
-                    }
-
-                    $telemetry = json_decode((string) ($row['last_telemetry_json'] ?? '{}'), true);
-                    $telemetry = is_array($telemetry) ? $telemetry : [];
-                    return ['cells' => [
-                        ve_admin_link_cell((string) ($row['domain'] ?? ''), ve_admin_subsection_url('infra-processing-profile', (int) ($row['id'] ?? 0), [], true), (string) ($row['ip_address'] ?? '')),
-                        ve_admin_status_cell((string) ($row['provision_status'] ?? 'pending')),
-                        ve_admin_status_cell((string) ($row['health_status'] ?? 'offline')),
-                        ve_admin_text_cell(ve_admin_percent_label($telemetry['cpu_percent'] ?? null, 'No sample')),
-                        ve_admin_text_cell(ve_admin_percent_label($telemetry['memory_percent'] ?? null, 'No sample')),
-                        ve_admin_text_cell((string) ($telemetry['processing_jobs'] ?? 0)),
-                    ]];
-                }, array_values(array_filter($processingNodes, 'is_array')))),
-                'empty' => 'No processing nodes registered.',
-            ]],
-            ['title' => 'Current live audience', 'table' => [
-                'columns' => ['Video', 'Owner', 'Live players', 'Bandwidth served', 'Last pulse'],
-                'rows' => $audienceRows,
-                'empty' => 'No active playback sessions are live right now.',
-            ]],
             ['title' => 'Live ingest and encode queue', 'table' => [
                 'columns' => ['Queue', 'Item', 'Owner', 'Status', 'Stage', 'Updated'],
                 'rows' => $processingRows,
                 'empty' => 'No live ingest or encode work is active.',
             ]],
-            ['title' => 'Register storage node', 'form' => [
-                'action' => ve_admin_subsection_url('infra-nodes', null, [], false),
-                'method' => 'POST',
-                'hidden' => ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'save_storage_node', 'return_to' => ve_admin_subsection_url('infra-nodes', null, [], true)]),
-                'fields' => [
-                    ve_admin_form_field('text', 'code', 'Code', ''),
-                    ve_admin_form_field('text', 'hostname', 'Hostname', ''),
-                    ve_admin_form_field('text', 'public_base_url', 'Public base URL', ''),
-                    ve_admin_form_field('text', 'upload_base_url', 'Upload base URL', ''),
-                    ve_admin_form_field('select', 'health_status', 'Health', 'healthy', ['options' => [['value' => 'healthy', 'label' => 'Healthy'], ['value' => 'degraded', 'label' => 'Degraded'], ['value' => 'offline', 'label' => 'Offline']]]),
-                    ve_admin_form_field('text', 'available_bytes', 'Available bytes', '0'),
-                    ve_admin_form_field('text', 'used_bytes', 'Used bytes', '0'),
-                    ve_admin_form_field('text', 'max_ingest_qps', 'Max ingest QPS', '0'),
-                    ve_admin_form_field('text', 'max_stream_qps', 'Max stream QPS', '0'),
-                    ve_admin_form_field('textarea', 'notes', 'Notes', ''),
-                ],
-                'actions' => [['type' => 'submit', 'label' => 'Save node', 'tone' => 'primary']],
+            ['title' => 'Storage box inventory', 'table' => [
+                'columns' => ['Code', 'Host', 'Health', 'Usage', 'Mounted on'],
+                'rows' => $storageBoxInventoryRows,
+                'empty' => 'No mounted storage boxes are configured.',
             ]],
         ]],
     ]);
-    $payload['live_refresh_seconds'] = 20;
+    $payload['live_refresh_seconds'] = 10;
 
     return $payload;
 }

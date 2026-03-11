@@ -9,7 +9,7 @@ fi
 INSTALL_PATH="/opt/video-engine-processing"
 DOMAIN=""
 IP_ADDRESS=""
-AGENT_VERSION="1.0.0"
+AGENT_VERSION="1.1.0"
 WORKDIR=""
 SOURCE=""
 KEYFILE=""
@@ -159,7 +159,7 @@ Description=Video Engine processing telemetry timer
 
 [Timer]
 OnBootSec=30s
-OnUnitActiveSec=15s
+OnUnitActiveSec=10s
 AccuracySec=1s
 Unit=ve-processing-telemetry.service
 

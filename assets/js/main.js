@@ -578,9 +578,9 @@ $(document).ready(function() {
     function renderAdminChartSvg(chart) {
         var points = chart.points || [];
         var series = chart.series || [];
-        var width = 820;
-        var height = 310;
-        var padding = {left: 54, right: 24, top: 18, bottom: 42};
+        var width = 760;
+        var height = 280;
+        var padding = {left: 56, right: 18, top: 16, bottom: 34};
         var plotWidth = width - padding.left - padding.right;
         var plotHeight = height - padding.top - padding.bottom;
         var maxValue = 0;

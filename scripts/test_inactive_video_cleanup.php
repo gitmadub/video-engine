@@ -16,7 +16,8 @@ function inactive_cleanup_assert(bool $condition, string $message): void
 
 function inactive_cleanup_insert_video(PDO $pdo, int $userId, string $publicId, string $title, string $readyAt): int
 {
-    $directory = ve_video_storage_path('library', $publicId);
+    $relativeDir = ve_video_default_storage_relative_dir($publicId, $readyAt);
+    $directory = ve_video_storage_path('library', str_replace('/', DIRECTORY_SEPARATOR, $relativeDir));
     ve_ensure_directory($directory);
     file_put_contents($directory . DIRECTORY_SEPARATOR . 'master.m3u8', "#EXTM3U\n");
 
@@ -24,11 +25,11 @@ function inactive_cleanup_insert_video(PDO $pdo, int $userId, string $publicId, 
         'INSERT INTO videos (
             user_id, public_id, title, original_filename, source_extension, is_public, status, status_message,
             duration_seconds, width, height, video_codec, audio_codec, original_size_bytes, processed_size_bytes,
-            compression_ratio, processing_error, created_at, updated_at, queued_at, processing_started_at, ready_at, deleted_at
+            compression_ratio, processing_error, storage_relative_dir, created_at, updated_at, queued_at, processing_started_at, ready_at, deleted_at
         ) VALUES (
             :user_id, :public_id, :title, :original_filename, :source_extension, 1, :status, :status_message,
             120, 1280, 720, "h264", "aac", 1024, 512,
-            0.5, "", :created_at, :updated_at, :queued_at, :processing_started_at, :ready_at, NULL
+            0.5, "", :storage_relative_dir, :created_at, :updated_at, :queued_at, :processing_started_at, :ready_at, NULL
         )'
     );
     $stmt->execute([
@@ -39,6 +40,7 @@ function inactive_cleanup_insert_video(PDO $pdo, int $userId, string $publicId, 
         ':source_extension' => 'mp4',
         ':status' => VE_VIDEO_STATUS_READY,
         ':status_message' => 'Ready for cleanup QA.',
+        ':storage_relative_dir' => $relativeDir,
         ':created_at' => $readyAt,
         ':updated_at' => $readyAt,
         ':queued_at' => $readyAt,
@@ -69,11 +71,11 @@ $freshVideoId = inactive_cleanup_insert_video($pdo, $userId, $freshPublicId, 'Fr
 
 ve_dashboard_record_video_view($viewedVideoId, $userId, gmdate('Y-m-d'), 0, 'cleanup-viewed-' . $suffix);
 
-$deletedCount = ve_video_cleanup_inactive_zero_view_videos();
+$deletedCount = ve_video_cleanup_inactive_videos();
 
-inactive_cleanup_assert($deletedCount === 1, 'Exactly one stale zero-view video should be deleted.');
+inactive_cleanup_assert($deletedCount === 1, 'Exactly one inactive video should be deleted.');
 inactive_cleanup_assert(ve_video_get_by_id($staleVideoId) === null, 'Stale zero-view video should be removed from the database.');
-inactive_cleanup_assert(!is_dir(ve_video_storage_path('library', $stalePublicId)), 'Stale zero-view video directory should be removed.');
+inactive_cleanup_assert(!is_dir(ve_video_storage_path('library', str_replace('/', DIRECTORY_SEPARATOR, ve_video_default_storage_relative_dir($stalePublicId, $oldDate)))), 'Stale inactive video directory should be removed.');
 inactive_cleanup_assert(is_array(ve_video_get_by_id($viewedVideoId)), 'Viewed video should be retained.');
 inactive_cleanup_assert(is_array(ve_video_get_by_id($freshVideoId)), 'Fresh zero-view video should be retained.');
 
