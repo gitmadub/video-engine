@@ -170,6 +170,15 @@
         }
     }
 
+    function selectRowItem(vm, item) {
+        if (!vm || !item || item.classList.contains('header')) {
+            return;
+        }
+
+        setItemSelected(item, true);
+        syncSelectionFromDom(vm);
+    }
+
     function requestJson(method, url, data, onSuccess, onError, onComplete) {
         if (!window.jQuery) {
             return;
@@ -414,9 +423,9 @@
             '.ve-item-public.is-public i{color:#f90}',
             '.ve-item-public.is-private i{color:rgba(255,255,255,.45)}',
             '.vue-simple-context-menu{background:#171717!important;border:1px solid rgba(67,70,69,.88)!important;box-shadow:0 18px 44px rgba(0,0,0,.38)!important;border-radius:6px!important;min-width:190px}',
-            '.vue-simple-context-menu__item{display:flex!important;align-items:center!important;gap:12px!important;color:rgba(255,255,255,.88)!important;padding:9px 14px!important;font-family:inherit!important;font-weight:600!important}',
-            '.vue-simple-context-menu__item i,.vue-simple-context-menu__item svg,.vue-simple-context-menu__item .icon{position:static!important;left:auto!important;right:auto!important;top:auto!important;transform:none!important;flex:0 0 16px;width:16px!important;min-width:16px;height:16px!important;line-height:16px!important;margin:0!important;text-align:center}',
-            '.vue-simple-context-menu__item span,.vue-simple-context-menu__item strong{position:static!important;transform:none!important;flex:1 1 auto;min-width:0}',
+            '.vue-simple-context-menu__item{position:relative!important;display:block!important;color:rgba(255,255,255,.88)!important;padding:9px 14px 9px 40px!important;font-family:inherit!important;font-weight:600!important;line-height:1.4!important;white-space:nowrap!important}',
+            '.vue-simple-context-menu__item i,.vue-simple-context-menu__item svg,.vue-simple-context-menu__item .icon{position:absolute!important;left:14px!important;top:50%!important;right:auto!important;transform:translateY(-50%)!important;width:16px!important;min-width:16px!important;height:16px!important;line-height:16px!important;margin:0!important;text-align:center!important}',
+            '.vue-simple-context-menu__item span,.vue-simple-context-menu__item strong{position:static!important;display:inline!important;transform:none!important;min-width:0}',
             '.vue-simple-context-menu__item:hover{background:rgba(255,153,0,.16)!important;color:#fff!important}',
             '.vue-simple-context-menu li:first-of-type,.vue-simple-context-menu li:last-of-type{margin:4px 0!important}',
             '.iziToast-wrapper-topRight,.iziToast-wrapper-topLeft,.iziToast-wrapper-topCenter{top:68px!important}',
@@ -1603,9 +1612,10 @@
         vm.__veSelectionReady = true;
         vm.__veSelection = window.Selection.create({
             class: 'selection',
-            selectables: ['.file_list > .item'],
-            boundaries: ['.file_manager.d-flex.flex-wrap'],
-            singleClick: true,
+            selectables: ['.file_list > .video.item', '.file_list > .folder.item'],
+            boundaries: ['.file_manager', '.files', '.file_list'],
+            startareas: ['.file_manager', '.files', '.file_list'],
+            singleClick: false,
             disableTouch: true
         })
             .on('beforestart', function (event) {
@@ -1819,12 +1829,27 @@
         document.addEventListener('click', function (event) {
             var shareLink = event.target && event.target.closest('[data-folder-share]');
             var pathCard = event.target && event.target.closest('[data-folder-path-card]');
+            var folderItem = event.target && event.target.closest('.file_list .folder.item[data-folder]');
+            var videoItem = event.target && event.target.closest('.file_list .video.item[data-video]');
             var item = event.target && event.target.closest('.file_list .item');
 
             if (!shareLink) {
                 if (pathCard) {
                     event.preventDefault();
                     vm.open_folder(String(pathCard.getAttribute('data-folder-id') || '0'));
+                    return;
+                }
+
+                if (folderItem && !isFormControlTarget(event.target)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    vm.open_folder(String(folderItem.getAttribute('data-folder') || '0'));
+                    return;
+                }
+
+                if (videoItem && !isFormControlTarget(event.target)) {
+                    event.preventDefault();
+                    selectRowItem(vm, videoItem);
                     return;
                 }
 
@@ -1854,6 +1879,8 @@
 
     function afterRender(vm) {
         window.setTimeout(function () {
+            var initialPayload;
+
             ensureBrowserToolbarStyles();
             renderBrowserToolbar(vm);
             wirePerPageControls(vm);
@@ -1869,6 +1896,15 @@
             installDropZone(vm);
             installSelectionSync(vm);
             syncSelectionFromDom(vm);
+
+            if (vm && vm.data && Array.isArray(vm.data.folders) && Array.isArray(vm.data.videos)) {
+                initialPayload = buildFolderRequestPayload(vm);
+
+                if (!getCachedFolderResponse(vm, initialPayload)) {
+                    cacheFolderResponse(vm, initialPayload, vm.data, 'dom');
+                    preloadDirectChildFolders(vm, initialPayload, vm.data);
+                }
+            }
         }, 0);
     }
 
@@ -1912,6 +1948,14 @@
             var pendingEntry = pending[requestKey];
             var requestVersion = Number(vm.__veFolderRequestVersion || 0);
             var cached;
+            var initialRootWindow;
+
+            initialRootWindow = Number(vm.__vePatchedAt || 0);
+
+            if (!options && !vm.loaded && String(payload.page || '1') === '1' && String(payload.fld_id || '0') === '0'
+                && String(payload.key || '') === '' && initialRootWindow > 0 && (Date.now() - initialRootWindow) < 1200) {
+                return;
+            }
 
             if (pendingEntry) {
                 if (pendingEntry.mode === 'prefetch') {
@@ -2512,6 +2556,9 @@
         }
 
         wrapMethods(instance);
+        if (!instance.__vePatchedAt) {
+            instance.__vePatchedAt = Date.now();
+        }
         hydrateSavedContentType(instance);
         afterRender(instance);
         installLiveRefresh(instance);
