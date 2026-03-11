@@ -39,7 +39,6 @@ try {
 
     $snapshot = ve_remote_host_dashboard_snapshot($user);
     assert_true(($snapshot['can_manage'] ?? false) === true, 'Manager snapshot should report management access.');
-    assert_true(str_contains((string) ($snapshot['panel_html'] ?? ''), '/account/remote-upload'), 'Manager snapshot should render the remote-upload settings form.');
 
     $defaultLabels = array_map(
         static fn (array $item): string => (string) ($item['label'] ?? ''),

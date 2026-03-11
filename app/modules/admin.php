@@ -89,6 +89,7 @@ function ve_admin_default_settings(): array
         'admin_default_page_size' => (string) VE_ADMIN_PAGE_SIZE,
         'admin_recent_audit_limit' => '12',
         'remote_max_queue_per_user' => '25',
+        'remote_default_quality' => '1080',
     ];
 }
 
@@ -1087,6 +1088,7 @@ function ve_admin_backend_view_definitions(): array
         ],
         'remote-uploads' => [
             ['slug' => 'remote-uploads-queue', 'label' => 'Queue', 'icon' => 'fa-tasks', 'kind' => 'sidebar'],
+            ['slug' => 'remote-uploads-hosts', 'label' => 'Host policy', 'icon' => 'fa-network-wired', 'kind' => 'sidebar'],
             ['slug' => 'remote-uploads-detail', 'label' => 'Job detail', 'icon' => 'fa-cloud-download', 'kind' => 'detail'],
         ],
         'dmca' => [
@@ -2355,6 +2357,18 @@ function ve_admin_delete_custom_domain(int $domainId, int $actorUserId): void
     ve_admin_log_event('admin.domain.deleted', 'custom_domain', $domainId, $before, [], $actorUserId);
 }
 
+function ve_admin_normalize_app_setting_value(string $key, string $value): string
+{
+    return match ($key) {
+        'payout_minimum_micro_usd' => (string) max(1000000, min(1000000000, (int) $value)),
+        'admin_default_page_size' => (string) max(10, min(200, (int) $value)),
+        'admin_recent_audit_limit' => (string) max(1, min(100, (int) $value)),
+        'remote_max_queue_per_user' => (string) max(1, min(500, (int) $value)),
+        'remote_default_quality' => in_array((int) $value, ve_remote_quality_options(), true) ? (string) (int) $value : '1080',
+        default => trim($value),
+    };
+}
+
 function ve_admin_save_app_settings(array $payload, int $actorUserId): void
 {
     $before = [];
@@ -2362,7 +2376,7 @@ function ve_admin_save_app_settings(array $payload, int $actorUserId): void
 
     foreach (ve_admin_default_settings() as $key => $defaultValue) {
         $before[$key] = ve_get_app_setting($key, (string) $defaultValue);
-        $value = trim((string) ($payload[$key] ?? $defaultValue));
+        $value = ve_admin_normalize_app_setting_value($key, trim((string) ($payload[$key] ?? $defaultValue)));
         $after[$key] = $value;
         ve_set_app_setting($key, $value);
     }
@@ -4505,7 +4519,7 @@ function ve_admin_backend_section_meta(string $section): array
         ],
         'remote-uploads' => [
             'eyebrow' => 'Ingest queue',
-            'description' => 'Track remote import throughput, failures, and source reliability.',
+            'description' => 'Track remote import throughput, failures, source reliability, and provider policy.',
         ],
         'dmca' => [
             'eyebrow' => 'Compliance',
@@ -7494,6 +7508,13 @@ function ve_admin_render_app_section_deep(): string
         $settings[$key] = ve_h(ve_get_app_setting($key, (string) $defaultValue) ?? (string) $defaultValue);
     }
 
+    $qualityOptionsHtml = '';
+
+    foreach (ve_remote_quality_options() as $quality) {
+        $selected = ((string) ($settings['remote_default_quality'] ?? '1080')) === (string) $quality ? ' selected' : '';
+        $qualityOptionsHtml .= '<option value="' . ve_h((string) $quality) . '"' . $selected . '>' . ve_h((string) $quality . 'p') . '</option>';
+    }
+
     $roleRows = '';
 
     foreach (ve_admin_role_catalog() as $code => $meta) {
@@ -7546,6 +7567,10 @@ function ve_admin_render_app_section_deep(): string
             <div class="form-group">
                 <label>Remote queue max per user</label>
                 <input type="text" name="remote_max_queue_per_user" value="{$settings['remote_max_queue_per_user']}" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Remote default quality</label>
+                <select name="remote_default_quality" class="form-control">{$qualityOptionsHtml}</select>
             </div>
         </div>
         <div class="admin-actions">
@@ -9063,6 +9088,136 @@ function ve_admin_backend_remote_uploads_view_payload(string $activeSubview): ar
     $selectedJobId = ve_admin_current_resource_id();
     $list = ve_admin_list_remote_uploads($query, $status, 0, $page);
 
+    if ($activeSubview === 'remote-uploads-hosts') {
+        $token = ve_csrf_token();
+        $providers = ve_remote_host_provider_rows();
+        $unsupportedDomains = ve_remote_host_unsupported_domains();
+        $totals = ve_remote_host_summary_totals();
+        $supportedHosts = ve_remote_host_supported_hosts_payload();
+        $enabledProviders = 0;
+        $verifiedProviders = 0;
+        $publicProviders = 0;
+        $providerRows = [];
+        $unsupportedRows = [];
+        $toggleFields = [];
+        $supportedList = [];
+
+        foreach ((array) $providers as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $hostKey = trim((string) ($row['key'] ?? ''));
+            $isEnabled = (bool) ($row['enabled'] ?? false);
+            $isVerified = (bool) ($row['verified'] ?? false);
+            $isPublic = (bool) ($row['show_in_supported_hosts'] ?? false);
+
+            if ($isEnabled) {
+                $enabledProviders++;
+            }
+
+            if ($isVerified) {
+                $verifiedProviders++;
+            }
+
+            if ($isPublic) {
+                $publicProviders++;
+            }
+
+            $statusParts = [];
+            $statusParts[] = $isEnabled ? 'Enabled' : 'Disabled';
+            $statusParts[] = $isVerified ? 'Verified' : 'Unverified';
+            $statusParts[] = $isPublic ? 'Public' : 'Hidden';
+
+            $providerRows[] = ['cells' => [
+                ve_admin_text_cell((string) ($row['label'] ?? $hostKey), $hostKey !== '' ? $hostKey : 'Unknown key'),
+                ve_admin_text_cell(implode(' / ', $statusParts), (string) ($row['note'] ?? '')),
+                ve_admin_text_cell((string) (int) ($row['submission_count'] ?? 0)),
+                ve_admin_text_cell((string) (int) ($row['completed_count'] ?? 0)),
+                ve_admin_text_cell((string) (int) ($row['failed_count'] ?? 0)),
+                ve_admin_text_cell((string) (int) ($row['disabled_count'] ?? 0)),
+                ve_admin_text_cell(ve_format_datetime_label((string) ($row['last_seen_at'] ?? ''), 'Never')),
+            ]];
+
+            $toggleFields[] = [
+                'type' => 'checkbox',
+                'name' => 'enabled_hosts[]',
+                'id' => 'remote_host_' . preg_replace('/[^a-z0-9_]+/i', '_', $hostKey),
+                'label' => (string) ($row['label'] ?? $hostKey),
+                'value' => $hostKey,
+                'checked' => $isEnabled,
+            ];
+        }
+
+        foreach ((array) $unsupportedDomains as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $unsupportedRows[] = ['cells' => [
+                ve_admin_code_cell((string) ($row['source_host'] ?? '')),
+                ve_admin_text_cell((string) (int) ($row['submission_count'] ?? 0)),
+                ve_admin_text_cell(ve_format_datetime_label((string) ($row['last_seen_at'] ?? ''), 'Never')),
+                ve_admin_text_cell((string) ($row['detail_message'] ?? '')),
+            ]];
+        }
+
+        foreach ((array) $supportedHosts as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $supportedList[] = [
+                'primary' => (string) ($item['label'] ?? ''),
+                'secondary' => (string) ($item['note'] ?? ''),
+            ];
+        }
+
+        return ve_admin_view_base_payload('Remote upload host policy', 'Control which remote-upload providers stay live, inspect current resolver pressure, and review unsupported source domains from the backend.', [
+            ve_admin_metric_payload('Providers', (string) count($providers)),
+            ve_admin_metric_payload('Enabled', (string) $enabledProviders),
+            ve_admin_metric_payload('Public supported', (string) count($supportedHosts)),
+            ve_admin_metric_payload('Total submissions', (string) (int) ($totals['total_submissions'] ?? 0)),
+            ve_admin_metric_payload('Completed', (string) (int) ($totals['completed_submissions'] ?? 0)),
+            ve_admin_metric_payload('Unsupported domains', (string) count($unsupportedDomains)),
+        ], [
+            ['type' => 'link', 'label' => 'Reload usage', 'tone' => 'secondary', 'href' => ve_admin_subsection_url('remote-uploads-hosts'), 'admin_nav' => true],
+        ], [
+            ['type' => 'group_grid', 'cards' => [
+                ['title' => 'Policy coverage', 'description' => 'How much of the resolver catalog is live and visible to uploader traffic right now.', 'items' => [
+                    ['label' => 'Enabled providers', 'value' => (string) $enabledProviders],
+                    ['label' => 'Verified providers', 'value' => (string) $verifiedProviders],
+                    ['label' => 'Public providers', 'value' => (string) $publicProviders],
+                    ['label' => 'Visible supported hosts', 'value' => (string) count($supportedHosts)],
+                ]],
+                ['title' => 'Submission pressure', 'description' => 'Recent resolver demand and how much source traffic fails because of unsupported or disabled hosts.', 'items' => [
+                    ['label' => 'Total submissions', 'value' => (string) (int) ($totals['total_submissions'] ?? 0)],
+                    ['label' => 'Completed', 'value' => (string) (int) ($totals['completed_submissions'] ?? 0)],
+                    ['label' => 'Unsupported hits', 'value' => (string) (int) ($totals['unsupported_submissions'] ?? 0)],
+                    ['label' => 'Disabled-policy hits', 'value' => (string) (int) ($totals['disabled_submissions'] ?? 0)],
+                ]],
+            ]],
+            ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                ['title' => 'Enabled provider policy', 'description' => 'These switches define which providers the sitewide remote-upload pipeline will accept.', 'form' => [
+                    'action' => ve_admin_subsection_url('remote-uploads-hosts', null, [], false),
+                    'method' => 'POST',
+                    'hidden' => ve_admin_form_hidden_inputs([
+                        'token' => $token,
+                        'action' => 'save_remote_host_policy',
+                        'return_to' => ve_admin_subsection_url('remote-uploads-hosts', null, [], true),
+                    ]),
+                    'fields' => $toggleFields,
+                    'actions' => [
+                        ['type' => 'submit', 'label' => 'Save host policy', 'tone' => 'primary'],
+                    ],
+                ]],
+                ['title' => 'Public supported hosts', 'description' => 'These providers are currently enabled, verified, and exposed in the user-facing remote-upload help surface.', 'list' => $supportedList],
+            ]],
+            ['type' => 'table', 'columns' => ['Provider', 'Status', 'Submitted', 'Completed', 'Failed', 'Disabled', 'Last seen'], 'rows' => $providerRows, 'empty' => 'No remote-upload provider stats are available yet.'],
+            ['type' => 'table', 'columns' => ['Unsupported domain', 'Submitted', 'Last seen', 'Latest error'], 'rows' => $unsupportedRows, 'empty' => 'No unsupported domains have been submitted yet.'],
+        ]);
+    }
+
     if ($activeSubview === 'remote-uploads-detail') {
         $detail = $selectedJobId > 0 ? ve_admin_remote_upload_detail($selectedJobId) : null;
 
@@ -9427,9 +9582,17 @@ function ve_admin_backend_app_view_payload(string $activeSubview): array
 {
     $token = ve_csrf_token();
     $settings = [];
+    $qualityOptions = [];
 
     foreach (ve_admin_default_settings() as $key => $defaultValue) {
         $settings[$key] = (string) (ve_get_app_setting($key, (string) $defaultValue) ?? (string) $defaultValue);
+    }
+
+    foreach (ve_remote_quality_options() as $quality) {
+        $qualityOptions[] = [
+            'value' => (string) $quality,
+            'label' => (string) $quality . 'p',
+        ];
     }
 
     if ($activeSubview === 'app-roles') {
@@ -9481,6 +9644,7 @@ function ve_admin_backend_app_view_payload(string $activeSubview): array
                     ve_admin_form_field('text', 'admin_default_page_size', 'Default page size', $settings['admin_default_page_size'] ?? ''),
                     ve_admin_form_field('text', 'admin_recent_audit_limit', 'Recent audit limit', $settings['admin_recent_audit_limit'] ?? ''),
                     ve_admin_form_field('text', 'remote_max_queue_per_user', 'Remote queue max per user', $settings['remote_max_queue_per_user'] ?? ''),
+                    ve_admin_form_field('select', 'remote_default_quality', 'Remote default quality', $settings['remote_default_quality'] ?? '1080', ['options' => $qualityOptions]),
                 ],
                 'actions' => [['type' => 'submit', 'label' => 'Save app settings', 'tone' => 'primary']],
             ],
@@ -10098,6 +10262,17 @@ function ve_handle_backend_request(): void
 
                     ve_admin_delete_remote_upload((int) ($_POST['job_id'] ?? 0), $actorUserId);
                     ve_flash('success', 'Remote job deleted.');
+                    break;
+
+                case 'save_remote_host_policy':
+                    if (!ve_user_has_permission($actorUser, 'admin.remote_uploads.manage')) {
+                        throw new RuntimeException('You do not have permission to manage remote uploads.');
+                    }
+
+                    $enabledHostKeys = is_array($_POST['enabled_hosts'] ?? null) ? (array) $_POST['enabled_hosts'] : [];
+                    ve_remote_host_persist_settings($enabledHostKeys, $actorUserId);
+                    ve_add_notification($actorUserId, 'Remote upload hosts updated', 'Sitewide remote-upload host policies were updated from the backend.');
+                    ve_flash('success', 'Remote upload host policy saved successfully.');
                     break;
 
                 case 'update_dmca_status':

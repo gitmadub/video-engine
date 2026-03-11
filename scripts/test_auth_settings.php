@@ -143,7 +143,7 @@ function assert_settings_panel_structure(string $html): void
     $settingsData = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " details ") and contains(concat(" ", normalize-space(@class), " "), " settings_data ")]')->item(0);
     assert_true($settingsData instanceof DOMElement, 'Settings page should contain the settings data container.');
 
-    foreach (['details', 'password_settings', 'email_settings', 'player_settings', 'premium_settings', 'ftp_servers', 'custom_domain', 'api_access', 'remote_upload_hosts', 'delete_account'] as $panelId) {
+    foreach (['details', 'password_settings', 'email_settings', 'player_settings', 'premium_settings', 'ftp_servers', 'custom_domain', 'api_access', 'delete_account'] as $panelId) {
         $panel = $xpath->query('//*[@id="' . $panelId . '"]')->item(0);
         assert_true($panel instanceof DOMElement, 'Missing settings panel #' . $panelId . '.');
         assert_true(
@@ -170,7 +170,6 @@ function assert_settings_forms_bound(string $html): void
         'player_settings' => '/account/player',
         'premium_settings' => '/account/advertising',
         'api_access' => '/account/api-settings',
-        'remote_upload_hosts' => '/account/remote-upload',
         'delete_account' => '/account/delete',
     ];
 
@@ -220,12 +219,12 @@ function assert_settings_ajax_script_valid(string $html): void
         'Settings page should render the managed API key rotation flow.'
     );
     assert_true(
-        str_contains($html, '/account/remote-upload'),
-        'Settings page should render the managed remote-upload host settings form.'
+        !str_contains($html, '/account/remote-upload'),
+        'Settings page should no longer expose the sitewide remote-upload host policy form.'
     );
     assert_true(
-        str_contains($html, '#refreshRemoteUploadHosts'),
-        'Settings page should render the remote-upload host refresh action.'
+        !str_contains($html, 'id="remote_upload_hosts"'),
+        'Settings page should no longer render the sitewide remote-upload host manager panel.'
     );
 }
 
@@ -539,10 +538,10 @@ try {
     assert_true(str_contains($settingsPage['body'], '/premium-plans'), 'Settings page should use the dashboard premium-plans route.');
     assert_true(!str_contains($settingsPage['body'], 'href="/premium"'), 'Settings page should not use the guest premium route.');
     assert_true(str_contains($settingsPage['body'], '/account/api-settings'), 'Settings page should expose the API policy form.');
-    assert_true(str_contains($settingsPage['body'], '/account/remote-upload'), 'Settings page should expose the remote-upload host policy form.');
     assert_true(str_contains($settingsPage['body'], 'data-api-status'), 'Settings page should render the API usage summary.');
     assert_true(str_contains($settingsPage['body'], 'id="apiKeyModal"'), 'Settings page should render the API key rotation modal.');
-    assert_true(str_contains($settingsPage['body'], 'id="remote_upload_hosts"'), 'Settings page should render the remote-upload host manager panel for the manager account.');
+    assert_true(!str_contains($settingsPage['body'], '/account/remote-upload'), 'Settings page should no longer expose the sitewide remote-upload host policy form.');
+    assert_true(!str_contains($settingsPage['body'], 'id="remote_upload_hosts"'), 'Settings page should no longer render the sitewide remote-upload host manager panel.');
     assert_settings_panel_structure($settingsPage['body']);
     assert_settings_forms_bound($settingsPage['body']);
     assert_settings_ajax_script_valid($settingsPage['body']);
@@ -569,51 +568,6 @@ try {
     assert_true($client->request('GET', '/?op=crypto_payments&coin=BTC')['status'] === 410, 'Legacy crypto checkout endpoints should be disabled.');
     $csrf = extract_hidden_token($settingsPage['body']);
     $oldApiKey = extract_api_key($settingsPage['body']);
-
-    $remoteUploadSnapshot = json_response($client->request('GET', '/api/account/remote-upload', [
-        'headers' => $ajaxHeaders,
-    ]));
-    assert_true(($remoteUploadSnapshot['status'] ?? null) === 'ok', 'Remote-upload host snapshot endpoint should return success JSON.');
-    $supportedLabels = array_map(
-        static fn (array $item): string => (string) ($item['label'] ?? ''),
-        array_values(array_filter($remoteUploadSnapshot['remote_upload']['supported_hosts'] ?? [], static fn ($item): bool => is_array($item)))
-    );
-    assert_true(in_array('YouTube', $supportedLabels, true), 'Supported-host snapshot should include verified enabled providers.');
-    assert_true(!in_array('Uploaded', $supportedLabels, true), 'Supported-host snapshot should exclude inactive providers.');
-    assert_true(!in_array('Zippyshare', $supportedLabels, true), 'Supported-host snapshot should exclude dead providers.');
-
-    $remoteUploadSaveResponse = $client->request('POST', '/account/remote-upload', [
-        'headers' => array_merge($ajaxHeaders, [
-            'X-CSRF-Token' => $csrf,
-        ]),
-        'form' => http_build_query([
-            'token' => $csrf,
-            'enabled_hosts' => ['google_drive', 'dropbox', 'mega', 'vidi64', 'direct'],
-        ]),
-    ]);
-    assert_json_content_type($remoteUploadSaveResponse, 'Saving remote-upload host policy should return JSON.');
-    $remoteUploadSave = json_response($remoteUploadSaveResponse);
-    assert_true(($remoteUploadSave['status'] ?? null) === 'ok', 'Saving remote-upload host policy should return success JSON.');
-    $updatedSupportedLabels = array_map(
-        static fn (array $item): string => (string) ($item['label'] ?? ''),
-        array_values(array_filter($remoteUploadSave['remote_upload']['supported_hosts'] ?? [], static fn ($item): bool => is_array($item)))
-    );
-    assert_true(!in_array('YouTube', $updatedSupportedLabels, true), 'Disabling YouTube should remove it from the supported-host payload.');
-    assert_true(in_array('Google Drive', $updatedSupportedLabels, true), 'Saving remote-upload host policy should preserve other enabled verified providers.');
-
-    $remoteUploadRestoreResponse = $client->request('POST', '/account/remote-upload', [
-        'headers' => array_merge($ajaxHeaders, [
-            'X-CSRF-Token' => $csrf,
-        ]),
-        'form' => http_build_query([
-            'token' => $csrf,
-            'enabled_hosts' => ['youtube', 'google_drive', 'dropbox', 'mega', 'vidi64', 'direct'],
-        ]),
-    ]);
-    assert_json_content_type($remoteUploadRestoreResponse, 'Restoring remote-upload host policy should return JSON.');
-    $remoteUploadRestore = json_response($remoteUploadRestoreResponse);
-    assert_true(($remoteUploadRestore['status'] ?? null) === 'ok', 'Restoring remote-upload host policy should return success JSON.');
-    echo "remote host settings ok\n";
 
     $accountSaveResponse = $client->request('POST', '/account/settings', [
         'form' => [

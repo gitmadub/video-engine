@@ -414,7 +414,7 @@ $(document).ready(function() {
             block.fields.forEach(function(field) {
                 var optionsHtml = '';
                 html += '<div class="form-group"' + (field.type === 'textarea' ? ' style="grid-column:1 / -1;"' : '') + '>';
-                if (field.type !== 'hidden') {
+                if (field.type !== 'hidden' && field.type !== 'checkbox') {
                     html += '<label>' + escapeHtml(field.label || '') + '</label>';
                 }
 
@@ -426,7 +426,8 @@ $(document).ready(function() {
                 } else if (field.type === 'textarea') {
                     html += '<textarea name="' + escapeHtml(field.name || '') + '" class="form-control">' + escapeHtml(field.value || '') + '</textarea>';
                 } else if (field.type === 'checkbox') {
-                    html += '<div class="custom-control custom-checkbox"><input type="checkbox" class="custom-control-input" id="admin_field_' + escapeHtml(field.name || '') + '" name="' + escapeHtml(field.name || '') + '" value="1"' + (field.checked ? ' checked="checked"' : '') + '><label class="custom-control-label" for="admin_field_' + escapeHtml(field.name || '') + '">' + escapeHtml(field.label || '') + '</label></div>';
+                    var checkboxId = escapeHtml(field.id || ('admin_field_' + String(field.name || '').replace(/[^a-z0-9_]+/ig, '_')));
+                    html += '<div class="custom-control custom-checkbox"><input type="checkbox" class="custom-control-input" id="' + checkboxId + '" name="' + escapeHtml(field.name || '') + '" value="' + escapeHtml(field.value || '1') + '"' + (field.checked ? ' checked="checked"' : '') + '><label class="custom-control-label" for="' + checkboxId + '">' + escapeHtml(field.label || '') + '</label></div>';
                 } else if (field.type === 'hidden') {
                     html += '<input type="hidden" name="' + escapeHtml(field.name || '') + '" value="' + escapeHtml(field.value || '') + '">';
                 } else {

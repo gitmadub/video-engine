@@ -270,6 +270,7 @@ function ve_default_app_settings(): array
     return [
         'video_payable_min_watch_seconds' => (string) max(5, (int) (getenv('VE_VIDEO_PAYABLE_MIN_WATCH_SECONDS') ?: 30)),
         'video_payable_max_views_per_viewer_per_day' => (string) max(0, (int) (getenv('VE_VIDEO_PAYABLE_MAX_VIEWS_PER_VIEWER_PER_DAY') ?: 1)),
+        'remote_default_quality' => '1080',
     ];
 }
 
@@ -4792,31 +4793,6 @@ function ve_settings_script(): string
             syncApiModalMeta(snapshot);
         }
 
-        function applyRemoteUploadSnapshot(snapshot) {
-            if (!snapshot || !snapshot.can_manage || typeof snapshot.panel_html !== 'string' || !snapshot.panel_html) {
-                return;
-            }
-
-            var \$panel = $('#remote_upload_hosts');
-
-            if (!\$panel.length) {
-                return;
-            }
-
-            var wasActive = \$panel.hasClass('active');
-            var \$replacement = $(snapshot.panel_html);
-
-            if (!\$replacement.length) {
-                return;
-            }
-
-            if (wasActive) {
-                \$replacement.addClass('active');
-            }
-
-            \$panel.replaceWith(\$replacement);
-        }
-
         function applyPlayerSnapshot(snapshot) {
             if (!snapshot) {
                 return;
@@ -4888,34 +4864,6 @@ function ve_settings_script(): string
                 }
             }).fail(function (xhr) {
                 showFormFeedback(\$apiForm, 'danger', handleAjaxError(xhr, 'Unable to load API usage right now.'));
-            });
-        }
-
-        function loadRemoteUploadSettings(successMessage) {
-            var \$form = $('#remote_upload_hosts form').first();
-
-            if (!\$form.length) {
-                return;
-            }
-
-            $.ajax({
-                type: 'GET',
-                url: appUrl('/api/account/remote-upload'),
-                dataType: 'json',
-                headers: ajaxHeaders
-            }).done(function (response) {
-                if (response.status !== 'ok' || !response.remote_upload || !response.remote_upload.can_manage) {
-                    showFormFeedback(\$form, 'danger', response.message || 'Unable to load remote-upload host settings.');
-                    return;
-                }
-
-                applyRemoteUploadSnapshot(response.remote_upload);
-
-                if (successMessage) {
-                    showFormFeedback($('#remote_upload_hosts form').first(), 'success', successMessage);
-                }
-            }).fail(function (xhr) {
-                showFormFeedback(\$form, 'danger', handleAjaxError(xhr, 'Unable to load remote-upload host settings right now.'));
             });
         }
 
@@ -5083,11 +5031,6 @@ function ve_settings_script(): string
 
                 if (action === '/account/api-settings' && response.api) {
                     applyApiSnapshot(response.api);
-                }
-
-                if (action === '/account/remote-upload' && response.remote_upload) {
-                    applyRemoteUploadSnapshot(response.remote_upload);
-                    \$feedbackForm = $('#remote_upload_hosts form').first();
                 }
 
                 if (response.status !== 'ok' && response.status !== 'warning') {
@@ -5273,12 +5216,6 @@ function ve_settings_script(): string
             loadApiUsage('API usage refreshed.');
         });
 
-        $(document).on('click', '#refreshRemoteUploadHosts', function (event) {
-            event.preventDefault();
-            clearAllPanelFeedback();
-            loadRemoteUploadSettings('Remote-upload host usage refreshed.');
-        });
-
         $(document).on('input', '#domainInput', function () {
             clearPanelFeedback($('#custom_domain'));
         });
@@ -5303,7 +5240,6 @@ function ve_render_settings_page(): void
     $settings = $user['settings'];
     $api = ve_api_usage_snapshot((int) $user['id']);
     $dashboard = ve_dashboard_summary((int) $user['id']);
-    $remoteUploadSnapshot = ve_remote_host_dashboard_snapshot($user);
     ve_pull_flash();
     $splashPreviewHtml = ve_player_splash_preview_html($settings);
 
@@ -5332,16 +5268,8 @@ function ve_render_settings_page(): void
         'This workflow immediately closes the account, revokes active sessions, and prevents future logins.',
         $html
     );
-    $html = str_replace(
-        '<!--REMOTE_UPLOAD_HOSTS_MENU-->',
-        (bool) ($remoteUploadSnapshot['can_manage'] ?? false) ? ve_remote_host_settings_menu_html() : '',
-        $html
-    );
-    $html = str_replace(
-        '<!--REMOTE_UPLOAD_HOSTS_PANEL-->',
-        (string) ($remoteUploadSnapshot['panel_html'] ?? ''),
-        $html
-    );
+    $html = str_replace('<!--REMOTE_UPLOAD_HOSTS_MENU-->', '', $html);
+    $html = str_replace('<!--REMOTE_UPLOAD_HOSTS_PANEL-->', '', $html);
     $html = ve_settings_bind_form($html, 'my_account', '/account/settings');
     $html = ve_settings_bind_form($html, 'my_password', '/account/password');
     $html = ve_settings_bind_form($html, 'my_email', '/account/email');
