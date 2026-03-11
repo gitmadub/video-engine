@@ -140,6 +140,8 @@ foreach ($videos as $video) {
         $migrated++;
     } elseif (is_dir($targetDirectory)) {
         $updatedOnly++;
+    } elseif ($sourceDirectory === '') {
+        $updatedOnly++;
     } else {
         $skipped++;
         continue;
