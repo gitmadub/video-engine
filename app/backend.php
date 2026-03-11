@@ -1300,17 +1300,18 @@ function ve_user_is_premium(array $user): bool
 
 function ve_player_splash_preview_html(array $settings): string
 {
-    $path = ve_storage_relative_path_to_absolute((string) ($settings['splash_image_path'] ?? ''));
+    $playerImageMode = trim((string) ($settings['player_image_mode'] ?? ''));
 
-    if ($path === '' || !is_file($path)) {
-        return '<div class="text-muted small">No splash image uploaded yet.</div>';
+    if (!in_array($playerImageMode, ['splash', 'single'], true)) {
+        $playerImageMode = 'splash';
     }
 
-    $updatedAt = (string) ($settings['updated_at'] ?? ve_timestamp());
-    $splashPreviewUrl = ve_h(ve_url('/account/player/splash-preview?ts=' . rawurlencode($updatedAt)));
+    $activeFile = $playerImageMode === 'single' ? 'poster.jpg' : 'preview.jpg';
+    $activeLabel = $playerImageMode === 'single' ? 'Single image' : 'Splash image';
 
-    return '<div class="small text-muted mb-2">Current protected splash image</div>'
-        . '<img src="' . $splashPreviewUrl . '" alt="Splash preview" style="display:block;width:100%;max-width:100%;border-radius:12px;border:1px solid rgba(255,255,255,0.08);background:#0c0c0c;">';
+    return '<div class="small text-muted mb-2">Generated automatically for every processed video.</div>'
+        . '<div class="small text-muted mb-1"><strong>' . ve_h($activeLabel) . '</strong> currently uses <code>' . ve_h($activeFile) . '</code>.</div>'
+        . '<div class="small text-muted">Splash image = <code>preview.jpg</code><br>Single image = <code>poster.jpg</code></div>';
 }
 
 function ve_player_settings_payload(int $userId, ?array $settings = null): array
@@ -1320,7 +1321,9 @@ function ve_player_settings_payload(int $userId, ?array $settings = null): array
     return [
         'show_embed_title' => ((int) ($settings['show_embed_title'] ?? 0)) === 1,
         'auto_subtitle_start' => ((int) ($settings['auto_subtitle_start'] ?? 0)) === 1,
-        'player_image_mode' => (string) ($settings['player_image_mode'] ?? ''),
+        'player_image_mode' => in_array((string) ($settings['player_image_mode'] ?? ''), ['splash', 'single'], true)
+            ? (string) ($settings['player_image_mode'] ?? '')
+            : 'splash',
         'player_colour' => strtolower((string) ($settings['player_colour'] ?? 'ff9900')),
         'embed_width' => (int) ($settings['embed_width'] ?? 600),
         'embed_height' => (int) ($settings['embed_height'] ?? 480),
@@ -3362,6 +3365,9 @@ function ve_save_player_settings(int $userId): void
 
     $settings = ve_get_user_settings($userId);
     $currentPlayerImageMode = (string) ($settings['player_image_mode'] ?? '');
+    if (!in_array($currentPlayerImageMode, ['splash', 'single'], true)) {
+        $currentPlayerImageMode = 'splash';
+    }
     $currentPlayerColour = strtolower((string) ($settings['player_colour'] ?? 'ff9900'));
     $currentEmbedWidth = (int) ($settings['embed_width'] ?? 600);
     $currentEmbedHeight = (int) ($settings['embed_height'] ?? 480);
@@ -3382,6 +3388,10 @@ function ve_save_player_settings(int $userId): void
 
     if (!in_array($playerImageMode, ['', 'splash', 'single'], true)) {
         ve_fail_form_submission('Choose a valid player image mode.', '/dashboard/settings#player_settings');
+    }
+
+    if ($playerImageMode === '') {
+        $playerImageMode = 'splash';
     }
 
     if (!preg_match('/^[A-Fa-f0-9]{6}$/', $playerColour)) {
@@ -4325,6 +4335,7 @@ function ve_runtime_html_transform(string $html, string $relativePath = ''): str
     $runtimeScript = ve_runtime_script_tag();
     $mainScriptUrl = ve_h(ve_url('/assets/js/main.js'));
     $legacyAdapterTag = '<script src="' . ve_h(ve_url('/assets/js/legacy_api_adapter.js')) . '"></script>';
+    $textLogoStyleTag = ve_runtime_text_logo_style_tag();
     $canonicalLinkReplacements = [
         'href="../index.html"' => 'href="' . ve_url('/') . '"',
         "href='../index.html'" => "href='" . ve_url('/') . "'",
@@ -4345,9 +4356,9 @@ function ve_runtime_html_transform(string $html, string $relativePath = ''): str
     ];
 
     if (str_contains($html, '</head>')) {
-        $html = str_replace('</head>', $runtimeScript . '</head>', $html);
+        $html = str_replace('</head>', $textLogoStyleTag . $runtimeScript . '</head>', $html);
     } else {
-        $html = $runtimeScript . $html;
+        $html = $textLogoStyleTag . $runtimeScript . $html;
     }
 
     $html = str_replace('src="/assets/js/main__q_8bb33b25bfc8.js"', 'src="' . $mainScriptUrl . '"', $html);
@@ -4407,6 +4418,27 @@ function ve_runtime_html_transform(string $html, string $relativePath = ''): str
     }
 
     $html = strtr($html, $canonicalLinkReplacements);
+    $html = (string) preg_replace_callback(
+        '#<a(?P<attributes>[^>]*)class=(?P<class_quote>["\'])(?P<class_value>(?:(?!\k<class_quote>).)*\bnavbar-brand\b(?:(?!\k<class_quote>).)*)\k<class_quote>(?P<tail>[^>]*)>\s*<img\b[^>]*\bsrc=(["\'])/assets/img/logo-s\.png\5[^>]*>\s*</a>#is',
+        static function (array $matches): string {
+            $attributes = trim(
+                $matches['attributes']
+                . 'class='
+                . $matches['class_quote']
+                . $matches['class_value']
+                . $matches['class_quote']
+                . $matches['tail']
+            );
+
+            return '<a ' . $attributes . '>' . ve_runtime_text_logo_html('nav') . '</a>';
+        },
+        $html
+    );
+    $html = (string) preg_replace(
+        '#<img\b(?=[^>]*\bclass=(["\'])[^"\']*\blogo\b[^"\']*\1)(?=[^>]*\bsrc=(["\'])/assets/img/logo-s\.png\2)[^>]*>#is',
+        ve_runtime_text_logo_html('footer'),
+        $html
+    );
     $html = (string) preg_replace(
         '#<li>\s*<a[^>]*href=["\']https://help\.filehost\.net/?["\'][^>]*>\s*Help center\s*</a>\s*</li>#i',
         '',
@@ -4414,6 +4446,32 @@ function ve_runtime_html_transform(string $html, string $relativePath = ''): str
     );
 
     return $html;
+}
+
+function ve_runtime_text_logo_style_tag(): string
+{
+    return <<<'HTML'
+<style>
+.ve-text-logo{display:inline-flex;align-items:baseline;gap:.02em;font-weight:800;letter-spacing:-.03em;line-height:1;color:#fff;font-size:1.75rem;white-space:nowrap}
+.ve-text-logo:hover,.ve-text-logo:focus{text-decoration:none;color:#fff}
+.ve-text-logo__accent{color:#ff9900}
+.ve-text-logo--nav{font-size:1.65rem}
+.ve-text-logo--footer{font-size:1.35rem}
+.navbar-brand .ve-text-logo{padding:.1rem 0}
+.footer .ve-text-logo{display:inline-flex;margin-top:.15rem}
+@media (max-width: 575.98px){
+    .ve-text-logo--nav{font-size:1.45rem}
+    .ve-text-logo--footer{font-size:1.2rem}
+}
+</style>
+HTML;
+}
+
+function ve_runtime_text_logo_html(string $context = 'nav'): string
+{
+    $modifier = $context === 'footer' ? ' ve-text-logo--footer' : ' ve-text-logo--nav';
+
+    return '<span class="ve-text-logo' . $modifier . '" aria-label="FileHost.net">FileHost<span class="ve-text-logo__accent">.net</span></span>';
 }
 
 function ve_html_set_input_value(string $html, string $name, string $value): string
@@ -5433,7 +5491,11 @@ function ve_render_settings_page(): void
     $html = ve_html_set_checkbox($html, 'usr_srt_burn', (bool) ($settings['extract_subtitles'] ?? false));
     $html = ve_html_set_checkbox($html, 'usr_embed_title', (bool) ($settings['show_embed_title'] ?? false));
     $html = ve_html_set_checkbox($html, 'usr_sub_auto_start', (bool) ($settings['auto_subtitle_start'] ?? false));
-    $html = ve_html_set_select_value($html, 'usr_player_image', (string) ($settings['player_image_mode'] ?? ''));
+    $savedPlayerImageMode = (string) ($settings['player_image_mode'] ?? '');
+    if (!in_array($savedPlayerImageMode, ['splash', 'single'], true)) {
+        $savedPlayerImageMode = 'splash';
+    }
+    $html = ve_html_set_select_value($html, 'usr_player_image', $savedPlayerImageMode);
     $html = ve_html_set_input_value($html, 'usr_player_colour', (string) ($settings['player_colour'] ?? 'ff9900'));
     $html = ve_html_set_input_value($html, 'embedcode_width', (string) ($settings['embed_width'] ?? 600));
     $html = ve_html_set_input_value($html, 'embedcode_height', (string) ($settings['embed_height'] ?? 480));
