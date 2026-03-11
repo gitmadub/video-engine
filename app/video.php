@@ -197,7 +197,7 @@ function ve_video_config(): array
         'download_wait_free' => max(0, (int) (getenv('VE_VIDEO_DOWNLOAD_WAIT_FREE') ?: 15)),
         'download_wait_premium' => max(0, (int) (getenv('VE_VIDEO_DOWNLOAD_WAIT_PREMIUM') ?: 0)),
         'download_request_ttl' => max(60, (int) (getenv('VE_VIDEO_DOWNLOAD_REQUEST_TTL') ?: 600)),
-        'download_ready_ttl' => max(15, (int) (getenv('VE_VIDEO_DOWNLOAD_READY_TTL') ?: 45)),
+        'download_ready_ttl' => max(600, (int) (getenv('VE_VIDEO_DOWNLOAD_READY_TTL') ?: 600)),
     ];
 
     return $config;
@@ -1560,14 +1560,16 @@ function ve_video_folder_to_legacy_payload(array $folder): array
     $folderId = (int) ($folder['id'] ?? 0);
     $userId = (int) ($folder['user_id'] ?? 0);
     $sizeBytes = ($folderId > 0 && $userId > 0) ? ve_video_folder_size_bytes($userId, $folderId) : 0;
+    $publicCode = trim((string) ($folder['public_code'] ?? ''));
 
     return [
         'fld_id' => $folderId,
-        'fld_code' => (string) ($folder['public_code'] ?? ''),
+        'fld_code' => $publicCode,
         'fld_name' => (string) ($folder['name'] ?? ''),
         'siz' => ve_video_format_bytes($sizeBytes),
         'siz_bytes' => $sizeBytes,
         'cre' => ve_video_legacy_date_label((string) ($folder['created_at'] ?? '')),
+        'pub' => $publicCode !== '' ? 1 : 0,
         'share_url' => ve_video_folder_share_url($folder),
     ];
 }
@@ -2203,6 +2205,71 @@ function ve_video_set_user_visibility(int $userId, array $videoIds, bool $isPubl
     return $stmt->rowCount();
 }
 
+function ve_video_set_user_folder_visibility(int $userId, array $folderIds, bool $isPublic): int
+{
+    $folderIds = ve_video_legacy_normalize_id_list($folderIds);
+
+    if ($folderIds === []) {
+        return 0;
+    }
+
+    $placeholders = implode(', ', array_fill(0, count($folderIds), '?'));
+
+    if ($isPublic === false) {
+        $params = array_merge(['', ve_now(), $userId], $folderIds);
+        $stmt = ve_db()->prepare(
+            'UPDATE video_folders
+             SET public_code = ?, updated_at = ?
+             WHERE user_id = ? AND deleted_at IS NULL AND id IN (' . $placeholders . ')'
+        );
+        $stmt->execute($params);
+
+        return $stmt->rowCount();
+    }
+
+    $params = array_merge([$userId], $folderIds);
+    $stmt = ve_db()->prepare(
+        'SELECT id, public_code
+         FROM video_folders
+         WHERE user_id = ? AND deleted_at IS NULL AND id IN (' . $placeholders . ')'
+    );
+    $stmt->execute($params);
+    $folders = $stmt->fetchAll();
+
+    if (!is_array($folders) || $folders === []) {
+        return 0;
+    }
+
+    $updateStmt = ve_db()->prepare(
+        'UPDATE video_folders
+         SET public_code = :public_code, updated_at = :updated_at
+         WHERE id = :id AND user_id = :user_id'
+    );
+    $updated = 0;
+
+    foreach ($folders as $folder) {
+        $folderId = (int) ($folder['id'] ?? 0);
+        $publicCode = trim((string) ($folder['public_code'] ?? ''));
+
+        if ($folderId <= 0 || $publicCode !== '') {
+            continue;
+        }
+
+        $updateStmt->execute([
+            ':public_code' => ve_video_folder_generate_public_code(),
+            ':updated_at' => ve_now(),
+            ':id' => $folderId,
+            ':user_id' => $userId,
+        ]);
+
+        if ($updateStmt->rowCount() > 0) {
+            $updated++;
+        }
+    }
+
+    return $updated;
+}
+
 function ve_handle_legacy_videos_json(): void
 {
     $user = ve_video_legacy_current_user();
@@ -2410,22 +2477,28 @@ function ve_handle_legacy_videos_json(): void
     if (ve_is_method('POST') && array_key_exists('set_public', $_POST)) {
         ve_require_csrf(ve_request_csrf_token());
         $videoIds = $_POST['file_id'] ?? [];
-        $updatedCount = ve_video_set_user_visibility($userId, is_array($videoIds) ? $videoIds : [$videoIds], true);
+        $folderIds = $_POST['folder_id'] ?? [];
+        $updatedVideos = ve_video_set_user_visibility($userId, is_array($videoIds) ? $videoIds : [$videoIds], true);
+        $updatedFolders = ve_video_set_user_folder_visibility($userId, is_array($folderIds) ? $folderIds : [$folderIds], true);
+        $updatedCount = $updatedVideos + $updatedFolders;
 
         ve_json([
             'status' => $updatedCount > 0 ? 'ok' : 'fail',
-            'message' => $updatedCount > 0 ? 'Videos are now public.' : 'No videos were updated.',
+            'message' => $updatedCount > 0 ? 'Selected items are now public.' : 'No items were updated.',
         ]);
     }
 
     if (ve_is_method('POST') && array_key_exists('set_private', $_POST)) {
         ve_require_csrf(ve_request_csrf_token());
         $videoIds = $_POST['file_id'] ?? [];
-        $updatedCount = ve_video_set_user_visibility($userId, is_array($videoIds) ? $videoIds : [$videoIds], false);
+        $folderIds = $_POST['folder_id'] ?? [];
+        $updatedVideos = ve_video_set_user_visibility($userId, is_array($videoIds) ? $videoIds : [$videoIds], false);
+        $updatedFolders = ve_video_set_user_folder_visibility($userId, is_array($folderIds) ? $folderIds : [$folderIds], false);
+        $updatedCount = $updatedVideos + $updatedFolders;
 
         ve_json([
             'status' => $updatedCount > 0 ? 'ok' : 'fail',
-            'message' => $updatedCount > 0 ? 'Videos are now private.' : 'No videos were updated.',
+            'message' => $updatedCount > 0 ? 'Selected items are now private.' : 'No items were updated.',
         ]);
     }
 
@@ -2449,6 +2522,7 @@ function ve_handle_legacy_videos_json(): void
     );
     $folders = array_map('ve_video_folder_to_legacy_payload', ve_video_folder_list_children($userId, $folderId));
     $processingAvailable = ve_video_processing_available();
+    $settings = ve_get_user_settings($userId);
 
     ve_json([
         'status' => 'ok',
@@ -5129,10 +5203,24 @@ function ve_video_emit_download_file(string $path, string $downloadName): void
     exit;
 }
 
-function ve_video_render_download_unavailable(string $title, string $message, int $status = 503): void
+function ve_video_download_is_inline_request(): bool
+{
+    return trim((string) ($_POST['download_context'] ?? $_GET['download_context'] ?? '')) === 'inline';
+}
+
+function ve_video_render_download_unavailable(string $title, string $message, int $status = 503, bool $retryable = false): void
 {
     $safeTitle = ve_h($title);
     $safeMessage = ve_h($message);
+
+    if (ve_video_download_is_inline_request()) {
+        ve_json([
+            'type' => 've-download-result',
+            'status' => 'fail',
+            'message' => $message,
+            'retryable' => $retryable,
+        ], $status);
+    }
 
     ve_html(<<<HTML
 <!doctype html>
@@ -5265,8 +5353,9 @@ function ve_video_download_consume_file(string $publicId, string $downloadToken,
     if (!is_array($grant)) {
         ve_video_render_download_unavailable(
             $title,
-            'This protected download link is invalid or has expired. Return to the watch page and request a new one.',
-            403
+            'This protected download link is invalid or has expired.',
+            403,
+            true
         );
     }
 
@@ -5304,6 +5393,10 @@ function ve_video_download_consume_file(string $publicId, string $downloadToken,
 
 function ve_video_download_file(string $publicId): void
 {
+    if (ve_is_method('GET')) {
+        ve_redirect('/d/' . rawurlencode($publicId));
+    }
+
     if (!ve_is_method('POST')) {
         ve_method_not_allowed(['POST']);
     }
@@ -8868,6 +8961,8 @@ function ve_render_secure_watch_page(string $publicId): void
     $safeStatusCopy = ve_h($statusCopy);
     $ownFileBanner = '';
     $exportPanel = '';
+    $playerWrapSpacingClass = $isOwnerView ? '' : ' mt-4';
+    $downloadPanelSpacingClass = $isOwnerView ? '' : ' mt-3';
 
     if ($isOwnerView) {
         $ownFileBanner = <<<HTML
@@ -8883,6 +8978,9 @@ HTML;
         $exportPanel = <<<HTML
     <div class="container my-3">
         <div class="video-content text-center">
+            <div class="export-panel-header">
+                <div class="v-owner">only visible to the file owner</div>
+            </div>
             <ul class="nav nav-pills mb-3" id="pills-tab" role="tablist">
                 <li class="nav-item">
                     <a class="nav-link active" id="pills-dr-tab" data-toggle="pill" href="#pills-dr" role="tab" aria-controls="pills-dr" aria-selected="true">Download link</a>
@@ -8895,7 +8993,6 @@ HTML;
                 </li>
             </ul>
             <div class="tab-content" id="pills-tabContent">
-                <div class="v-owner">only visible to the file owner</div>
                 <div class="tab-pane fade show active buttonInside" id="pills-dr" role="tabpanel" aria-labelledby="pills-dr-tab">
                     <textarea id="code_txt" class="form-control export-txt">{$watchPageUrl}</textarea>
                     <button class="copy-in btn btn-primary btn-sm" type="button" data-copy-target="code_txt">copy</button>
@@ -8916,8 +9013,9 @@ HTML;
 
     $downloadPanel = $downloadAvailable
         ? <<<HTML
-    <div class="container">
+    <div class="container{$downloadPanelSpacingClass}">
         <div class="video-content text-center">
+            <div id="ve-download-notice" class="download-notice" hidden></div>
             <div id="ve-download-status" class="countdown">{$safeDownloadStatusText}</div>
             <div class="download-action-shell">
                 <a href="#download_now" id="ve-download-button" class="btn btn-primary download_vd" data-ready="0">{$safeDownloadButtonIdleText} <i class="fad fa-arrow-right ml-2"></i></a>
@@ -8930,8 +9028,9 @@ HTML;
     </div>
 HTML
         : <<<HTML
-    <div class="container">
+    <div class="container{$downloadPanelSpacingClass}">
         <div class="video-content text-center">
+            <div id="ve-download-notice" class="download-notice" hidden></div>
             <div class="countdown">{$safeStatusCopy}</div>
         </div>
     </div>
@@ -8998,10 +9097,13 @@ HTML;
             border-radius: 1px;
             transition: color .3s ease, background .3s ease;
         }
+        .export-panel-header {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 8px;
+        }
         .v-owner {
-            position: absolute;
-            right: 8px;
-            top: 5px;
+            position: static;
             font-size: 12px;
             color: #6d6d6d;
         }
@@ -9050,6 +9152,20 @@ HTML;
         .download-meta {
             margin-top: 14px;
         }
+        .download-notice {
+            display: none;
+            margin-bottom: 12px;
+            padding: 10px 14px;
+            background: rgba(255, 153, 0, 0.12);
+            color: #ffd59a;
+            font-weight: 700;
+            line-height: 1.4;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .download-notice.is-visible {
+            display: block;
+        }
         .download-meta-copy {
             color: #c7c7c7;
             font-weight: 600;
@@ -9072,7 +9188,7 @@ HTML;
         }
         body.ve-cinema-mode .player-wrap {
             position: fixed;
-            inset: 16px;
+            inset: 0;
             z-index: 4;
             display: flex;
             align-items: center;
@@ -9084,23 +9200,29 @@ HTML;
             box-shadow: none;
             transform: none;
         }
+        body.ve-cinema-mode .player-wrap.container {
+            padding-left: 0;
+            padding-right: 0;
+        }
         body.ve-cinema-mode #os_player {
-            width: min(calc(100vw - 32px), calc((100vh - 32px) * 16 / 9));
+            width: min(100vw, calc(100vh * 16 / 9));
             max-width: none;
-            margin: 0 auto;
+            margin: 0;
         }
         body.ve-cinema-mode .container:not(.player-wrap) {
             position: relative;
             z-index: 0;
-            opacity: 0.2;
-            transition: opacity .2s ease;
+            opacity: 0;
+            pointer-events: none;
+            visibility: hidden;
+            transition: opacity .2s ease, visibility .2s ease;
         }
         @media (max-width: 767.98px) {
             body.ve-cinema-mode .player-wrap {
-                inset: 8px;
+                inset: 0;
             }
             body.ve-cinema-mode #os_player {
-                width: min(calc(100vw - 16px), calc((100vh - 16px) * 16 / 9));
+                width: min(100vw, calc(100vh * 16 / 9));
             }
         }
         .spinner-inline {
@@ -9165,7 +9287,7 @@ HTML;
             .v-owner {
                 position: static;
                 display: block;
-                margin-bottom: 8px;
+                margin-bottom: 0;
                 text-align: right;
             }
             .buttonInside {
@@ -9194,7 +9316,7 @@ HTML;
 </head>
 <body>
     {$ownFileBanner}
-    <div class="player-wrap container">
+    <div class="player-wrap container{$playerWrapSpacingClass}">
         <div style="--aspect-ratio: 16/9;" id="os_player">
             <iframe src="{$localEmbedUrl}" scrolling="no" frameborder="0" allowfullscreen="true"></iframe>
         </div>
@@ -9264,9 +9386,17 @@ HTML;
             var downloadCsrfToken = {$downloadCsrfTokenJs};
             var downloadWaitSeconds = {$downloadWaitSeconds};
             var downloadButton = document.getElementById('ve-download-button');
+            var downloadNotice = document.getElementById('ve-download-notice');
             var downloadStatus = document.getElementById('ve-download-status');
             var downloadMeta = document.getElementById('ve-download-meta');
             var countdownTimer = null;
+            var resolveRetryTimer = null;
+            var downloadSubmitResetTimer = null;
+            var downloadNoticeTimer = null;
+            var countdownTargetAt = 0;
+            var countdownFinishedAwaitingToken = false;
+            var downloadRequestStartedAt = 0;
+            var downloadRetryNotice = '';
             var activeRequestToken = '';
             var activeDownloadToken = '';
             var requestInFlight = false;
@@ -9297,8 +9427,129 @@ HTML;
                 downloadButton.innerHTML = label + ' <i class="' + iconClass + ' ml-2"></i>';
             }
 
+            function clearDownloadCountdown() {
+                if (countdownTimer !== null) {
+                    window.clearInterval(countdownTimer);
+                    countdownTimer = null;
+                }
+
+                countdownTargetAt = 0;
+                countdownFinishedAwaitingToken = false;
+            }
+
+            function clearDownloadResolveRetry() {
+                if (resolveRetryTimer !== null) {
+                    window.clearTimeout(resolveRetryTimer);
+                    resolveRetryTimer = null;
+                }
+            }
+
+            function clearDownloadSubmitReset() {
+                if (downloadSubmitResetTimer !== null) {
+                    window.clearTimeout(downloadSubmitResetTimer);
+                    downloadSubmitResetTimer = null;
+                }
+            }
+
+            function clearDownloadNotice() {
+                if (downloadNoticeTimer !== null) {
+                    window.clearTimeout(downloadNoticeTimer);
+                    downloadNoticeTimer = null;
+                }
+
+                if (!downloadNotice) {
+                    return;
+                }
+
+                downloadNotice.hidden = true;
+                downloadNotice.classList.remove('is-visible');
+                downloadNotice.textContent = '';
+            }
+
+            function showDownloadNotice(message) {
+                if (!downloadNotice) {
+                    return;
+                }
+
+                clearDownloadNotice();
+                downloadNotice.hidden = false;
+                downloadNotice.classList.add('is-visible');
+                downloadNotice.textContent = message;
+                downloadNoticeTimer = window.setTimeout(clearDownloadNotice, 5000);
+            }
+
+            function handleDownloadFramePayload(payload) {
+                clearDownloadSubmitReset();
+
+                if (!payload || payload.type !== 've-download-result') {
+                    return;
+                }
+
+                if (payload.status === 'fail') {
+                    var retryNotice = String(payload.message || 'This protected download link is invalid or has expired.');
+                    setDownloadIdleState();
+                    showDownloadNotice(retryNotice);
+
+                    if (payload.retryable === true) {
+                        beginProtectedDownloadRequest('');
+                        return;
+                    }
+
+                    updateDownloadStatus(retryNotice);
+                }
+            }
+
+            function ensureDownloadFrame() {
+                var frame = document.getElementById('ve-download-frame');
+
+                if (frame) {
+                    return frame;
+                }
+
+                frame = document.createElement('iframe');
+                frame.id = 've-download-frame';
+                frame.name = 've-download-frame';
+                frame.hidden = true;
+                frame.setAttribute('aria-hidden', 'true');
+                frame.tabIndex = -1;
+                frame.addEventListener('load', function () {
+                    var doc;
+                    var bodyText;
+                    var payload;
+
+                    try {
+                        doc = frame.contentDocument || (frame.contentWindow ? frame.contentWindow.document : null);
+                        bodyText = doc && doc.body ? String(doc.body.textContent || doc.body.innerText || '').trim() : '';
+
+                        if (bodyText === '') {
+                            return;
+                        }
+
+                        payload = JSON.parse(bodyText);
+                    } catch (error) {
+                        return;
+                    }
+
+                    handleDownloadFramePayload(payload);
+                });
+                document.body.appendChild(frame);
+
+                return frame;
+            }
+
+            function downloadCountdownMessage(remaining) {
+                var message = 'Please wait ' + remaining + ' seconds before the protected download link is issued.';
+                return downloadRetryNotice ? (downloadRetryNotice + ' ' + message) : message;
+            }
+
             function setDownloadIdleState() {
                 requestInFlight = false;
+                downloadRequestStartedAt = 0;
+                activeRequestToken = '';
+                clearDownloadCountdown();
+                clearDownloadResolveRetry();
+                clearDownloadSubmitReset();
+                downloadRetryNotice = '';
 
                 if (!downloadButton) {
                     return;
@@ -9312,6 +9563,8 @@ HTML;
             }
 
             function setDownloadBusyState() {
+                clearDownloadResolveRetry();
+
                 if (!downloadButton) {
                     return;
                 }
@@ -9336,18 +9589,27 @@ HTML;
             }
 
             function submitProtectedDownload() {
+                var frame;
+                var form;
+                var tokenInput;
+                var csrfInput;
+                var contextInput;
+
                 if (!downloadActionUrl || !activeDownloadToken) {
                     setDownloadIdleState();
                     updateDownloadStatus('The protected download session expired. Request a new one.');
                     return;
                 }
 
-                var form = document.createElement('form');
-                var tokenInput = document.createElement('input');
-                var csrfInput = document.createElement('input');
+                frame = ensureDownloadFrame();
+                form = document.createElement('form');
+                tokenInput = document.createElement('input');
+                csrfInput = document.createElement('input');
+                contextInput = document.createElement('input');
                 form.method = 'POST';
                 form.action = downloadActionUrl;
                 form.style.display = 'none';
+                form.target = frame.name;
 
                 tokenInput.type = 'hidden';
                 tokenInput.name = 'download_token';
@@ -9359,16 +9621,34 @@ HTML;
                 csrfInput.value = downloadCsrfToken;
                 form.appendChild(csrfInput);
 
+                contextInput.type = 'hidden';
+                contextInput.name = 'download_context';
+                contextInput.value = 'inline';
+                form.appendChild(contextInput);
+
+                activeDownloadToken = '';
+                clearDownloadSubmitReset();
+                setDownloadBusyState();
+                updateDownloadStatus('Starting protected download...');
+
                 document.body.appendChild(form);
                 form.submit();
                 document.body.removeChild(form);
 
-                setDownloadIdleState();
-                updateDownloadStatus('Protected download started. Request a new one if you need another copy.');
+                downloadSubmitResetTimer = window.setTimeout(function () {
+                    setDownloadIdleState();
+                    updateDownloadStatus('Protected download started. Request a new one if you need another copy.');
+                }, 1200);
             }
 
             function setDownloadReadyState(downloadToken, sizeLabel) {
                 requestInFlight = false;
+                downloadRequestStartedAt = 0;
+                activeRequestToken = '';
+                clearDownloadCountdown();
+                clearDownloadResolveRetry();
+                clearDownloadSubmitReset();
+                downloadRetryNotice = '';
 
                 if (!downloadButton) {
                     return;
@@ -9380,7 +9660,7 @@ HTML;
                 downloadButton.setAttribute('data-ready', '1');
                 downloadButton.setAttribute('href', '#download_now');
                 setDownloadButtonMarkup('Download ' + downloadLabel, 'fad fa-cloud-download');
-                updateDownloadStatus('Protected download is ready. This one-time link expires quickly after first use.');
+                updateDownloadStatus('Protected download is ready. This one-time link stays valid for 10 minutes or until first use.');
 
                 if (downloadMeta) {
                     downloadMeta.hidden = false;
@@ -9410,29 +9690,137 @@ HTML;
                 });
             }
 
-            function startDownloadCountdown(seconds) {
-                var remaining = Math.max(0, seconds);
+            function updateDownloadCountdownUi() {
+                var remainingMs = Math.max(0, countdownTargetAt - Date.now());
+
+                if (remainingMs > 0) {
+                    var remaining = Math.max(1, Math.ceil(remainingMs / 1000));
+                    setDownloadCountdownState(remaining);
+                    updateDownloadStatus(downloadCountdownMessage(remaining));
+                    return;
+                }
 
                 if (countdownTimer !== null) {
                     window.clearInterval(countdownTimer);
+                    countdownTimer = null;
                 }
 
-                setDownloadCountdownState(remaining);
-                updateDownloadStatus('Please wait ' + remaining + ' seconds before the protected download link is issued.');
+                countdownTargetAt = 0;
 
-                countdownTimer = window.setInterval(function () {
-                    remaining -= 1;
+                if (!activeRequestToken) {
+                    countdownFinishedAwaitingToken = true;
+                    setDownloadBusyState();
+                    updateDownloadStatus('Preparing protected download link...');
+                    return;
+                }
 
-                    if (remaining > 0) {
-                        setDownloadCountdownState(remaining);
-                        updateDownloadStatus('Please wait ' + remaining + ' seconds before the protected download link is issued.');
+                countdownFinishedAwaitingToken = false;
+                resolveProtectedDownload();
+            }
+
+            function startDownloadCountdown(seconds, startedAtMs) {
+                var durationMs = Math.max(0, Number(seconds || 0)) * 1000;
+                var anchorMs = typeof startedAtMs === 'number' && startedAtMs > 0
+                    ? startedAtMs
+                    : Date.now();
+
+                clearDownloadCountdown();
+                clearDownloadResolveRetry();
+
+                countdownTargetAt = anchorMs + durationMs;
+                countdownFinishedAwaitingToken = false;
+                updateDownloadCountdownUi();
+
+                if (countdownTargetAt <= Date.now()) {
+                    return;
+                }
+
+                countdownTimer = window.setInterval(updateDownloadCountdownUi, 250);
+            }
+
+            function scheduleDownloadResolveRetry(seconds) {
+                var retrySeconds = Math.max(0, Number(seconds || 0));
+                clearDownloadResolveRetry();
+
+                if (retrySeconds <= 0) {
+                    resolveRetryTimer = window.setTimeout(resolveProtectedDownload, 200);
+                    return;
+                }
+
+                if (retrySeconds <= 1) {
+                    setDownloadBusyState();
+                    updateDownloadStatus('Finalizing protected download link...');
+                    resolveRetryTimer = window.setTimeout(resolveProtectedDownload, 350);
+                    return;
+                }
+
+                startDownloadCountdown(retrySeconds, Date.now());
+            }
+
+            function beginProtectedDownloadRequest(retryNotice) {
+                if (requestInFlight) {
+                    return;
+                }
+
+                requestInFlight = true;
+                downloadRequestStartedAt = Date.now();
+                activeRequestToken = '';
+                activeDownloadToken = '';
+                clearDownloadCountdown();
+                clearDownloadResolveRetry();
+                clearDownloadSubmitReset();
+                downloadRetryNotice = typeof retryNotice === 'string' ? retryNotice : '';
+
+                if (downloadMeta) {
+                    downloadMeta.hidden = true;
+                }
+
+                if (downloadWaitSeconds > 0) {
+                    startDownloadCountdown(downloadWaitSeconds, downloadRequestStartedAt);
+                } else {
+                    setDownloadBusyState();
+                    updateDownloadStatus(
+                        downloadRetryNotice
+                            ? downloadRetryNotice + ' Issuing a new protected premium download link...'
+                            : 'Issuing protected premium download link...'
+                    );
+                }
+
+                postDownloadForm(downloadRequestUrl, {
+                    token: downloadCsrfToken,
+                }).then(function (result) {
+                    if (!result.ok || !result.payload || result.payload.status !== 'ok') {
+                        setDownloadIdleState();
+                        updateDownloadStatus((result.payload && result.payload.message) || 'The protected download could not be started.');
                         return;
                     }
 
-                    window.clearInterval(countdownTimer);
-                    countdownTimer = null;
-                    resolveProtectedDownload();
-                }, 1000);
+                    if (result.payload.ready === true && result.payload.download_token) {
+                        setDownloadReadyState(result.payload.download_token, result.payload.size_label || '{$safeSize}');
+
+                        if (downloadWaitSeconds === 0) {
+                            submitProtectedDownload();
+                        }
+
+                        return;
+                    }
+
+                    activeRequestToken = result.payload.request_token || '';
+
+                    if (!activeRequestToken) {
+                        setDownloadIdleState();
+                        updateDownloadStatus('The protected download session could not be started.');
+                        return;
+                    }
+
+                    if (countdownFinishedAwaitingToken || countdownTargetAt <= Date.now()) {
+                        countdownFinishedAwaitingToken = false;
+                        resolveProtectedDownload();
+                    }
+                }).catch(function () {
+                    setDownloadIdleState();
+                    updateDownloadStatus('The protected download could not be started.');
+                });
             }
 
             function resolveProtectedDownload() {
@@ -9458,7 +9846,7 @@ HTML;
                     if (result.payload.ready !== true || !result.payload.download_token) {
                         var retrySeconds = Number(result.payload.remaining_seconds || 0);
                         setDownloadBusyState();
-                        startDownloadCountdown(retrySeconds > 0 ? retrySeconds : 1);
+                        scheduleDownloadResolveRetry(retrySeconds);
                         return;
                     }
 
@@ -9478,54 +9866,7 @@ HTML;
                     }
 
                     event.preventDefault();
-
-                    if (requestInFlight) {
-                        return;
-                    }
-
-                    requestInFlight = true;
-                    activeRequestToken = '';
-
-                    if (downloadWaitSeconds > 0) {
-                        setDownloadCountdownState(downloadWaitSeconds);
-                        updateDownloadStatus('Please wait ' + downloadWaitSeconds + ' seconds before the protected download link is issued.');
-                    } else {
-                        setDownloadBusyState();
-                        updateDownloadStatus('Issuing protected premium download link...');
-                    }
-
-                    postDownloadForm(downloadRequestUrl, {
-                        token: downloadCsrfToken,
-                    }).then(function (result) {
-                        if (!result.ok || !result.payload || result.payload.status !== 'ok') {
-                            setDownloadIdleState();
-                            updateDownloadStatus((result.payload && result.payload.message) || 'The protected download could not be started.');
-                            return;
-                        }
-
-                        if (result.payload.ready === true && result.payload.download_token) {
-                            setDownloadReadyState(result.payload.download_token, result.payload.size_label || '{$safeSize}');
-
-                            if (downloadWaitSeconds === 0) {
-                                submitProtectedDownload();
-                            }
-
-                            return;
-                        }
-
-                        activeRequestToken = result.payload.request_token || '';
-
-                        if (!activeRequestToken) {
-                            setDownloadIdleState();
-                            updateDownloadStatus('The protected download session could not be started.');
-                            return;
-                        }
-
-                        startDownloadCountdown(Number(result.payload.remaining_seconds || result.payload.wait_seconds || downloadWaitSeconds || 1));
-                    }).catch(function () {
-                        setDownloadIdleState();
-                        updateDownloadStatus('The protected download could not be started.');
-                    });
+                    beginProtectedDownloadRequest('');
                 });
             }
 
@@ -9544,6 +9885,11 @@ HTML;
                 var data = event && event.data && typeof event.data === 'object' ? event.data : null;
 
                 if (!data || typeof data.type !== 'string') {
+                    return;
+                }
+
+                if (data.type === 've-download-result') {
+                    handleDownloadFramePayload(data);
                     return;
                 }
 
@@ -11501,7 +11847,7 @@ function ve_render_videos_dashboard_page(): void
 
     $headAssets = <<<'HTML'
 <style type="text/css">.vue-simple-context-menu{top:0;left:0;margin:0;padding:0;display:none;list-style:none;position:absolute;z-index:1000000;background-color:#ecf0f1;border-bottom-width:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,"Fira Sans","Droid Sans","Helvetica Neue",sans-serif;box-shadow:0 3px 6px 0 rgba(51,51,51,.2);border-radius:4px}.vue-simple-context-menu--active{display:block}.vue-simple-context-menu__item{display:flex;color:#333;cursor:pointer;padding:5px 15px;align-items:center}.vue-simple-context-menu__item:hover{background-color:#007aff;color:#fff}.vue-simple-context-menu li:first-of-type{margin-top:4px}.vue-simple-context-menu li:last-of-type{margin-bottom:4px}.text-orange{color:#f90;}@media (max-width: 768px){ .container-fluid{ padding-right:0px; padding-left:0px; } .file_manager { border-radius:0px !important; padding: 5px !important; } .file_manager .title_wrap { padding: 0px !important; margin-bottom:0px !important; }}.my-premium .bandwidth-plans .payments .selection, .my-premium .premium-plans .payments .selection { width: 100% !important;}.my-premium .bandwidth-plans .payments .selection .custom-control.p-plan:nth-of-type(3n), .my-premium .premium-plans .payments .selection .custom-control.p-plan:nth-of-type(3n) { margin-right: 20px !important;}@media (min-width: 1200px){ .my-premium .bandwidth-plans .payments .selection .custom-control:not(.p-plan):nth-of-type(5n+1), .my-premium .premium-plans .payments .selection .custom-control:not(.p-plan):nth-of-type(5n+1) { clear: both; margin-left: 20px !important; }}.my-premium .bandwidth-plans .payments .btn, .my-premium .premium-plans .payments .btn { margin-left: 20px;}.remote-list small{ display: block; color: #ea8c00;}.remote-list .fa-external-link{ font-size: 10px; margin: 2px;}.remote-list .badge{ padding: 7px;}@media (min-width: 1350px){ .container-mp { max-width: 1350px !important; }} </style>
-<style type="text/css">.ve-browser-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:0 0 12px;padding:14px 16px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(11,16,26,.72)}.ve-browser-toolbar-main{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0}.ve-browser-toolbar .ve-go-back[disabled]{opacity:.45;cursor:not-allowed}.ve-folder-path{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.ve-folder-path-separator{color:rgba(255,255,255,.38);font-size:.75rem}.ve-folder-path-card{display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid rgba(255,255,255,.1);border-radius:999px;background:rgba(255,255,255,.04);color:#fff;font-size:.86rem;line-height:1;transition:border-color .18s ease,background .18s ease,transform .18s ease}.ve-folder-path-card:hover,.ve-folder-path-card:focus-visible{text-decoration:none;border-color:rgba(255,153,0,.55);background:rgba(255,153,0,.12);outline:none}.ve-folder-path-card.is-current{border-color:rgba(255,153,0,.55);background:rgba(255,153,0,.16)}.ve-folder-path-card.ve-drag-folder-target{border-color:rgba(255,153,0,.88);background:rgba(255,153,0,.22);transform:translateY(-1px)}.ve-results-control{display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.72);font-size:.82rem}.ve-results-control select{min-width:88px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:#111826;color:#fff;padding:8px 12px}.iziToast-wrapper-topRight,.iziToast-wrapper-topLeft,.iziToast-wrapper-topCenter{top:92px!important}@media (max-width:991px){.ve-browser-toolbar{padding:12px}.ve-browser-toolbar-main,.ve-folder-path{width:100%}.ve-results-control{width:100%;justify-content:flex-start}}</style>
+<style type="text/css">.ve-browser-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:0 0 12px;padding:14px 16px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(11,16,26,.72)}.ve-browser-toolbar-main{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0}.ve-browser-toolbar .ve-go-back[disabled]{opacity:.45;cursor:not-allowed}.ve-folder-path{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.ve-folder-path-separator{color:rgba(255,255,255,.38);font-size:.75rem}.ve-folder-path-card{display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid rgba(255,255,255,.1);border-radius:999px;background:rgba(255,255,255,.04);color:#fff;font-size:.86rem;line-height:1;transition:border-color .18s ease,background .18s ease,transform .18s ease}.ve-folder-path-card:hover,.ve-folder-path-card:focus-visible{text-decoration:none;border-color:rgba(255,153,0,.55);background:rgba(255,153,0,.12);outline:none}.ve-folder-path-card.is-current{border-color:rgba(255,153,0,.55);background:rgba(255,153,0,.16)}.ve-folder-path-card.ve-drag-folder-target{border-color:rgba(255,153,0,.88);background:rgba(255,153,0,.22);transform:translateY(-1px)}.ve-results-control{display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.72);font-size:.82rem}.ve-results-control select{min-width:88px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:#111826;color:#fff;padding:8px 12px}.iziToast-wrapper-topRight,.iziToast-wrapper-topLeft,.iziToast-wrapper-topCenter{top:68px!important}@media (max-width:991px){.ve-browser-toolbar{padding:12px}.ve-browser-toolbar-main,.ve-folder-path{width:100%}.ve-results-control{width:100%;justify-content:flex-start}}</style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tootik/1.0.2/css/tootik.min.css" />
 <link rel="stylesheet" href="/assets/css/video_page.min.css">
 HTML;
