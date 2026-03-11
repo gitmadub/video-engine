@@ -437,8 +437,145 @@ function findVideoManagerInstance(node) {
       throw new Error(`Clicking outside file rows should clear the selection. Received: ${JSON.stringify(selectionResetState)}`);
     }
 
+    const firstVideoRow = page.locator('.file_list .video.item').nth(0);
+    const secondVideoRow = page.locator('.file_list .video.item').nth(1);
+    await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('.file_list .video.item')).slice(0, 2);
+
+      rows.forEach((row) => {
+        row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      });
+    });
+
+    const additiveSelectionState = await page.evaluate(() => {
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+        while (queue.length > 0) {
+          const child = queue.shift();
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+        return null;
+      }
+      const vm = findVideoManagerInstance(root);
+
+      return {
+        activeCount: document.querySelectorAll('.file_list .video.item.active').length,
+        fileIds: vm && Array.isArray(vm.file_ids) ? vm.file_ids.slice() : [],
+      };
+    });
+
+    if (additiveSelectionState.activeCount < 2 || additiveSelectionState.fileIds.length < 2) {
+      throw new Error(`Clicking anywhere on two video rows should add both to the selection. Received: ${JSON.stringify(additiveSelectionState)}`);
+    }
+
+    await page.locator('.title_wrap').first().click();
+    const firstVideoBox = await firstVideoRow.boundingBox();
+    const secondVideoBox = await secondVideoRow.boundingBox();
+
+    if (!firstVideoBox || !secondVideoBox) {
+      throw new Error('Unable to resolve video row bounds for drag-selection validation.');
+    }
+
+    await page.evaluate((coords) => {
+      const startTarget = document.elementFromPoint(coords.startX, coords.startY) || document.querySelector('.file_manager');
+      startTarget.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: coords.startX,
+        clientY: coords.startY,
+      }));
+      document.dispatchEvent(new MouseEvent('mousemove', {
+        bubbles: true,
+        cancelable: true,
+        buttons: 1,
+        clientX: coords.endX,
+        clientY: coords.endY,
+      }));
+      document.dispatchEvent(new MouseEvent('mouseup', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: coords.endX,
+        clientY: coords.endY,
+      }));
+    }, {
+      startX: Math.round(firstVideoBox.x + 28),
+      startY: Math.round(firstVideoBox.y + 18),
+      endX: Math.round(secondVideoBox.x + Math.max(32, Math.min(secondVideoBox.width - 24, 180))),
+      endY: Math.round(secondVideoBox.y + secondVideoBox.height - 8),
+    });
+
+    const dragSelectionState = await page.evaluate(() => {
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+        while (queue.length > 0) {
+          const child = queue.shift();
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+        return null;
+      }
+      const vm = findVideoManagerInstance(root);
+
+      return {
+        activeCount: document.querySelectorAll('.file_list .video.item.active').length,
+        fileIds: vm && Array.isArray(vm.file_ids) ? vm.file_ids.slice() : [],
+      };
+    });
+
+    if (dragSelectionState.activeCount < 2 || dragSelectionState.fileIds.length < 2) {
+      throw new Error(`Mouse drag selection should select the covered video rows. Received: ${JSON.stringify(dragSelectionState)}`);
+    }
+
+    await page.locator('.title_wrap').first().click();
+    await firstVideoRow.click({ button: 'right', position: { x: 40, y: 18 } });
+    await page.waitForFunction(() => {
+      const menu = document.getElementById('videoMenu');
+      return Boolean(menu && menu.classList.contains('vue-simple-context-menu--active'));
+    });
+
+    const contextMenuLayout = await page.evaluate(() => {
+      const item = Array.from(document.querySelectorAll('#videoMenu .vue-simple-context-menu__item'))
+        .find((node) => (node.textContent || '').includes('Make Private'));
+
+      if (!item) {
+        return null;
+      }
+
+      const itemStyle = window.getComputedStyle(item);
+      const iconStyle = window.getComputedStyle(item, '::before');
+
+      return {
+        paddingLeft: itemStyle.paddingLeft,
+        beforeWidth: iconStyle.width,
+        beforeLeft: iconStyle.left,
+        beforeImage: iconStyle.backgroundImage,
+      };
+    });
+
+    if (!contextMenuLayout || contextMenuLayout.beforeImage === 'none' || contextMenuLayout.beforeWidth !== '16px' || contextMenuLayout.beforeLeft !== '14px') {
+      throw new Error(`The context menu icons should be aligned and the Make Private row should render its icon. Received: ${JSON.stringify(contextMenuLayout)}`);
+    }
+
+    await page.locator('.title_wrap').first().click();
+
     await page.evaluate((folderId) => {
       const rows = Array.from(document.querySelectorAll('.file_list .video.item')).slice(0, 2);
+      const folderRow = document.querySelector(`.file_list .folder.item[data-folder="${String(folderId || '')}"]`);
       const app = document.getElementById('app');
       const root = app && app.__vue__;
 
@@ -466,17 +603,39 @@ function findVideoManagerInstance(node) {
         }
       });
 
+      if (folderRow) {
+        folderRow.classList.add('active');
+        const folderInput = folderRow.querySelector('input.custom-control-input');
+
+        if (folderInput) {
+          folderInput.checked = true;
+          folderInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+
       const vm = findVideoManagerInstance(root);
+      const selectedFolder = vm && vm.data && Array.isArray(vm.data.folders)
+        ? vm.data.folders.find((folder) => String(folder.fld_id || '') === String(folderId || ''))
+        : null;
 
       if (!vm) {
         throw new Error('Unable to locate the video manager instance for multi-share validation.');
       }
 
+      if (!selectedFolder || !selectedFolder.share_url) {
+        throw new Error('Unable to resolve the selected folder share URL for mixed-share validation.');
+      }
+
+      vm.__veForcedFolderShareEntries = [{
+        title: String(selectedFolder.fld_name || 'Folder'),
+        url: String(selectedFolder.share_url || ''),
+      }];
+
       vm.video_clicked({
         option: { slug: 'get-links' },
         item: 0,
       });
-    });
+    }, sharedFolderId);
 
     await page.waitForFunction(() => {
       const modal = document.querySelector('#export_videos.show, #export_videos[style*="display: block"]');
@@ -484,7 +643,69 @@ function findVideoManagerInstance(node) {
       const value = textarea ? String(textarea.value || textarea.textContent || '') : '';
       return !!modal && value.includes('/d/') && value.split('/d/').length >= 3;
     });
+    const mixedShareOutput = (await page.locator('#export_videos textarea.form-control').first().inputValue()).trim();
+    if (!mixedShareOutput.includes('/videos/shared/')) {
+      const mixedShareDebug = await page.evaluate(() => {
+        const app = document.getElementById('app');
+        const root = app && app.__vue__;
+        function findVideoManagerInstance(node) {
+          const queue = node && node.$children ? node.$children.slice() : [];
+          while (queue.length > 0) {
+            const child = queue.shift();
+            if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+              return child;
+            }
+            if (child && child.$children) {
+              queue.push(...child.$children);
+            }
+          }
+          return null;
+        }
+        const vm = findVideoManagerInstance(root);
+        return {
+          fileIds: vm && Array.isArray(vm.file_ids) ? vm.file_ids.slice() : [],
+          folderIds: vm && Array.isArray(vm.folder_ids) ? vm.folder_ids.slice() : [],
+          folderEntries: vm && Array.isArray(vm.__veFolderShareEntries) ? vm.__veFolderShareEntries.slice() : [],
+          forcedFolderEntries: vm && Array.isArray(vm.__veForcedFolderShareEntries) ? vm.__veForcedFolderShareEntries.slice() : [],
+          activeFolderIds: Array.from(document.querySelectorAll('.file_list .folder.item.active[data-folder]')).map((node) => String(node.getAttribute('data-folder') || '')),
+          folderPayloads: vm && vm.data && Array.isArray(vm.data.folders) ? vm.data.folders.map((folder) => ({
+            id: String(folder.fld_id || ''),
+            share_url: String(folder.share_url || ''),
+          })) : [],
+        };
+      });
+      throw new Error(`Mixed file and folder share output should include the selected folder link. Received: ${mixedShareOutput || '(empty)'} Debug: ${JSON.stringify(mixedShareDebug)}`);
+    }
     await dismissModalIfVisible(page, '#export_videos');
+
+    await perPageSelect.selectOption('25');
+    await page.waitForFunction(() => {
+      const allowed = ['25', '50', '100', '500', '1000'];
+      const select = Array.from(document.querySelectorAll('select')).find((node) => {
+        const values = Array.from(node.options || []).map((option) => String(option.value || '').trim()).filter(Boolean);
+        return values.length >= 3 && values.every((value) => allowed.includes(value));
+      });
+
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+        while (queue.length > 0) {
+          const child = queue.shift();
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+        return null;
+      }
+
+      const vm = findVideoManagerInstance(root);
+      return select && select.value === '25' && vm && String(vm.per_page || '') === '25';
+    });
 
     if (!sharedFolderId) {
       throw new Error(`Shared folder row was not rendered with a folder id: ${sharedFolderName}`);
@@ -511,7 +732,7 @@ function findVideoManagerInstance(node) {
       const vm = findVideoManagerInstance(root);
       const cache = vm && vm.__veFolderResponseCache ? vm.__veFolderResponseCache : {};
 
-      return Object.keys(cache).some((key) => key.includes(`|${String(folderId || '0')}|`));
+      return Object.keys(cache).some((key) => key.includes(`1|25|${String(folderId || '0')}|`));
     }, sharedFolderId);
 
     const publicBadgeParity = await page.evaluate((folderName) => {
@@ -546,7 +767,7 @@ function findVideoManagerInstance(node) {
     );
 
     if (sharedFolderRequests.length > 1) {
-      throw new Error(`Opening a folder should issue at most one /videos/actions request. Seen: ${JSON.stringify(sharedFolderRequests)}`);
+      throw new Error(`Opening a preloaded folder should issue at most one /videos/actions request. Seen: ${JSON.stringify(sharedFolderRequests)}`);
     }
 
     const breadcrumbLabelsInsideFolder = await page.locator('[data-folder-path-card]').allTextContents();
