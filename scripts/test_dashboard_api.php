@@ -280,7 +280,7 @@ function dashboard_api_add_stats(int $videoId, int $userId, string $date, int $v
 }
 
 $root = dirname(__DIR__);
-$php = 'C:\\xampp\\php\\php.exe';
+$php = is_string(PHP_BINARY) && PHP_BINARY !== '' ? PHP_BINARY : 'php';
 $dbPath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'dashboard-test.sqlite';
 $cookiePath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'dashboard-test.cookie';
 $port = dashboard_api_pick_port();

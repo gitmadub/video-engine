@@ -273,7 +273,7 @@ function videos_actions_insert_ready_video(PDO $pdo, int $userId, string $public
 }
 
 $root = dirname(__DIR__);
-$php = 'C:\\xampp\\php\\php.exe';
+$php = is_string(PHP_BINARY) && PHP_BINARY !== '' ? PHP_BINARY : 'php';
 $runId = bin2hex(random_bytes(4));
 $dbPath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'videos-actions-test-' . $runId . '.sqlite';
 $cookiePath = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'videos-actions-test-' . $runId . '.cookie';
