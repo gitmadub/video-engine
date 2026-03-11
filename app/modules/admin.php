@@ -902,6 +902,10 @@ function ve_admin_log_event(
         $actorUserId = is_array($actor) ? (int) ($actor['id'] ?? 0) : null;
     }
 
+    if (is_int($actorUserId) && $actorUserId <= 0) {
+        $actorUserId = null;
+    }
+
     ve_db()->prepare(
         'INSERT INTO audit_logs (
             actor_user_id, target_type, target_id, event_code, before_json, after_json, ip_address, created_at
