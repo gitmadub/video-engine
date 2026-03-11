@@ -417,6 +417,11 @@ function ve_video_poster_path(array $video): string
     return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'poster.jpg';
 }
 
+function ve_video_preview_path(array $video): string
+{
+    return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'preview.jpg';
+}
+
 function ve_video_preview_sprite_path(array $video): string
 {
     return ve_video_library_directory((string) $video['public_id']) . DIRECTORY_SEPARATOR . 'preview-sprite.jpg';
@@ -1673,6 +1678,13 @@ function ve_video_legacy_date_label(string $timestamp): string
 function ve_video_public_thumbnail_url(array $video, string $mode): string
 {
     return ve_absolute_url('/thumbs/' . rawurlencode((string) ($video['public_id'] ?? '')) . '/' . ($mode === 'splash' ? 'splash.jpg' : 'single.jpg'));
+}
+
+function ve_video_normalize_player_image_mode(string $mode): string
+{
+    $mode = trim($mode);
+
+    return $mode === 'single' ? 'single' : 'splash';
 }
 
 function ve_video_folder_to_legacy_payload(array $folder): array
@@ -3715,25 +3727,16 @@ function ve_video_write_preview_vtt(array $video, float $duration): bool
     return file_put_contents(ve_video_preview_vtt_path($video), implode("\n", $lines)) !== false;
 }
 
-function ve_video_generate_preview_assets(array $video, string $sourcePath, array $metadata): void
+function ve_video_generate_still_image(string $sourcePath, string $outputPath, float $offsetSeconds): bool
 {
-    $duration = max(0.0, (float) ($metadata['duration'] ?? 0.0));
-    $posterOffset = $duration > 0 ? min(max($duration * 0.18, 1.0), max(1.0, $duration - 0.5)) : 1.0;
-    $posterPath = ve_video_poster_path($video);
-    $spritePath = ve_video_preview_sprite_path($video);
-    $previewVttPath = ve_video_preview_vtt_path($video);
-    $frameCount = ve_video_preview_frame_count();
-    $fps = max($frameCount / max($duration, 1.0), 0.25);
-    $fpsLabel = rtrim(rtrim(sprintf('%.6F', $fps), '0'), '.');
-
-    [$posterExitCode] = ve_video_run_command([
+    [$exitCode] = ve_video_run_command([
         (string) ve_video_config()['ffmpeg'],
         '-y',
         '-hide_banner',
         '-loglevel',
         'error',
         '-ss',
-        sprintf('%.3F', $posterOffset),
+        sprintf('%.3F', max(0.0, $offsetSeconds)),
         '-i',
         $sourcePath,
         '-frames:v',
@@ -3742,10 +3745,47 @@ function ve_video_generate_preview_assets(array $video, string $sourcePath, arra
         'scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black',
         '-q:v',
         '4',
-        $posterPath,
+        $outputPath,
     ]);
 
-    if ($posterExitCode !== 0 || !is_file($posterPath)) {
+    if ($exitCode !== 0 || !is_file($outputPath)) {
+        @unlink($outputPath);
+        return false;
+    }
+
+    return true;
+}
+
+function ve_video_generate_preview_assets(array $video, string $sourcePath, array $metadata): void
+{
+    $duration = max(0.0, (float) ($metadata['duration'] ?? 0.0));
+    $lastFrameOffset = $duration > 0 ? max(0.0, $duration - 0.05) : 0.0;
+    $previewOffset = $duration > 0 ? min(max($duration * 0.05, 0.35), $lastFrameOffset) : 0.0;
+    $posterOffset = $duration > 0 ? min(max($duration * 0.18, 1.0), $lastFrameOffset) : 0.0;
+    $previewPath = ve_video_preview_path($video);
+    $posterPath = ve_video_poster_path($video);
+    $spritePath = ve_video_preview_sprite_path($video);
+    $previewVttPath = ve_video_preview_vtt_path($video);
+    $frameCount = ve_video_preview_frame_count();
+    $fps = max($frameCount / max($duration, 1.0), 0.25);
+    $fpsLabel = rtrim(rtrim(sprintf('%.6F', $fps), '0'), '.');
+
+    $previewGenerated = ve_video_generate_still_image($sourcePath, $previewPath, $previewOffset);
+    $posterGenerated = ve_video_generate_still_image($sourcePath, $posterPath, $posterOffset);
+
+    if (!$previewGenerated && $posterGenerated && @copy($posterPath, $previewPath)) {
+        $previewGenerated = true;
+    }
+
+    if (!$posterGenerated && $previewGenerated && @copy($previewPath, $posterPath)) {
+        $posterGenerated = true;
+    }
+
+    if (!$previewGenerated) {
+        @unlink($previewPath);
+    }
+
+    if (!$posterGenerated) {
         @unlink($posterPath);
     }
 
@@ -3775,6 +3815,38 @@ function ve_video_generate_preview_assets(array $video, string $sourcePath, arra
     }
 }
 
+function ve_video_ensure_generated_images(array $video): void
+{
+    if (
+        is_file(ve_video_preview_path($video))
+        && is_file(ve_video_poster_path($video))
+    ) {
+        return;
+    }
+
+    if ((string) ($video['status'] ?? '') !== VE_VIDEO_STATUS_READY) {
+        return;
+    }
+
+    $sourcePath = ve_video_source_path($video);
+
+    if (!is_file($sourcePath)) {
+        $sourcePath = (string) ve_video_prepare_download_path($video);
+    }
+
+    if ($sourcePath === '' || !is_file($sourcePath)) {
+        return;
+    }
+
+    $metadata = ve_video_probe($sourcePath);
+
+    if (!is_array($metadata)) {
+        return;
+    }
+
+    ve_video_generate_preview_assets($video, $sourcePath, $metadata);
+}
+
 function ve_video_owner_settings(array $video): array
 {
     return ve_get_user_settings((int) ($video['user_id'] ?? 0));
@@ -3801,26 +3873,17 @@ function ve_video_session_uses_premium_bandwidth(array $video): bool
 
 function ve_video_resolve_poster_asset(array $video): ?array
 {
+    ve_video_ensure_generated_images($video);
     $settings = ve_video_owner_settings($video);
-    $mode = trim((string) ($settings['player_image_mode'] ?? ''));
+    $mode = ve_video_normalize_player_image_mode((string) ($settings['player_image_mode'] ?? ''));
+    $preferredPaths = $mode === 'single'
+        ? [ve_video_poster_path($video), ve_video_preview_path($video)]
+        : [ve_video_preview_path($video), ve_video_poster_path($video)];
 
-    if ($mode === 'splash') {
-        $splashPath = ve_storage_relative_path_to_absolute((string) ($settings['splash_image_path'] ?? ''));
-
-        if ($splashPath !== '' && is_file($splashPath)) {
+    foreach ($preferredPaths as $path) {
+        if (is_file($path)) {
             return [
-                'path' => $splashPath,
-                'mime' => ve_detect_file_mime_type($splashPath),
-            ];
-        }
-    }
-
-    if ($mode === 'single' || $mode === 'splash') {
-        $posterPath = ve_video_poster_path($video);
-
-        if (is_file($posterPath)) {
-            return [
-                'path' => $posterPath,
+                'path' => $path,
                 'mime' => 'image/jpeg',
             ];
         }
@@ -3831,29 +3894,21 @@ function ve_video_resolve_poster_asset(array $video): ?array
 
 function ve_video_resolve_public_image_asset(array $video, string $mode = 'single'): ?array
 {
-    $settings = ve_video_owner_settings($video);
+    ve_video_ensure_generated_images($video);
+    $preferredPaths = $mode === 'single'
+        ? [ve_video_poster_path($video), ve_video_preview_path($video)]
+        : [ve_video_preview_path($video), ve_video_poster_path($video)];
 
-    if ($mode === 'splash') {
-        $splashPath = ve_storage_relative_path_to_absolute((string) ($settings['splash_image_path'] ?? ''));
-
-        if ($splashPath !== '' && is_file($splashPath)) {
+    foreach ($preferredPaths as $path) {
+        if (is_file($path)) {
             return [
-                'path' => $splashPath,
-                'mime' => ve_detect_file_mime_type($splashPath),
+                'path' => $path,
+                'mime' => 'image/jpeg',
             ];
         }
     }
 
-    $posterPath = ve_video_poster_path($video);
-
-    if (is_file($posterPath)) {
-        return [
-            'path' => $posterPath,
-            'mime' => 'image/jpeg',
-        ];
-    }
-
-    return $mode === 'splash' ? ve_video_resolve_poster_asset($video) : null;
+    return null;
 }
 
 function ve_video_is_request_visible(array $video): bool
@@ -9243,19 +9298,17 @@ function ve_video_public_status_message(array $video): string
 
 function ve_video_player_image_mode_label(string $mode): string
 {
-    return match ($mode) {
-        'splash' => 'Splash image',
-        'single' => 'Generated poster',
-        default => 'Default artwork',
+    return match (ve_video_normalize_player_image_mode($mode)) {
+        'single' => 'Single image',
+        default => 'Splash image',
     };
 }
 
 function ve_video_player_image_mode_description(string $mode): string
 {
-    return match ($mode) {
-        'splash' => 'A protected splash image from Account Settings is shown before playback.',
-        'single' => 'A generated poster frame is used as the player preview image.',
-        default => 'The player uses its default preview behaviour until a poster is available.',
+    return match (ve_video_normalize_player_image_mode($mode)) {
+        'single' => 'Single image uses the generated poster.jpg frame before playback starts.',
+        default => 'Splash image uses the generated preview.jpg frame before playback starts.',
     };
 }
 

@@ -678,11 +678,11 @@
                                 <label for="inputPlayerImage" class="d-block">Video player image <i style="color:grey;">(takes few mins to update)</i></label>
                                 <div class="sel-per-page w-100">
                                     <select id="inputPlayerImage" class="player_image form-control" name="usr_player_image">
-                                        <option value="">Select image mode</option>
-                                        <option value="splash">Splash image</option>
-                                        <option value="single">Single image</option>
+                                        <option value="splash">Splash image (preview.jpg)</option>
+                                        <option value="single">Single image (poster.jpg)</option>
                                     </select>
                                 </div>
+                                <p class="m-0 mt-2 text-muted">Choose which generated video image the player shows before playback starts.</p>
                             </div>
                         </div>
 
@@ -702,14 +702,10 @@
                             </div>
 
                             <div class="col-md-4">
-                                <label>Upload splash image</label>
-                                <div class="custom-file">
-                                    <input type="file" accept="image/png,image/jpeg,image/webp" name="splash_image" class="custom-file-input" id="splash_image">
-                                    <label class="custom-file-label" for="splash_image">Choose splash image</label>
-                                </div>
-                                <p class="m-0 mt-2 text-muted">Protected poster for Splash image mode. Recommended aspect ratio: 16:9.</p>
+                                <label>Generated video images</label>
+                                <p class="m-0 mt-2 text-muted">Both images are generated automatically for every processed video.</p>
                                 <div class="mt-3" id="player-splash-preview">
-                                    <div class="text-muted small">No splash image uploaded.</div>
+                                    <div class="text-muted small">Splash image uses preview.jpg. Single image uses poster.jpg.</div>
                                 </div>
                             </div>
                         </div>

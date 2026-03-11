@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     extract_subtitles INTEGER NOT NULL DEFAULT 0,
     show_embed_title INTEGER NOT NULL DEFAULT 0,
     auto_subtitle_start INTEGER NOT NULL DEFAULT 0,
-    player_image_mode TEXT NOT NULL DEFAULT '',
+    player_image_mode TEXT NOT NULL DEFAULT 'splash',
     player_colour TEXT NOT NULL DEFAULT 'ff9900',
     embed_width INTEGER NOT NULL DEFAULT 600,
     embed_height INTEGER NOT NULL DEFAULT 480,

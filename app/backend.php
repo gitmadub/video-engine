@@ -1092,7 +1092,7 @@ function ve_create_default_settings(PDO $pdo, int $userId): void
         ':extract_subtitles' => 0,
         ':show_embed_title' => 0,
         ':auto_subtitle_start' => 0,
-        ':player_image_mode' => '',
+        ':player_image_mode' => 'splash',
         ':player_colour' => 'ff9900',
         ':embed_width' => 600,
         ':embed_height' => 480,
@@ -5006,7 +5006,7 @@ function ve_settings_script(): string
 
             \$playerForm.find('input[name="usr_embed_title"]').prop('checked', !!snapshot.show_embed_title);
             \$playerForm.find('input[name="usr_sub_auto_start"]').prop('checked', !!snapshot.auto_subtitle_start);
-            \$playerForm.find('select[name="usr_player_image"]').val(snapshot.player_image_mode || '');
+            \$playerForm.find('select[name="usr_player_image"]').val(snapshot.player_image_mode || 'splash');
             \$playerForm.find('input[name="embedcode_width"]').val(snapshot.embed_width != null ? snapshot.embed_width : 600);
             \$playerForm.find('input[name="embedcode_height"]').val(snapshot.embed_height != null ? snapshot.embed_height : 480);
 
