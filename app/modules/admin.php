@@ -2419,6 +2419,36 @@ function ve_admin_processing_node_extract_current_sample(array $snapshot): array
     return $current;
 }
 
+function ve_admin_extract_json_payload(string $output): array
+{
+    $output = trim($output);
+
+    if ($output === '') {
+        throw new RuntimeException('The telemetry command returned no output.');
+    }
+
+    $decoded = json_decode($output, true);
+
+    if (is_array($decoded)) {
+        return $decoded;
+    }
+
+    $start = strpos($output, '{');
+    $end = strrpos($output, '}');
+
+    if ($start === false || $end === false || $end <= $start) {
+        throw new RuntimeException('The telemetry command did not return valid JSON.');
+    }
+
+    $decoded = json_decode(substr($output, $start, ($end - $start) + 1), true);
+
+    if (!is_array($decoded)) {
+        throw new RuntimeException('The telemetry command returned invalid JSON.');
+    }
+
+    return $decoded;
+}
+
 function ve_admin_processing_node_persist_samples(int $nodeId, array $samples): void
 {
     if ($nodeId <= 0) {
@@ -2481,11 +2511,7 @@ function ve_admin_processing_node_snapshot(array $node, int $historyLimit = 48, 
         throw new RuntimeException('Unable to read processing-node telemetry. ' . trim($output));
     }
 
-    $snapshot = json_decode($output, true);
-
-    if (!is_array($snapshot)) {
-        throw new RuntimeException('Processing-node telemetry returned invalid JSON.');
-    }
+    $snapshot = ve_admin_extract_json_payload($output);
 
     $history = array_values(array_filter((array) ($snapshot['history'] ?? []), 'is_array'));
     $current = ve_admin_processing_node_extract_current_sample($snapshot);
@@ -3073,11 +3099,7 @@ function ve_admin_storage_box_snapshot(array $volume): array
         throw new RuntimeException('Unable to read storage-box telemetry. ' . trim($output));
     }
 
-    $snapshot = json_decode($output, true);
-
-    if (!is_array($snapshot)) {
-        throw new RuntimeException('Storage-box telemetry returned invalid JSON.');
-    }
+    $snapshot = ve_admin_extract_json_payload($output);
 
     ve_db()->prepare(
         'UPDATE storage_volumes
