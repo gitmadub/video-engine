@@ -390,9 +390,10 @@
             '.ve-folder-path-card.is-current{color:#f90;border-color:rgba(255,153,0,.58);background:rgba(255,153,0,.08)}',
             '.ve-folder-path-card.ve-drag-folder-target,.ve-folder-path-card.ve-drop-commit{color:#fff;border-color:#f90;background:rgba(255,153,0,.18);transform:translateY(-1px)}',
             '.file_manager .files ul.file_list li.item{transition:background .14s ease,box-shadow .14s ease,transform .14s ease}',
-            '.file_list .item.active{cursor:grab}',
-            '.file_list .item.active:active{cursor:grabbing}',
-            '.file_list .item.ve-item-pending-move{opacity:0;transform:translateX(32px) scale(.985);pointer-events:none;transition:opacity .16s ease,transform .16s ease}',
+            '.file_list .video.item,.file_list .folder.item{cursor:grab}',
+            '.file_list .item.active,.file_list .item:active{cursor:grabbing}',
+            '.file_list .item.ve-item-pending-move{opacity:.52;transform:translateX(14px) scale(.992);pointer-events:none;transition:opacity .16s ease,transform .16s ease}',
+            '@media (min-width:769px){.file_manager .files ul.file_list li.header,.file_manager .files ul.file_list li.video.item,.file_manager .files ul.file_list li.folder.item{display:flex!important;align-items:center;flex-wrap:nowrap!important;width:100%}.file_manager .files ul.file_list li.header .custom-checkbox,.file_manager .files ul.file_list li.video.item .custom-checkbox,.file_manager .files ul.file_list li.folder.item .custom-checkbox{flex:0 0 34px;max-width:34px;width:34px;padding-right:12px}.file_manager .files ul.file_list li.header .name,.file_manager .files ul.file_list li.video.item .name,.file_manager .files ul.file_list li.folder.item .name{flex:1 1 auto;min-width:0;max-width:none;padding-right:18px}.file_manager .files ul.file_list li.header .size,.file_manager .files ul.file_list li.video.item .size,.file_manager .files ul.file_list li.folder.item .size{flex:0 0 110px;max-width:110px}.file_manager .files ul.file_list li.header .date,.file_manager .files ul.file_list li.video.item .date,.file_manager .files ul.file_list li.folder.item .date{flex:0 0 130px;max-width:130px}.file_manager .files ul.file_list li.header .views,.file_manager .files ul.file_list li.video.item .views,.file_manager .files ul.file_list li.folder.item .views{flex:0 0 74px;max-width:74px}.file_manager .files ul.file_list li.header .public,.file_manager .files ul.file_list li.video.item .public,.file_manager .files ul.file_list li.folder.item .public{flex:0 0 86px;max-width:86px}.file_manager .files ul.file_list li.header .size,.file_manager .files ul.file_list li.header .date,.file_manager .files ul.file_list li.header .views,.file_manager .files ul.file_list li.header .public,.file_manager .files ul.file_list li.video.item .size,.file_manager .files ul.file_list li.video.item .date,.file_manager .files ul.file_list li.video.item .views,.file_manager .files ul.file_list li.video.item .public,.file_manager .files ul.file_list li.folder.item .size,.file_manager .files ul.file_list li.folder.item .date,.file_manager .files ul.file_list li.folder.item .views,.file_manager .files ul.file_list li.folder.item .public{display:flex!important;align-items:center;justify-content:flex-end;text-align:right;padding-left:12px;white-space:nowrap}.file_manager .files ul.file_list li.header .mobile,.file_manager .files ul.file_list li.video.item .mobile,.file_manager .files ul.file_list li.folder.item .mobile{margin-left:12px}}',
             '.file_list .folder.item.ve-drag-folder-target,.file_list .folder.item.ve-drop-commit{box-shadow:0 0 0 1px rgba(255,153,0,.65) inset;background:rgba(255,153,0,.10);transform:translateY(-1px)}',
             '.file_list .folder.item.ve-drag-folder-target .name .title,.file_list .folder.item.ve-drop-commit .name .title{color:#fff}',
             '.ve-drag-ghost{position:fixed;top:-9999px;left:-9999px;max-width:260px;padding:10px 12px;border:1px solid #434645;border-radius:3px;background:#1c1c1c;box-shadow:0 8px 22px rgba(0,0,0,.28);color:#fff;pointer-events:none;z-index:2147483647}',
@@ -401,7 +402,9 @@
             '.ve-folder-public{display:inline-flex;align-items:center;gap:6px;color:rgba(255,255,255,.86);font-weight:600}',
             '.ve-folder-public i{color:#f90;font-size:.9rem}',
             '.vue-simple-context-menu{background:#171717!important;border:1px solid rgba(67,70,69,.88)!important;box-shadow:0 18px 44px rgba(0,0,0,.38)!important;border-radius:6px!important;min-width:190px}',
-            '.vue-simple-context-menu__item{color:rgba(255,255,255,.88)!important;padding:9px 14px!important;font-family:inherit!important;font-weight:600!important}',
+            '.vue-simple-context-menu__item{display:flex!important;align-items:center!important;gap:12px!important;color:rgba(255,255,255,.88)!important;padding:9px 14px!important;font-family:inherit!important;font-weight:600!important}',
+            '.vue-simple-context-menu__item i,.vue-simple-context-menu__item svg,.vue-simple-context-menu__item .icon{position:static!important;left:auto!important;right:auto!important;top:auto!important;transform:none!important;flex:0 0 16px;width:16px!important;min-width:16px;height:16px!important;line-height:16px!important;margin:0!important;text-align:center}',
+            '.vue-simple-context-menu__item span,.vue-simple-context-menu__item strong{position:static!important;transform:none!important;flex:1 1 auto;min-width:0}',
             '.vue-simple-context-menu__item:hover{background:rgba(255,153,0,.16)!important;color:#fff!important}',
             '.vue-simple-context-menu li:first-of-type,.vue-simple-context-menu li:last-of-type{margin:4px 0!important}',
             '@media (max-width:991px){.ve-browser-toolbar{padding:10px 12px}.ve-browser-toolbar-main,.ve-folder-path{width:100%}.ve-folder-path-label{padding-top:0}}'
@@ -788,6 +791,18 @@
         return vm.data.folders;
     }
 
+    function ensureVideoCollection(vm) {
+        if (!vm.data || typeof vm.data !== 'object') {
+            vm.data = {};
+        }
+
+        if (!Array.isArray(vm.data.videos)) {
+            vm.data.videos = [];
+        }
+
+        return vm.data.videos;
+    }
+
     function insertOptimisticFolder(vm, folder) {
         var folders = ensureFolderCollection(vm);
 
@@ -830,6 +845,84 @@
         }
 
         folders.splice(index, 1);
+
+        if (typeof vm.$forceUpdate === 'function') {
+            vm.$forceUpdate();
+        }
+
+        afterRender(vm);
+    }
+
+    function applyOptimisticMove(vm, selection, targetFolderId) {
+        var normalizedTargetFolderId = String(targetFolderId || '0');
+        var currentFolderId = String(vm && vm.current_folder || '0');
+        var fileIdLookup = Object.create(null);
+        var folderIdLookup = Object.create(null);
+        var videos;
+        var folders;
+        var snapshot;
+        var removedVideos = 0;
+
+        if (!vm || normalizedTargetFolderId === currentFolderId) {
+            return null;
+        }
+
+        normalizeIdList(selection && selection.fileIds).forEach(function (id) {
+            fileIdLookup[String(id)] = true;
+        });
+
+        normalizeIdList(selection && selection.folderIds).forEach(function (id) {
+            folderIdLookup[String(id)] = true;
+        });
+
+        videos = ensureVideoCollection(vm);
+        folders = ensureFolderCollection(vm);
+        snapshot = {
+            videos: videos.slice(),
+            folders: folders.slice(),
+            totalVideos: vm.total_videos,
+            fileIds: Array.isArray(vm.file_ids) ? vm.file_ids.slice() : [],
+            folderIds: Array.isArray(vm.folder_ids) ? vm.folder_ids.slice() : []
+        };
+
+        vm.data.videos = videos.filter(function (video) {
+            return !video || !fileIdLookup[String(video.id || '')];
+        });
+        vm.data.folders = folders.filter(function (folder) {
+            return !folder || !folderIdLookup[String(folder.fld_id || '')];
+        });
+
+        removedVideos = snapshot.videos.length - vm.data.videos.length;
+
+        if (typeof vm.total_videos === 'number') {
+            vm.total_videos = Math.max(0, vm.total_videos - removedVideos);
+        }
+
+        vm.file_ids = [];
+        vm.folder_ids = [];
+
+        if (typeof vm.$forceUpdate === 'function') {
+            vm.$forceUpdate();
+        }
+
+        afterRender(vm);
+        return snapshot;
+    }
+
+    function restoreOptimisticMove(vm, snapshot) {
+        if (!vm || !snapshot) {
+            return;
+        }
+
+        if (!vm.data || typeof vm.data !== 'object') {
+            vm.data = {};
+        }
+
+        vm.data.videos = Array.isArray(snapshot.videos) ? snapshot.videos.slice() : [];
+        vm.data.folders = Array.isArray(snapshot.folders) ? snapshot.folders.slice() : [];
+        vm.total_videos = snapshot.totalVideos;
+        vm.file_ids = Array.isArray(snapshot.fileIds) ? snapshot.fileIds.slice() : [];
+        vm.folder_ids = Array.isArray(snapshot.folderIds) ? snapshot.folderIds.slice() : [];
 
         if (typeof vm.$forceUpdate === 'function') {
             vm.$forceUpdate();
@@ -1253,6 +1346,7 @@
         root.addEventListener('drop', function (event) {
             var folderTarget = folderDropTargetFromEvent(event);
             var targetFolderId = folderTarget ? folderIdFromDropTarget(folderTarget) : String(vm.current_folder || '0');
+            var optimisticMove = null;
 
             event.preventDefault();
             clearHighlight();
@@ -1265,11 +1359,13 @@
                 }
 
                 applyPendingMoveState(vm, vm.__veInternalDrag, folderTarget);
+                optimisticMove = applyOptimisticMove(vm, vm.__veInternalDrag, targetFolderId);
                 moveItemsToFolder(vm, vm.__veInternalDrag, targetFolderId, function (failed) {
                     if (failed) {
+                        restoreOptimisticMove(vm, optimisticMove);
                         clearPendingMoveState(vm);
                     } else {
-                        vm.__vePendingDragMove = null;
+                        clearPendingMoveState(vm);
                     }
 
                     vm.__veInternalDrag = null;
@@ -1277,7 +1373,7 @@
                     vm.file_ids = [];
                     vm.folder_ids = [];
                     destroyDragPreview(vm);
-                    vm.update();
+                    vm.update({ silent: true });
                 });
                 return;
             }
@@ -1394,8 +1490,10 @@
             installSelection(this);
         };
 
-        target.update = function () {
+        target.update = function (options) {
             var vm = this;
+            var silent = !!(options && options.silent);
+            var requestId = (Number(vm.__veUpdateRequestId || 0) + 1);
             var payload = {
                 page: vm.page,
                 per_page: vm.per_page,
@@ -1406,10 +1504,18 @@
                 sort_order: vm.sort_order
             };
 
-            vm.loading = false;
-            vm.loaded = false;
+            vm.__veUpdateRequestId = requestId;
+
+            if (!silent) {
+                vm.loading = false;
+                vm.loaded = false;
+            }
 
             requestJson('get', ENDPOINTS.actions, payload, function (response) {
+                if (requestId !== Number(vm.__veUpdateRequestId || 0)) {
+                    return;
+                }
+
                 vm.data = response;
                 vm.loaded = true;
                 vm.loading = false;
@@ -1489,6 +1595,7 @@
             var fileIds;
             var folderIds;
             var targetFolderId;
+            var optimisticMove;
 
             syncSelectionFromDom(vm);
             fileIds = normalizeIdList(vm.file_ids);
@@ -1508,14 +1615,22 @@
 
             window.jQuery('#move_files').modal('hide');
             vm.move_files.folders = null;
+            optimisticMove = applyOptimisticMove(vm, {
+                fileIds: fileIds,
+                folderIds: folderIds
+            }, targetFolderId);
             moveItemsToFolder(vm, {
                 fileIds: fileIds,
                 folderIds: folderIds
-            }, targetFolderId, function () {
+            }, targetFolderId, function (failed) {
+                if (failed) {
+                    restoreOptimisticMove(vm, optimisticMove);
+                }
+
                 vm.__vePendingMove = null;
                 vm.file_ids = [];
                 vm.folder_ids = [];
-                vm.update();
+                vm.update({ silent: true });
             });
         };
 

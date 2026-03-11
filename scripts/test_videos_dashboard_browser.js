@@ -769,7 +769,7 @@ function findVideoManagerInstance(node) {
         }
       });
 
-      const source = rows[0] ? (rows[0].querySelector('.size, .date, .views, .public, .mobile') || rows[0]) : null;
+      const source = rows[0] || null;
       const dataTransfer = new DataTransfer();
       const app = document.getElementById('app');
       const root = app && app.__vue__;
@@ -831,7 +831,7 @@ function findVideoManagerInstance(node) {
         }
       });
 
-      const source = rows[0] ? (rows[0].querySelector('.size, .date, .views, .public, .mobile') || rows[0]) : document.querySelector('.file_list .video.item');
+      const source = rows[0] || document.querySelector('.file_list .video.item');
       const target = Array.from(document.querySelectorAll('.file_list .folder.item')).find((node) =>
         (node.textContent || '').includes(folderName)
       );
