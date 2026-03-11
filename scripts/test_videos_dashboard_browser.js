@@ -923,7 +923,7 @@ function findVideoManagerInstance(node) {
       }
     });
     await page.waitForFunction((name) => {
-      return Array.from(document.querySelectorAll('.file_list .folder.item .title')).some((node) => (node.textContent || '').includes(name));
+      return Array.from(document.querySelectorAll('.file_list .folder.item')).some((node) => (node.textContent || '').includes(name));
     }, sharedFolderName);
 
     await page.evaluate((folderName) => {
