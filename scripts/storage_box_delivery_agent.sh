@@ -35,14 +35,14 @@ require_root() {
 
 write_kv_config() {
     mkdir -p "$(dirname "$CONFIG_PATH")"
-    cat >"$CONFIG_PATH" <<EOF
-STORAGE_HOST=${STORAGE_HOST}
-STORAGE_USERNAME=${STORAGE_USERNAME}
-STORAGE_PASSWORD=${STORAGE_PASSWORD}
-MOUNT_PATH=${MOUNT_PATH}
-LIBRARY_ROOT=${LIBRARY_ROOT}
-AGENT_VERSION=${AGENT_VERSION}
-EOF
+    {
+        printf 'STORAGE_HOST=%q\n' "$STORAGE_HOST"
+        printf 'STORAGE_USERNAME=%q\n' "$STORAGE_USERNAME"
+        printf 'STORAGE_PASSWORD=%q\n' "$STORAGE_PASSWORD"
+        printf 'MOUNT_PATH=%q\n' "$MOUNT_PATH"
+        printf 'LIBRARY_ROOT=%q\n' "$LIBRARY_ROOT"
+        printf 'AGENT_VERSION=%q\n' "$AGENT_VERSION"
+    } >"$CONFIG_PATH"
     chmod 600 "$CONFIG_PATH"
 }
 
