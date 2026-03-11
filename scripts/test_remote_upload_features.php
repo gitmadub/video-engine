@@ -45,8 +45,20 @@ ve_admin_save_app_settings($allSettings, $actorUserId);
 
 remote_features_assert(ve_remote_default_quality_height() === 720, 'Remote default quality should be loaded from app settings.');
 remote_features_assert((int) (ve_remote_config()['max_queue_per_user'] ?? 0) === 33, 'Remote queue cap should honor the app setting.');
+remote_features_assert(ve_remote_youtube_extractor_args_value() === 'youtube:player_client=default,mweb', 'Remote YouTube extractor args should default to the container-neutral client selection.');
+remote_features_assert(!str_contains(ve_remote_yt_dlp_best_format(true), '[ext=mp4]'), 'Remote yt-dlp best-format selection should no longer force MP4-only source tracks.');
+remote_features_assert(ve_remote_yt_dlp_merge_output_format() === 'mkv', 'Remote yt-dlp downloads should merge into MKV so high-quality non-MP4 sources remain available.');
+remote_features_assert(ve_remote_ytdlp_plugin_dirs() === [], 'Remote yt-dlp plugin dirs should default to empty.');
 remote_features_assert(ve_remote_ytdlp_cookies_browser() === '', 'Remote yt-dlp cookies browser should default to empty.');
 remote_features_assert(ve_remote_ytdlp_cookies_file() === '', 'Remote yt-dlp cookies file should default to empty.');
+
+ve_set_app_setting('remote_youtube_extractor_args', 'youtube:player_client=web,mweb');
+remote_features_assert(ve_remote_youtube_extractor_args() === ['--extractor-args', 'youtube:player_client=web,mweb'], 'Remote YouTube extractor args should honor the configured app setting.');
+ve_set_app_setting('remote_youtube_extractor_args', 'youtube:player_client=default,mweb');
+ve_set_app_setting('remote_ytdlp_plugin_dirs', "/opt/bgutil-ytdlp-pot-provider/plugin\n/opt/custom/plugin");
+remote_features_assert(ve_remote_ytdlp_plugin_dirs() === ['/opt/bgutil-ytdlp-pot-provider/plugin', '/opt/custom/plugin'], 'Remote yt-dlp plugin dirs should accept newline-separated paths.');
+remote_features_assert(ve_remote_yt_dlp_plugin_args() === ['--plugin-dirs', '/opt/bgutil-ytdlp-pot-provider/plugin', '--plugin-dirs', '/opt/custom/plugin'], 'Remote yt-dlp plugin args should expand every configured plugin directory.');
+ve_set_app_setting('remote_ytdlp_plugin_dirs', '');
 
 $cookieFixturePath = ve_storage_path('private', 'remote_uploads', 'qa-cookies.txt');
 file_put_contents($cookieFixturePath, "# Netscape HTTP Cookie File\n");

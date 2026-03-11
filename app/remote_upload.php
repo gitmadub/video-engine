@@ -138,23 +138,90 @@ function ve_remote_yt_dlp_format_limit_clause(): string
     return '[height<=' . ve_remote_default_quality_height() . ']';
 }
 
-function ve_remote_yt_dlp_mp4_format(bool $preferSeparateStreams = false): string
+function ve_remote_yt_dlp_best_format(bool $preferSeparateStreams = false): string
 {
     $limit = ve_remote_yt_dlp_format_limit_clause();
 
     if ($preferSeparateStreams) {
-        return 'bv*[ext=mp4]' . $limit . '+ba[ext=m4a]'
-            . '/b[ext=mp4]' . $limit
+        return 'bv*' . $limit . '+ba'
+            . '/b' . $limit
             . '/best' . $limit
-            . '/bv*[ext=mp4]+ba[ext=m4a]'
-            . '/b[ext=mp4]'
+            . '/bv*+ba'
+            . '/b'
             . '/best';
     }
 
-    return 'best[ext=mp4]' . $limit
-        . '/best' . $limit
-        . '/best[ext=mp4]'
+    return 'best' . $limit
+        . '/b' . $limit
         . '/best';
+}
+
+function ve_remote_yt_dlp_mp4_format(bool $preferSeparateStreams = false): string
+{
+    return ve_remote_yt_dlp_best_format($preferSeparateStreams);
+}
+
+function ve_remote_yt_dlp_merge_output_format(): string
+{
+    return 'mkv';
+}
+
+function ve_remote_youtube_extractor_args_value(): string
+{
+    $value = ve_get_app_setting(
+        'remote_youtube_extractor_args',
+        (string) (getenv('VE_REMOTE_YOUTUBE_EXTRACTOR_ARGS') ?: 'youtube:player_client=default,mweb')
+    );
+
+    return trim((string) $value);
+}
+
+function ve_remote_ytdlp_plugin_dirs(): array
+{
+    $raw = ve_get_app_setting(
+        'remote_ytdlp_plugin_dirs',
+        (string) (getenv('VE_REMOTE_YTDLP_PLUGIN_DIRS') ?: '')
+    );
+    $raw = trim((string) $raw);
+
+    if ($raw === '') {
+        return [];
+    }
+
+    $pattern = ve_video_is_windows() ? '/[;\r\n]+/' : '/[:\r\n]+/';
+    $dirs = preg_split($pattern, $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $unique = [];
+
+    foreach ($dirs as $dir) {
+        $dir = trim((string) $dir);
+
+        if ($dir === '') {
+            continue;
+        }
+
+        $unique[$dir] = $dir;
+    }
+
+    return array_values($unique);
+}
+
+function ve_remote_yt_dlp_plugin_args(): array
+{
+    $args = [];
+
+    foreach (ve_remote_ytdlp_plugin_dirs() as $dir) {
+        $args[] = '--plugin-dirs';
+        $args[] = $dir;
+    }
+
+    return $args;
+}
+
+function ve_remote_youtube_extractor_args(): array
+{
+    $value = ve_remote_youtube_extractor_args_value();
+
+    return $value !== '' ? ['--extractor-args', $value] : [];
 }
 
 function ve_remote_ytdlp_cookies_browser(): string
@@ -337,6 +404,7 @@ function ve_remote_yt_dlp_extract_info(string $url, array $options = []): array
         '--user-agent',
         (string) ve_remote_config()['user_agent'],
     ]);
+    $args = array_merge($args, ve_remote_yt_dlp_plugin_args());
     $args = array_merge($args, ve_remote_yt_dlp_cookie_args());
 
     $format = trim((string) ($options['format'] ?? ''));
@@ -1247,6 +1315,7 @@ function ve_remote_download_via_ytdlp(int $jobId, array $source): array
         '-o',
         $outputTemplate,
     ]);
+    $args = array_merge($args, ve_remote_yt_dlp_plugin_args());
     $args = array_merge($args, ve_remote_yt_dlp_cookie_args());
 
     $format = trim((string) ($source['yt_dlp_format'] ?? ''));

@@ -9,7 +9,7 @@ function ve_remote_youporn_match(string $url): bool
 
 function ve_remote_youporn_resolve(string $url): array
 {
-    $format = ve_remote_yt_dlp_mp4_format();
+    $format = ve_remote_yt_dlp_best_format();
     $info = ve_remote_yt_dlp_extract_info($url, ['format' => $format]);
     $title = trim((string) ($info['title'] ?? 'youporn-video'));
     $filename = ve_remote_sanitize_filename($title . '.mp4', 'youporn-video.mp4');
@@ -19,7 +19,7 @@ function ve_remote_youporn_resolve(string $url): array
         'download_url' => $url,
         'download_method' => 'yt_dlp',
         'yt_dlp_format' => $format,
-        'merge_output_format' => 'mp4',
+        'merge_output_format' => ve_remote_yt_dlp_merge_output_format(),
         'filename' => $filename,
         'referer' => (string) ($info['webpage_url'] ?? $url),
     ];

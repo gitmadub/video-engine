@@ -9,8 +9,8 @@ function ve_remote_youtube_match(string $url): bool
 
 function ve_remote_youtube_resolve(string $url): array
 {
-    $format = ve_remote_yt_dlp_mp4_format(true);
-    $extraArgs = ['--extractor-args', 'youtube:player_client=android'];
+    $format = ve_remote_yt_dlp_best_format(true);
+    $extraArgs = ve_remote_youtube_extractor_args();
     $info = ve_remote_yt_dlp_extract_info($url, [
         'format' => $format,
         'extra_args' => $extraArgs,
@@ -24,7 +24,7 @@ function ve_remote_youtube_resolve(string $url): array
         'download_method' => 'yt_dlp',
         'yt_dlp_format' => $format,
         'yt_dlp_extra_args' => $extraArgs,
-        'merge_output_format' => 'mp4',
+        'merge_output_format' => ve_remote_yt_dlp_merge_output_format(),
         'filename' => $filename,
         'referer' => (string) ($info['webpage_url'] ?? $url),
     ];
