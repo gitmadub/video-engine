@@ -1082,6 +1082,27 @@ function ve_video_normalize_folder_id(int $userId, int $folderId): int
     return is_array($folder) ? (int) $folder['id'] : 0;
 }
 
+/**
+ * @return array<int, array{id:int,name:string}>
+ */
+function ve_video_folder_path_for_user(int $userId, int $folderId): array
+{
+    $path = [];
+    $current = ve_video_folder_get_for_user($userId, $folderId);
+
+    while (is_array($current)) {
+        array_unshift($path, [
+            'id' => (int) ($current['id'] ?? 0),
+            'name' => (string) ($current['name'] ?? ''),
+        ]);
+
+        $parentId = (int) ($current['parent_id'] ?? 0);
+        $current = $parentId > 0 ? ve_video_folder_get_for_user($userId, $parentId) : null;
+    }
+
+    return $path;
+}
+
 function ve_video_folder_name_exists(int $userId, int $parentId, string $name, ?int $ignoreId = null): bool
 {
     $sql = 'SELECT id FROM video_folders
@@ -1372,9 +1393,48 @@ function ve_video_legacy_sort_direction(string $sortOrder): string
 function ve_video_legacy_per_page(): int
 {
     $allowed = [25, 50, 100, 500, 1000];
-    $requested = (int) ($_COOKIE['per_page'] ?? 25);
+    $requested = (int) ($_REQUEST['per_page'] ?? $_COOKIE['per_page'] ?? 25);
+
+    if (!in_array($requested, $allowed, true)) {
+        $requested = 25;
+    }
+
+    if (array_key_exists('per_page', $_REQUEST)) {
+        $cookiePath = rtrim((string) ve_base_path(), '/');
+        $cookiePath = $cookiePath === '' ? '/' : $cookiePath . '/';
+
+        setcookie('per_page', (string) $requested, [
+            'expires' => time() + 31536000,
+            'path' => $cookiePath,
+            'samesite' => 'Lax',
+        ]);
+        $_COOKIE['per_page'] = (string) $requested;
+    }
 
     return in_array($requested, $allowed, true) ? $requested : 25;
+}
+
+function ve_video_set_user_uploader_type(int $userId, string $uploaderType): string
+{
+    $uploaderType = trim($uploaderType);
+
+    if (!in_array($uploaderType, ['0', '1', '2', '3'], true)) {
+        throw new RuntimeException('Choose a valid uploader type.');
+    }
+
+    ve_create_default_settings(ve_db(), $userId);
+    ve_db()->prepare(
+        'UPDATE user_settings
+         SET uploader_type = :uploader_type,
+             updated_at = :updated_at
+         WHERE user_id = :user_id'
+    )->execute([
+        ':uploader_type' => $uploaderType,
+        ':updated_at' => ve_now(),
+        ':user_id' => $userId,
+    ]);
+
+    return $uploaderType;
 }
 
 function ve_video_legacy_total_for_folder(int $userId, int $folderId, string $search = ''): int
@@ -2117,11 +2177,24 @@ function ve_handle_legacy_videos_json(): void
     $user = ve_video_legacy_current_user();
     $userId = (int) ($user['id'] ?? 0);
 
-    if (ve_is_method('GET') && array_key_exists('content_type', $_GET)) {
-        ve_json([
-            'status' => 'ok',
-            'message' => 'Content type preference updated for this session.',
-        ]);
+    if (array_key_exists('content_type', $_REQUEST)) {
+        if (ve_is_method('POST')) {
+            ve_require_csrf(ve_request_csrf_token());
+        }
+
+        try {
+            $uploaderType = ve_video_set_user_uploader_type($userId, (string) ($_REQUEST['content_type'] ?? '0'));
+            ve_json([
+                'status' => 'ok',
+                'uploader_type' => $uploaderType,
+                'message' => 'Content type preference saved to your account.',
+            ]);
+        } catch (RuntimeException $exception) {
+            ve_json([
+                'status' => 'fail',
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
     }
 
     if (ve_is_method('POST') && array_key_exists('file_export', $_POST)) {
@@ -2355,10 +2428,12 @@ function ve_handle_legacy_videos_json(): void
         'folder_id' => $folderId,
         'fld_parent_id' => is_array($currentFolder) ? (int) ($currentFolder['parent_id'] ?? 0) : 0,
         'current_folder' => is_array($currentFolder) ? ve_video_folder_to_legacy_payload($currentFolder) : null,
+        'folder_path' => ve_video_folder_path_for_user($userId, $folderId),
         'folders' => $folders,
         'videos' => array_map('ve_video_to_legacy_payload', $videos),
         'list' => array_map('ve_video_to_legacy_payload', $videos),
         'token' => ve_csrf_token(),
+        'uploader_type' => (string) ($settings['uploader_type'] ?? '0'),
         'upload' => [
             'utype' => 'reg',
             'sess_id' => session_id(),
@@ -11385,6 +11460,9 @@ function ve_render_videos_dashboard_page(): void
     $settings = is_array($user) ? ve_get_user_settings((int) $user['id']) : [];
     $embedWidth = max(240, (int) ($settings['embed_width'] ?? 600));
     $embedHeight = max(240, (int) ($settings['embed_height'] ?? 480));
+    $uploaderType = trim((string) ($settings['uploader_type'] ?? '0'));
+    $askContentType = in_array($uploaderType, ['1', '2', '3'], true) ? 1 : 0;
+    $safeUploaderType = ve_h($uploaderType);
 
     $html = (string) file_get_contents(ve_root_path('dashboard', 'index.html'));
     $html = str_replace('<title>Dashboard - DoodStream</title>', '<title>My Videos - DoodStream</title>', $html);
@@ -11392,6 +11470,7 @@ function ve_render_videos_dashboard_page(): void
 
     $headAssets = <<<'HTML'
 <style type="text/css">.vue-simple-context-menu{top:0;left:0;margin:0;padding:0;display:none;list-style:none;position:absolute;z-index:1000000;background-color:#ecf0f1;border-bottom-width:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,Cantarell,"Fira Sans","Droid Sans","Helvetica Neue",sans-serif;box-shadow:0 3px 6px 0 rgba(51,51,51,.2);border-radius:4px}.vue-simple-context-menu--active{display:block}.vue-simple-context-menu__item{display:flex;color:#333;cursor:pointer;padding:5px 15px;align-items:center}.vue-simple-context-menu__item:hover{background-color:#007aff;color:#fff}.vue-simple-context-menu li:first-of-type{margin-top:4px}.vue-simple-context-menu li:last-of-type{margin-bottom:4px}.text-orange{color:#f90;}@media (max-width: 768px){ .container-fluid{ padding-right:0px; padding-left:0px; } .file_manager { border-radius:0px !important; padding: 5px !important; } .file_manager .title_wrap { padding: 0px !important; margin-bottom:0px !important; }}.my-premium .bandwidth-plans .payments .selection, .my-premium .premium-plans .payments .selection { width: 100% !important;}.my-premium .bandwidth-plans .payments .selection .custom-control.p-plan:nth-of-type(3n), .my-premium .premium-plans .payments .selection .custom-control.p-plan:nth-of-type(3n) { margin-right: 20px !important;}@media (min-width: 1200px){ .my-premium .bandwidth-plans .payments .selection .custom-control:not(.p-plan):nth-of-type(5n+1), .my-premium .premium-plans .payments .selection .custom-control:not(.p-plan):nth-of-type(5n+1) { clear: both; margin-left: 20px !important; }}.my-premium .bandwidth-plans .payments .btn, .my-premium .premium-plans .payments .btn { margin-left: 20px;}.remote-list small{ display: block; color: #ea8c00;}.remote-list .fa-external-link{ font-size: 10px; margin: 2px;}.remote-list .badge{ padding: 7px;}@media (min-width: 1350px){ .container-mp { max-width: 1350px !important; }} </style>
+<style type="text/css">.ve-browser-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:0 0 12px;padding:14px 16px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(11,16,26,.72)}.ve-browser-toolbar-main{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0}.ve-browser-toolbar .ve-go-back[disabled]{opacity:.45;cursor:not-allowed}.ve-folder-path{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.ve-folder-path-separator{color:rgba(255,255,255,.38);font-size:.75rem}.ve-folder-path-card{display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid rgba(255,255,255,.1);border-radius:999px;background:rgba(255,255,255,.04);color:#fff;font-size:.86rem;line-height:1;transition:border-color .18s ease,background .18s ease,transform .18s ease}.ve-folder-path-card:hover,.ve-folder-path-card:focus-visible{text-decoration:none;border-color:rgba(255,153,0,.55);background:rgba(255,153,0,.12);outline:none}.ve-folder-path-card.is-current{border-color:rgba(255,153,0,.55);background:rgba(255,153,0,.16)}.ve-folder-path-card.ve-drag-folder-target{border-color:rgba(255,153,0,.88);background:rgba(255,153,0,.22);transform:translateY(-1px)}.ve-results-control{display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.72);font-size:.82rem}.ve-results-control select{min-width:88px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:#111826;color:#fff;padding:8px 12px}.iziToast-wrapper-topRight,.iziToast-wrapper-topLeft,.iziToast-wrapper-topCenter{top:92px!important}@media (max-width:991px){.ve-browser-toolbar{padding:12px}.ve-browser-toolbar-main,.ve-folder-path{width:100%}.ve-results-control{width:100%;justify-content:flex-start}}</style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tootik/1.0.2/css/tootik.min.css" />
 <link rel="stylesheet" href="/assets/css/video_page.min.css">
 HTML;
@@ -11404,8 +11483,8 @@ HTML;
 
     if ($contentPosition !== false && $footerPosition !== false && $footerPosition > $contentPosition) {
         $pageContent = <<<HTML
-<div id="app" class="ve-video-dashboard-app">
-    <video-manager :ask-content-type="0" embed-code-width="{$embedWidth}" embed-code-height="{$embedHeight}"></video-manager>
+<div id="app" class="ve-video-dashboard-app" data-uploader-type="{$safeUploaderType}">
+    <video-manager :ask-content-type="{$askContentType}" embed-code-width="{$embedWidth}" embed-code-height="{$embedHeight}"></video-manager>
 </div>
 HTML;
         $html = substr($html, 0, $contentPosition + strlen($contentMarker))

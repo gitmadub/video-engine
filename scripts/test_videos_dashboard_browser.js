@@ -198,11 +198,31 @@ function findVideoManagerInstance(node) {
 
     await page.goto(appPath(basePath, '/dashboard/videos'), { waitUntil: 'networkidle' });
 
-    await dismissModalIfVisible(page, '#content_type');
-
     if (!page.url().endsWith(appPath(basePath, '/videos'))) {
       throw new Error(`Expected /dashboard/videos to redirect to ${appPath(basePath, '/videos')}. Received ${page.url()}`);
     }
+
+    await page.waitForFunction(() => {
+      const modal = document.querySelector('#content_type');
+      if (!modal) {
+        return false;
+      }
+
+      const style = window.getComputedStyle(modal);
+      return modal.classList.contains('show') || style.display !== 'none';
+    });
+
+    await page.check('#adult', { force: true });
+    await page.locator('#content_type .modal-footer .btn.btn-primary').click();
+    await page.waitForFunction(() => {
+      const modal = document.querySelector('#content_type');
+      if (!modal) {
+        return true;
+      }
+
+      const style = window.getComputedStyle(modal);
+      return !modal.classList.contains('show') && style.display === 'none';
+    });
 
     await page.waitForFunction(() => {
       const root = document.querySelector('.file_manager.d-flex.flex-wrap');
@@ -210,8 +230,36 @@ function findVideoManagerInstance(node) {
         (button.textContent || '').includes('Share')
       );
       const folderRow = document.querySelector('.file_list .folder.item .size');
-      return Boolean(root && shareButton && folderRow);
+      const pathCard = document.querySelector('[data-folder-path-card][data-folder-id="0"]');
+      const perPage = document.querySelector('[data-results-per-page]');
+      return Boolean(root && shareButton && folderRow && pathCard && perPage);
     });
+
+    const contentTypeAfterSave = await page.evaluate(() => {
+      const app = document.getElementById('app');
+      return app ? app.getAttribute('data-uploader-type') : '';
+    });
+
+    if (contentTypeAfterSave !== '2') {
+      throw new Error(`Content type was not persisted into the dashboard shell. Received: ${contentTypeAfterSave || '(empty)'}`);
+    }
+
+    await page.reload({ waitUntil: 'networkidle' });
+    const contentTypeModal = page.locator('#content_type');
+    const contentModalVisibleAfterReload = (await contentTypeModal.count())
+      ? await contentTypeModal.evaluate((node) => {
+        if (!node) {
+          return false;
+        }
+
+        const style = window.getComputedStyle(node);
+        return node.classList.contains('show') || style.display !== 'none';
+      })
+      : false;
+
+    if (contentModalVisibleAfterReload) {
+      throw new Error('Content type modal should not reopen after the saved account preference is set.');
+    }
 
     const toolbarLabels = await page.locator('.title_wrap .btn-group .btn').allTextContents();
 
@@ -221,6 +269,44 @@ function findVideoManagerInstance(node) {
 
     if (toolbarLabels.some((label) => label.includes('Export'))) {
       throw new Error(`Legacy Export button should no longer appear: ${JSON.stringify(toolbarLabels)}`);
+    }
+
+    const rootBreadcrumbLabel = (await page.locator('[data-folder-path-card][data-folder-id="0"]').textContent() || '').trim();
+
+    if (rootBreadcrumbLabel !== '/Videos') {
+      throw new Error(`Root breadcrumb should start with /Videos. Received: ${rootBreadcrumbLabel || '(empty)'}`);
+    }
+
+    await page.selectOption('[data-results-per-page]', '50');
+    await page.waitForFunction(() => {
+      const select = document.querySelector('[data-results-per-page]');
+      if (!select) {
+        return false;
+      }
+
+      const app = document.getElementById('app');
+      const root = app && app.__vue__;
+
+      function findVideoManagerInstance(node) {
+        const queue = node && node.$children ? node.$children.slice() : [];
+        while (queue.length > 0) {
+          const child = queue.shift();
+          if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+            return child;
+          }
+          if (child && child.$children) {
+            queue.push(...child.$children);
+          }
+        }
+        return null;
+      }
+
+      const vm = findVideoManagerInstance(root);
+      return select.value === '50' && vm && String(vm.per_page || '') === '50';
+    });
+
+    if (!seenRequests.some((entry) => entry.includes('/videos/actions') && entry.includes('per_page=50'))) {
+      throw new Error(`Changing the results-per-page control did not call /videos/actions with per_page=50. Seen requests: ${JSON.stringify(seenRequests)}`);
     }
 
     const sharedFolderRow = page.locator('.file_list .folder.item').filter({ hasText: sharedFolderName });
@@ -260,6 +346,12 @@ function findVideoManagerInstance(node) {
       const videoTitle = document.querySelector('.file_list .video.item h4 a');
       return Boolean(videoTitle && videoTitle.textContent && videoTitle.textContent.includes(name));
     }, 'Shared Folder Clip');
+
+    const breadcrumbLabelsInsideFolder = await page.locator('[data-folder-path-card]').allTextContents();
+
+    if (!(breadcrumbLabelsInsideFolder.includes('/Videos') && breadcrumbLabelsInsideFolder.some((label) => label.trim() === sharedFolderName))) {
+      throw new Error(`Breadcrumb path did not include the current folder. Received: ${JSON.stringify(breadcrumbLabelsInsideFolder)}`);
+    }
 
     await toolbarButton(page, 'Share').click();
     await page.waitForFunction(() => {
@@ -301,6 +393,10 @@ function findVideoManagerInstance(node) {
     }
 
     await dismissModalIfVisible(page, '#sharing');
+    await page.locator('[data-action="go-back"]').click();
+    await page.waitForFunction((name) => {
+      return Array.from(document.querySelectorAll('.file_list .folder.item .title')).some((node) => (node.textContent || '').includes(name));
+    }, targetFolderName);
 
     await page.evaluate(() => {
       const app = document.getElementById('app');

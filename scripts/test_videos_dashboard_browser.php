@@ -11,13 +11,13 @@ function videos_browser_assert(bool $condition, string $message): void
     }
 }
 
-function videos_browser_wait_for_server(string $baseUrl, int $attempts = 50): void
+function videos_browser_wait_for_server(string $baseUrl, int $attempts = 80): void
 {
     for ($i = 0; $i < $attempts; $i++) {
         $curl = curl_init($baseUrl . '/');
         curl_setopt_array($curl, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT_MS => 500,
+            CURLOPT_TIMEOUT_MS => 1000,
         ]);
         curl_exec($curl);
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);

@@ -262,6 +262,188 @@
         });
     }
 
+    function appRootElement() {
+        return document.getElementById('app');
+    }
+
+    function currentUploaderType() {
+        var root = appRootElement();
+        var value = root ? String(root.getAttribute('data-uploader-type') || '0') : '0';
+
+        return /^(1|2|3)$/.test(value) ? value : '0';
+    }
+
+    function setCurrentUploaderType(value) {
+        var root = appRootElement();
+        var normalized = /^(1|2|3)$/.test(String(value || '')) ? String(value) : '0';
+
+        if (root) {
+            root.setAttribute('data-uploader-type', normalized);
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function hydrateSavedContentType(vm) {
+        if (!vm) {
+            return;
+        }
+
+        var uploaderType = currentUploaderType();
+
+        if (uploaderType !== '0') {
+            vm.content_type = uploaderType;
+            return;
+        }
+
+        if (vm.data && /^(1|2|3)$/.test(String(vm.data.uploader_type || ''))) {
+            vm.content_type = String(vm.data.uploader_type);
+            setCurrentUploaderType(vm.content_type);
+        }
+    }
+
+    function persistPerPage(value) {
+        var normalized = String(value || '25');
+        var cookiePath = window.VE_BASE_PATH || '/';
+
+        if (!cookiePath || cookiePath === '') {
+            cookiePath = '/';
+        } else if (cookiePath.charAt(cookiePath.length - 1) !== '/') {
+            cookiePath += '/';
+        }
+
+        document.cookie = 'per_page=' + encodeURIComponent(normalized)
+            + '; path=' + cookiePath
+            + '; max-age=31536000; SameSite=Lax';
+    }
+
+    function folderPathItems(vm) {
+        var items = [{
+            id: '0',
+            name: '/Videos'
+        }];
+
+        if (!vm || !vm.data || !Array.isArray(vm.data.folder_path)) {
+            return items;
+        }
+
+        vm.data.folder_path.forEach(function (folder) {
+            var folderId = folder && (folder.id || folder.fld_id);
+            var folderName = folder && (folder.name || folder.fld_name);
+
+            if (!folderId || !folderName) {
+                return;
+            }
+
+            items.push({
+                id: String(folderId),
+                name: String(folderName)
+            });
+        });
+
+        return items;
+    }
+
+    function renderBrowserToolbar(vm) {
+        var filesPane = document.querySelector('.files');
+        var list = filesPane ? filesPane.querySelector('.file_list') : null;
+        var toolbar;
+        var pathMarkup;
+        var items;
+        var currentFolderId;
+
+        if (!filesPane || !list) {
+            return;
+        }
+
+        toolbar = filesPane.querySelector('[data-videos-browser-toolbar]');
+
+        if (!toolbar) {
+            toolbar = document.createElement('div');
+            toolbar.className = 've-browser-toolbar';
+            toolbar.setAttribute('data-videos-browser-toolbar', 'true');
+            filesPane.insertBefore(toolbar, list);
+        }
+
+        items = folderPathItems(vm);
+        currentFolderId = String(vm && vm.current_folder || '0');
+        pathMarkup = items.map(function (item, index) {
+            var separator = index === 0 ? '' : '<span class="ve-folder-path-separator">/</span>';
+            var currentClass = item.id === currentFolderId ? ' is-current' : '';
+
+            return separator
+                + '<button type="button" class="ve-folder-path-card' + currentClass + '"'
+                + ' data-folder-path-card="true"'
+                + ' data-folder-id="' + item.id + '">'
+                + escapeHtml(item.name)
+                + '</button>';
+        }).join('');
+
+        toolbar.innerHTML = ''
+            + '<div class="ve-browser-toolbar-main">'
+            + '  <button type="button" class="btn btn-white btn-sm ve-go-back" data-action="go-back"' + (currentFolderId === '0' ? ' disabled' : '') + '>Go Back</button>'
+            + '  <div class="ve-folder-path" data-folder-path>' + pathMarkup + '</div>'
+            + '</div>'
+            + '<label class="ve-results-control">'
+            + '  <span>Results per page</span>'
+            + '  <select data-results-per-page>'
+            + '      <option value="25">25</option>'
+            + '      <option value="50">50</option>'
+            + '      <option value="100">100</option>'
+            + '      <option value="500">500</option>'
+            + '      <option value="1000">1000</option>'
+            + '  </select>'
+            + '</label>';
+
+        wirePerPageControls(vm);
+    }
+
+    function isPerPageSelect(select) {
+        var values;
+
+        if (!select || select.tagName !== 'SELECT') {
+            return false;
+        }
+
+        values = Array.prototype.map.call(select.options || [], function (option) {
+            return String(option.value || '').trim();
+        }).filter(Boolean);
+
+        return values.length >= 3 && values.every(function (value) {
+            return ['25', '50', '100', '500', '1000'].indexOf(value) !== -1;
+        });
+    }
+
+    function applyPerPageSelection(vm, value) {
+        var normalized = String(value || '25');
+
+        if (['25', '50', '100', '500', '1000'].indexOf(normalized) === -1) {
+            normalized = '25';
+        }
+
+        vm.per_page = normalized;
+        vm.page = 1;
+        persistPerPage(normalized);
+        vm.update();
+    }
+
+    function wirePerPageControls(vm) {
+        document.querySelectorAll('select').forEach(function (select) {
+            if (!isPerPageSelect(select)) {
+                return;
+            }
+
+            select.value = String(vm && vm.per_page || '25');
+        });
+    }
+
     function folderPayloadById(vm, folderId) {
         var folders = (vm && vm.data && Array.isArray(vm.data.folders)) ? vm.data.folders : [];
         var normalizedId = String(folderId || '');
@@ -275,6 +457,18 @@
         }
 
         return null;
+    }
+
+    function folderIdFromDropTarget(target) {
+        if (!target) {
+            return '0';
+        }
+
+        if (target.hasAttribute('data-folder-id')) {
+            return String(target.getAttribute('data-folder-id') || '0');
+        }
+
+        return String(target.getAttribute('data-folder') || '0');
     }
 
     function decorateFolderRows(vm) {
@@ -657,7 +851,7 @@
         }
 
         function folderDropTargetFromEvent(event) {
-            var target = event.target && event.target.closest('.file_list .folder.item[data-folder]');
+            var target = event.target && event.target.closest('.file_list .folder.item[data-folder], [data-folder-path-card]');
 
             return target && root.contains(target) ? target : null;
         }
@@ -722,7 +916,7 @@
 
         root.addEventListener('drop', function (event) {
             var folderTarget = folderDropTargetFromEvent(event);
-            var targetFolderId = folderTarget ? folderTarget.getAttribute('data-folder') : String(vm.current_folder || '0');
+            var targetFolderId = folderTarget ? folderIdFromDropTarget(folderTarget) : String(vm.current_folder || '0');
 
             event.preventDefault();
             clearHighlight();
@@ -770,8 +964,21 @@
 
         document.addEventListener('click', function (event) {
             var shareLink = event.target && event.target.closest('[data-folder-share]');
+            var pathCard = event.target && event.target.closest('[data-folder-path-card]');
+            var goBackButton = event.target && event.target.closest('[data-action="go-back"]');
 
             if (!shareLink) {
+                if (pathCard) {
+                    event.preventDefault();
+                    vm.open_folder(String(pathCard.getAttribute('data-folder-id') || '0'));
+                    return;
+                }
+
+                if (goBackButton && !goBackButton.disabled) {
+                    event.preventDefault();
+                    vm.open_folder(String(vm.data && vm.data.fld_parent_id || '0'));
+                }
+
                 return;
             }
 
@@ -779,15 +986,27 @@
             openFolderShare(vm, shareLink.getAttribute('data-folder-share'));
         });
 
+        document.addEventListener('change', function (event) {
+            var select = event.target;
+
+            if (!isPerPageSelect(select)) {
+                return;
+            }
+
+            applyPerPageSelection(vm, select.value);
+        });
+
         vm.__veSelectionSyncReady = true;
     }
 
     function afterRender(vm) {
         window.setTimeout(function () {
+            renderBrowserToolbar(vm);
             ensureToolbarLabels(vm);
             ensureActionButtonTypes();
             decorateFolderRows(vm);
             decorateDraggableItems();
+            hydrateSavedContentType(vm);
             installSelection(vm);
             installDropZone(vm);
             installSelectionSync(vm);
@@ -826,6 +1045,7 @@
             var vm = this;
             var payload = {
                 page: vm.page,
+                per_page: vm.per_page,
                 sort: vm.sort,
                 fld_id: vm.current_folder,
                 key: vm.$root.search_filter || vm.search || '',
@@ -842,9 +1062,15 @@
                 vm.loading = false;
                 vm.total_videos = response.total_videos;
                 vm.token = response.token;
+                vm.per_page = String(response.per_page || vm.per_page || '25');
                 vm.folder_ids = [];
                 vm.file_ids = [];
                 vm.folders = [];
+
+                if (/^(1|2|3)$/.test(String(response.uploader_type || ''))) {
+                    vm.content_type = String(response.uploader_type);
+                    setCurrentUploaderType(vm.content_type);
+                }
 
                 if (Array.isArray(response.folders)) {
                     response.folders.forEach(function (folder) {
@@ -1164,6 +1390,25 @@
             });
         };
 
+        target.add_content_type = function () {
+            var vm = this;
+
+            requestJson('post', ENDPOINTS.actions, {
+                content_type: vm.content_type,
+                token: vm.token
+            }, function (response) {
+                if (!response || response.status !== 'ok') {
+                    showToast('error', response && response.message ? response.message : 'Unable to save your content type.');
+                    return;
+                }
+
+                vm.content_type = String(response.uploader_type || vm.content_type || '1');
+                setCurrentUploaderType(vm.content_type);
+                window.jQuery('#content_type').modal('hide');
+                showToast('success', response.message || 'Content type saved.');
+            });
+        };
+
         target.open_folder = function (folderId) {
             this.current_folder = folderId;
             this.page = 1;
@@ -1224,6 +1469,7 @@
         }
 
         wrapMethods(instance);
+        hydrateSavedContentType(instance);
         afterRender(instance);
         return true;
     }

@@ -86,13 +86,13 @@ function videos_actions_extract_runtime_token(string $html): string
     return $decoded;
 }
 
-function videos_actions_wait_for_server(string $baseUrl, int $attempts = 50): void
+function videos_actions_wait_for_server(string $baseUrl, int $attempts = 80): void
 {
     for ($i = 0; $i < $attempts; $i++) {
         $curl = curl_init($baseUrl . '/');
         curl_setopt_array($curl, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT_MS => 500,
+            CURLOPT_TIMEOUT_MS => 1000,
         ]);
         curl_exec($curl);
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
@@ -284,6 +284,8 @@ try {
     videos_actions_assert(($initialActions['status'] ?? null) === 'ok', 'Initial videos actions request should succeed.');
     videos_actions_assert(count((array) ($initialActions['folders'] ?? [])) === 1, 'Initial videos actions request should expose the seeded folder.');
     videos_actions_assert(count((array) ($initialActions['videos'] ?? [])) === 2, 'Initial videos actions request should expose both seeded videos.');
+    videos_actions_assert((string) ($initialActions['per_page'] ?? '') === '25', 'Initial videos actions response should expose the default results-per-page value.');
+    videos_actions_assert((array) ($initialActions['folder_path'] ?? []) === [], 'Root folder path should be empty in the legacy payload.');
     videos_actions_assert((string) (($initialActions['folders'][0]['siz'] ?? '')) === '0 B', 'Folder payload should include a formatted size.');
     videos_actions_assert((string) (($initialActions['folders'][0]['cre'] ?? '')) !== '', 'Folder payload should include a created date.');
     videos_actions_assert(str_contains((string) (($initialActions['folders'][0]['share_url'] ?? '')), '/videos/shared/'), 'Folder payload should include a public share URL.');
@@ -372,6 +374,7 @@ try {
         'query' => [
             'page' => 1,
             'fld_id' => $folderAId,
+            'per_page' => 50,
             'sort_field' => 'file_created',
             'sort_order' => 'down',
         ],
@@ -379,6 +382,9 @@ try {
     videos_actions_assert(count((array) ($folderActions['videos'] ?? [])) === 1, 'Target folder should contain the moved video.');
     videos_actions_assert((string) (($folderActions['videos'][0]['fid'] ?? '')) === 'rootvideo01', 'Moved video should appear in the target folder list.');
     videos_actions_assert((string) (($folderActions['current_folder']['siz'] ?? '')) === '150.00 MB', 'Current folder payload should include the recursive folder size.');
+    videos_actions_assert((string) ($folderActions['per_page'] ?? '') === '50', 'Videos actions should honor the requested results-per-page value.');
+    videos_actions_assert(count((array) ($folderActions['folder_path'] ?? [])) === 1, 'The current folder payload should include a single breadcrumb segment for the parent folder.');
+    videos_actions_assert((string) (($folderActions['folder_path'][0]['name'] ?? '')) === 'QA Folder Alpha', 'Folder path should expose the current folder name.');
 
     $nestedTree = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
@@ -398,6 +404,17 @@ try {
 
     videos_actions_assert(is_array($alphaTree), 'Nested folder tree should include the renamed parent folder.');
     videos_actions_assert(count((array) ($alphaTree['sub_folders'] ?? [])) === 1, 'Nested folder tree should show the moved sub-folder under the parent folder.');
+
+    $setContentType = videos_actions_json($client->request('POST', '/videos/actions', [
+        'form' => [
+            'token' => $pageToken,
+            'content_type' => '2',
+        ],
+    ]));
+    videos_actions_assert(($setContentType['status'] ?? null) === 'ok', 'Saving the uploader content type should succeed.');
+    videos_actions_assert((string) ($setContentType['uploader_type'] ?? '') === '2', 'The saved uploader content type should be returned to the dashboard.');
+    $savedSettings = ve_get_user_settings($userId);
+    videos_actions_assert((string) ($savedSettings['uploader_type'] ?? '') === '2', 'Uploader content type should persist into the account settings record.');
 
     $setPrivate = videos_actions_json($client->request('POST', '/videos/actions', [
         'form' => [
