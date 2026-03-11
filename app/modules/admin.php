@@ -84,13 +84,86 @@ function ve_admin_bootstrap_logins(): array
 
 function ve_admin_default_settings(): array
 {
-    return [
+    $defaults = [
         'payout_minimum_micro_usd' => '10000000',
         'admin_default_page_size' => (string) VE_ADMIN_PAGE_SIZE,
         'admin_recent_audit_limit' => '12',
         'remote_max_queue_per_user' => '25',
         'remote_default_quality' => '1080',
     ];
+
+    foreach (ve_membership_plan_catalog() as $planCode => $meta) {
+        foreach (ve_video_processing_plan_defaults((string) $planCode) as $field => $value) {
+            $defaults[ve_video_processing_setting_key((string) $planCode, (string) $field)] = (string) $value;
+        }
+    }
+
+    return $defaults;
+}
+
+function ve_admin_setting_options(array $pairs): array
+{
+    $options = [];
+
+    foreach ($pairs as $value => $label) {
+        $options[] = [
+            'value' => (string) $value,
+            'label' => (string) $label,
+        ];
+    }
+
+    return $options;
+}
+
+function ve_admin_format_micro_usd_input(?string $microUsd): string
+{
+    $amount = max(0, (int) ($microUsd ?? '0'));
+    $usd = number_format($amount / 1000000, 6, '.', '');
+    $usd = rtrim(rtrim($usd, '0'), '.');
+
+    return $usd !== '' ? $usd : '0';
+}
+
+function ve_admin_processing_setting_fields(array $settings): array
+{
+    $fields = [];
+    $serverMaxHeight = (int) (ve_video_config()['target_max_height'] ?? 1080);
+    $resolutionOptions = ve_admin_setting_options(ve_video_processing_resolution_options($serverMaxHeight));
+    $qualityModeOptions = ve_admin_setting_options(ve_video_processing_quality_mode_options());
+    $audioOptions = ve_admin_setting_options(ve_video_audio_bitrate_options());
+
+    foreach (ve_membership_plan_catalog() as $planCode => $meta) {
+        $label = (string) ($meta['label'] ?? ucfirst((string) $planCode));
+        $defaults = ve_video_processing_plan_defaults((string) $planCode);
+        $fields[] = [
+            'type' => 'heading',
+            'label' => $label . ' processing profile',
+            'description' => 'Controls the maximum output resolution and how aggressively uploaded videos are compressed for ' . strtolower($label) . ' members.',
+        ];
+        $fields[] = ve_admin_form_field(
+            'select',
+            ve_video_processing_setting_key((string) $planCode, 'max_height'),
+            'Max output resolution',
+            (string) ($settings[ve_video_processing_setting_key((string) $planCode, 'max_height')] ?? $defaults['max_height']),
+            ['options' => $resolutionOptions, 'help' => 'Higher resolutions preserve more detail but increase storage and delivery cost.']
+        );
+        $fields[] = ve_admin_form_field(
+            'select',
+            ve_video_processing_setting_key((string) $planCode, 'quality_mode'),
+            'Processing mode',
+            (string) ($settings[ve_video_processing_setting_key((string) $planCode, 'quality_mode')] ?? $defaults['quality_mode']),
+            ['options' => $qualityModeOptions, 'help' => 'Fast encodes quicker. Best quality keeps more source detail and uses a larger bitrate budget.']
+        );
+        $fields[] = ve_admin_form_field(
+            'select',
+            ve_video_processing_setting_key((string) $planCode, 'audio_bitrate'),
+            'Audio quality',
+            (string) ($settings[ve_video_processing_setting_key((string) $planCode, 'audio_bitrate')] ?? $defaults['audio_bitrate']),
+            ['options' => $audioOptions, 'help' => 'Use higher audio quality for music-heavy or spoken-word content.']
+        );
+    }
+
+    return $fields;
 }
 
 function ve_admin_run_migrations(PDO $pdo): void
@@ -2359,8 +2432,21 @@ function ve_admin_delete_custom_domain(int $domainId, int $actorUserId): void
 
 function ve_admin_normalize_app_setting_value(string $key, string $value): string
 {
+    if (preg_match('/^video_processing_(.+)_(max_height|quality_mode|audio_bitrate)$/', $key, $matches) === 1) {
+        $planCode = (string) ($matches[1] ?? 'free');
+        $field = (string) ($matches[2] ?? '');
+        $defaults = ve_video_processing_plan_defaults($planCode);
+
+        return match ($field) {
+            'max_height' => array_key_exists($value, ve_video_processing_resolution_options((int) (ve_video_config()['target_max_height'] ?? 1080))) ? $value : (string) ($defaults['max_height'] ?? '1080'),
+            'quality_mode' => array_key_exists($value, ve_video_processing_quality_mode_options()) ? $value : (string) ($defaults['quality_mode'] ?? 'balanced'),
+            'audio_bitrate' => array_key_exists($value, ve_video_audio_bitrate_options()) ? $value : (string) ($defaults['audio_bitrate'] ?? '128k'),
+            default => trim($value),
+        };
+    }
+
     return match ($key) {
-        'payout_minimum_micro_usd' => (string) max(1000000, min(1000000000, (int) $value)),
+        'payout_minimum_micro_usd' => (string) max(1000000, min(1000000000, ve_admin_parse_amount_to_micro_usd($value))),
         'admin_default_page_size' => (string) max(10, min(200, (int) $value)),
         'admin_recent_audit_limit' => (string) max(1, min(100, (int) $value)),
         'remote_max_queue_per_user' => (string) max(1, min(500, (int) $value)),
@@ -2371,18 +2457,6 @@ function ve_admin_normalize_app_setting_value(string $key, string $value): strin
 
 function ve_admin_save_app_settings(array $payload, int $actorUserId): void
 {
-function ve_admin_normalize_app_setting_value(string $key, string $value): string
-{
-    return match ($key) {
-        'payout_minimum_micro_usd' => (string) max(1000000, min(1000000000, (int) $value)),
-        'admin_default_page_size' => (string) max(10, min(200, (int) $value)),
-        'admin_recent_audit_limit' => (string) max(1, min(100, (int) $value)),
-        'remote_max_queue_per_user' => (string) max(1, min(500, (int) $value)),
-        'remote_default_quality' => in_array((int) $value, ve_remote_quality_options(), true) ? (string) (int) $value : '1080',
-        default => trim($value),
-    };
-}
-
     $before = [];
     $after = [];
 
@@ -3242,6 +3316,29 @@ function ve_admin_dashboard_shell(
         .admin-shell .admin-mini-list small { color: #7f7f7f; display: block; }
         .admin-shell .admin-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
         .admin-shell .admin-form-grid .form-group { margin-bottom: 0; }
+        .admin-shell .admin-form-heading {
+            padding-top: 10px;
+            margin-top: 4px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .admin-shell .admin-form-heading:first-child {
+            padding-top: 0;
+            margin-top: 0;
+            border-top: 0;
+        }
+        .admin-shell .admin-form-heading h6 {
+            margin: 0 0 4px;
+            font-size: .95rem;
+            font-weight: 700;
+        }
+        .admin-shell .admin-form-heading p,
+        .admin-shell .admin-form-help {
+            margin: 6px 0 0;
+            color: #8f8f8f;
+            font-size: .78rem;
+            line-height: 1.55;
+            display: block;
+        }
         .admin-shell .admin-stack > * + * { margin-top: 14px; }
         .admin-shell .admin-table-actions { display: flex; flex-wrap: wrap; gap: 8px; }
         .admin-shell .admin-form-card { background: #181818; border: 1px solid rgba(255, 255, 255, 0.05); padding: 18px; }
@@ -7520,6 +7617,8 @@ function ve_admin_render_app_section_deep(): string
         $settings[$key] = ve_h(ve_get_app_setting($key, (string) $defaultValue) ?? (string) $defaultValue);
     }
 
+    $payoutMinimumUsd = ve_h(ve_admin_format_micro_usd_input((string) ($settings['payout_minimum_micro_usd'] ?? '10000000')));
+
     $qualityOptionsHtml = '';
 
     foreach (ve_remote_quality_options() as $quality) {
@@ -7572,8 +7671,8 @@ function ve_admin_render_app_section_deep(): string
         {$returnToInput}
         <div class="admin-form-grid">
             <div class="form-group">
-                <label>Payout minimum (micro USD)</label>
-                <input type="text" name="payout_minimum_micro_usd" value="{$settings['payout_minimum_micro_usd']}" class="form-control">
+                <label>Payout minimum (USD)</label>
+                <input type="text" name="payout_minimum_micro_usd" value="{$payoutMinimumUsd}" class="form-control">
             </div>
             <div class="form-group">
                 <label>Default page size</label>
@@ -9618,6 +9717,17 @@ function ve_admin_backend_app_view_payload(string $activeSubview): array
         ];
     }
 
+    $processingFields = ve_admin_processing_setting_fields($settings);
+    $operatorFields = [
+        ['type' => 'heading', 'label' => 'Payouts and backend limits', 'description' => 'These values affect admin pagination, payout gating, and queue safety checks.'],
+        ve_admin_form_field('text', 'payout_minimum_micro_usd', 'Payout minimum (USD)', ve_admin_format_micro_usd_input($settings['payout_minimum_micro_usd'] ?? '10000000')),
+        ve_admin_form_field('text', 'admin_default_page_size', 'Default page size', $settings['admin_default_page_size'] ?? ''),
+        ve_admin_form_field('text', 'admin_recent_audit_limit', 'Recent audit limit', $settings['admin_recent_audit_limit'] ?? ''),
+        ['type' => 'heading', 'label' => 'Remote upload defaults', 'description' => 'These defaults control the first step of a remote upload before the membership processing profile is applied.'],
+        ve_admin_form_field('text', 'remote_max_queue_per_user', 'Remote queue max per user', $settings['remote_max_queue_per_user'] ?? ''),
+        ve_admin_form_field('select', 'remote_default_quality', 'Remote default quality', $settings['remote_default_quality'] ?? '1080', ['options' => $qualityOptions]),
+    ];
+
     if ($activeSubview === 'app-roles') {
         $rows = [];
         foreach (ve_admin_role_catalog() as $code => $meta) {
@@ -9652,23 +9762,20 @@ function ve_admin_backend_app_view_payload(string $activeSubview): array
         ]);
     }
 
-    return ve_admin_view_base_payload('App settings', 'Backend operating thresholds and bootstrap access defaults.', [
+    return ve_admin_view_base_payload('App settings', 'Grouped controls for service limits and per-membership processing behavior.', [
         ve_admin_metric_payload('Bootstrap admins', implode(', ', ve_admin_bootstrap_logins()) ?: 'None'),
         ve_admin_metric_payload('Custom domain target', (string) (ve_config()['custom_domain_target'] ?? '')),
+        ve_admin_metric_payload('Configured memberships', (string) count(ve_membership_plan_catalog())),
+        ve_admin_metric_payload('Server max resolution', (string) (ve_video_config()['target_max_height'] ?? 1080) . 'p', (string) (ve_video_config()['target_max_width'] ?? 1920) . 'px width cap'),
     ], [], [
         ['type' => 'cards', 'layout' => 'stack', 'cards' => [[
-            'title' => 'Operator thresholds',
+            'title' => 'Service controls',
+            'description' => 'Use the grouped controls below. Resolution caps decide the highest output size. Processing mode decides how much quality to keep.',
             'form' => [
                 'action' => ve_admin_subsection_url('app-general', null, [], false),
                 'method' => 'POST',
                 'hidden' => ve_admin_form_hidden_inputs(['token' => $token, 'action' => 'save_app_settings', 'return_to' => ve_admin_subsection_url('app-general', null, [], true)]),
-                'fields' => [
-                    ve_admin_form_field('text', 'payout_minimum_micro_usd', 'Payout minimum (micro USD)', $settings['payout_minimum_micro_usd'] ?? ''),
-                    ve_admin_form_field('text', 'admin_default_page_size', 'Default page size', $settings['admin_default_page_size'] ?? ''),
-                    ve_admin_form_field('text', 'admin_recent_audit_limit', 'Recent audit limit', $settings['admin_recent_audit_limit'] ?? ''),
-                    ve_admin_form_field('text', 'remote_max_queue_per_user', 'Remote queue max per user', $settings['remote_max_queue_per_user'] ?? ''),
-                    ve_admin_form_field('select', 'remote_default_quality', 'Remote default quality', $settings['remote_default_quality'] ?? '1080', ['options' => $qualityOptions]),
-                ],
+                'fields' => array_merge($operatorFields, $processingFields),
                 'actions' => [['type' => 'submit', 'label' => 'Save app settings', 'tone' => 'primary']],
             ],
         ]]],

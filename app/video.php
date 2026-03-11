@@ -208,6 +208,69 @@ function ve_video_processing_available(): bool
     return is_string(ve_video_config()['ffmpeg']) && ve_video_config()['ffmpeg'] !== '';
 }
 
+function ve_video_scale_rate_limit(string $value, float $multiplier): string
+{
+    if (preg_match('/^(\d+)([kKmM])$/', trim($value), $matches) !== 1) {
+        return $value;
+    }
+
+    $amount = (int) ($matches[1] ?? 0);
+    $suffix = strtolower((string) ($matches[2] ?? 'k'));
+    $multiplier = max(0.5, min(3.0, $multiplier));
+
+    return (string) max(1, (int) round($amount * $multiplier)) . $suffix;
+}
+
+function ve_video_processing_membership_settings(string $planCode): array
+{
+    $catalog = ve_membership_plan_catalog();
+    $normalizedPlan = ve_user_plan_code(['plan_code' => $planCode]);
+
+    if (!isset($catalog[$normalizedPlan])) {
+        $normalizedPlan = 'free';
+    }
+
+    $defaults = ve_video_processing_plan_defaults($normalizedPlan);
+    $settings = [];
+
+    foreach ($defaults as $field => $default) {
+        $storedValue = (string) ve_get_app_setting(ve_video_processing_setting_key($normalizedPlan, (string) $field), (string) $default);
+
+        switch ($field) {
+            case 'audio_bitrate':
+                $options = ve_video_audio_bitrate_options();
+                $settings[$field] = array_key_exists($storedValue, $options) ? $storedValue : (string) $default;
+                break;
+
+            case 'quality_mode':
+                $options = ve_video_processing_quality_mode_options();
+                $settings[$field] = array_key_exists($storedValue, $options) ? $storedValue : (string) $default;
+                break;
+
+            case 'max_height':
+                $serverMaxHeight = (int) (ve_video_config()['target_max_height'] ?? 1080);
+                $settings[$field] = (int) (array_key_exists($storedValue, ve_video_processing_resolution_options($serverMaxHeight)) ? $storedValue : (string) $default);
+                break;
+
+            default:
+                $settings[$field] = (string) $storedValue;
+                break;
+        }
+    }
+
+    return $settings;
+}
+
+function ve_video_processing_mode_tuning(string $mode): array
+{
+    return match ($mode) {
+        'fast' => ['preset' => 'faster', 'crf_offset' => 1, 'rate_multiplier' => 0.9],
+        'quality' => ['preset' => 'slow', 'crf_offset' => -2, 'rate_multiplier' => 1.25],
+        'best' => ['preset' => 'slower', 'crf_offset' => -4, 'rate_multiplier' => 1.5],
+        default => ['preset' => 'medium', 'crf_offset' => 0, 'rate_multiplier' => 1.0],
+    };
+}
+
 function ve_video_parse_shorthand_bytes(string $value): int
 {
     $value = trim($value);
@@ -3345,12 +3408,16 @@ function ve_video_mark_failed(int $videoId, string $message, string $details = '
     }
 }
 
-function ve_video_choose_profile(array $metadata): array
+function ve_video_choose_profile(array $metadata, ?array $processingSettings = null): array
 {
     $height = (int) ($metadata['height'] ?? 0);
     $width = (int) ($metadata['width'] ?? 0);
-    $maxWidth = (int) ve_video_config()['target_max_width'];
-    $maxHeight = (int) ve_video_config()['target_max_height'];
+    $globalMaxWidth = (int) ve_video_config()['target_max_width'];
+    $globalMaxHeight = (int) ve_video_config()['target_max_height'];
+    $processingSettings = is_array($processingSettings) ? $processingSettings : ve_video_processing_membership_settings('free');
+    $planMaxHeight = max(360, min($globalMaxHeight, (int) ($processingSettings['max_height'] ?? $globalMaxHeight)));
+    $maxWidth = (int) round($globalMaxWidth * ($planMaxHeight / max(1, $globalMaxHeight)));
+    $maxHeight = $planMaxHeight;
     $targetWidth = max(2, $width > 0 ? min($maxWidth, $width) : $maxWidth);
     $targetHeight = max(2, $height > 0 ? min($maxHeight, $height) : $maxHeight);
     $targetWidth -= $targetWidth % 2;
@@ -3368,43 +3435,70 @@ function ve_video_choose_profile(array $metadata): array
         ? 'scale=-2:' . $targetHeight
         : 'scale=' . $targetWidth . ':-2';
 
-    if ($height >= 1080 || $width >= 1920) {
-        return [
+    $mode = ve_video_processing_mode_tuning((string) ($processingSettings['quality_mode'] ?? 'balanced'));
+    $rateMultiplier = (float) ($mode['rate_multiplier'] ?? 1.0);
+
+    if ($targetHeight >= 1080 || $targetWidth >= 1920) {
+        $profile = [
             'vf' => $vf,
-            'crf' => 23,
+            'crf' => max(16, min(32, 23 + (int) ($mode['crf_offset'] ?? 0))),
             'maxrate' => '4500k',
             'bufsize' => '9000k',
-            'audio_bitrate' => '128k',
+            'audio_bitrate' => (string) ($processingSettings['audio_bitrate'] ?? '128k'),
+            'preset' => (string) ($mode['preset'] ?? 'medium'),
         ];
+
+        $profile['maxrate'] = ve_video_scale_rate_limit((string) $profile['maxrate'], $rateMultiplier);
+        $profile['bufsize'] = ve_video_scale_rate_limit((string) $profile['bufsize'], $rateMultiplier);
+
+        return $profile;
     }
 
-    if ($height >= 720 || $width >= 1280) {
-        return [
+    if ($targetHeight >= 720 || $targetWidth >= 1280) {
+        $profile = [
             'vf' => $vf,
-            'crf' => 24,
+            'crf' => max(16, min(32, 24 + (int) ($mode['crf_offset'] ?? 0))),
             'maxrate' => '2500k',
             'bufsize' => '5000k',
-            'audio_bitrate' => '128k',
+            'audio_bitrate' => (string) ($processingSettings['audio_bitrate'] ?? '128k'),
+            'preset' => (string) ($mode['preset'] ?? 'medium'),
         ];
+
+        $profile['maxrate'] = ve_video_scale_rate_limit((string) $profile['maxrate'], $rateMultiplier);
+        $profile['bufsize'] = ve_video_scale_rate_limit((string) $profile['bufsize'], $rateMultiplier);
+
+        return $profile;
     }
 
-    if ($height >= 480 || $width >= 854) {
-        return [
+    if ($targetHeight >= 480 || $targetWidth >= 854) {
+        $profile = [
             'vf' => $vf,
-            'crf' => 25,
+            'crf' => max(16, min(32, 25 + (int) ($mode['crf_offset'] ?? 0))),
             'maxrate' => '1200k',
             'bufsize' => '2400k',
-            'audio_bitrate' => '96k',
+            'audio_bitrate' => (string) ($processingSettings['audio_bitrate'] ?? '128k'),
+            'preset' => (string) ($mode['preset'] ?? 'medium'),
         ];
+
+        $profile['maxrate'] = ve_video_scale_rate_limit((string) $profile['maxrate'], $rateMultiplier);
+        $profile['bufsize'] = ve_video_scale_rate_limit((string) $profile['bufsize'], $rateMultiplier);
+
+        return $profile;
     }
 
-    return [
+    $profile = [
         'vf' => $vf,
-        'crf' => 26,
+        'crf' => max(16, min(32, 26 + (int) ($mode['crf_offset'] ?? 0))),
         'maxrate' => '850k',
         'bufsize' => '1700k',
-        'audio_bitrate' => '64k',
+        'audio_bitrate' => (string) ($processingSettings['audio_bitrate'] ?? '128k'),
+        'preset' => (string) ($mode['preset'] ?? 'medium'),
     ];
+
+    $profile['maxrate'] = ve_video_scale_rate_limit((string) $profile['maxrate'], $rateMultiplier);
+    $profile['bufsize'] = ve_video_scale_rate_limit((string) $profile['bufsize'], $rateMultiplier);
+
+    return $profile;
 }
 
 function ve_video_probe(string $sourcePath): ?array
@@ -3730,7 +3824,9 @@ function ve_video_process_job(int $videoId): void
         return;
     }
 
-    $profile = ve_video_choose_profile($metadata);
+    $user = ve_get_user_by_id((int) ($video['user_id'] ?? 0));
+    $processingSettings = ve_video_processing_membership_settings(is_array($user) ? ve_user_plan_code($user) : 'free');
+    $profile = ve_video_choose_profile($metadata, $processingSettings);
     ve_video_update_status((int) $video['id'], VE_VIDEO_STATUS_PROCESSING, 'Compressing video and packaging secure stream.');
 
     ve_video_cleanup_output_files($video);
@@ -3763,7 +3859,7 @@ function ve_video_process_job(int $videoId): void
         '-c:v',
         'libx264',
         '-preset',
-        (string) ve_video_config()['encoder_preset'],
+        (string) ($profile['preset'] ?? (string) ve_video_config()['encoder_preset']),
         '-crf',
         (string) $profile['crf'],
         '-profile:v',

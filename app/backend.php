@@ -1159,6 +1159,121 @@ function ve_user_plan_code(array $user): string
     return $planCode !== '' ? $planCode : 'free';
 }
 
+function ve_membership_plan_catalog(): array
+{
+    return [
+        'free' => ['label' => 'Free'],
+        'premium' => ['label' => 'Premium'],
+        'enterprise' => ['label' => 'Enterprise'],
+        'lifetime' => ['label' => 'Lifetime'],
+    ];
+}
+
+function ve_video_encoder_preset_options(): array
+{
+    return [
+        'ultrafast' => 'Ultrafast',
+        'superfast' => 'Superfast',
+        'veryfast' => 'Very fast',
+        'faster' => 'Faster',
+        'fast' => 'Fast',
+        'medium' => 'Medium',
+        'slow' => 'Slow',
+        'slower' => 'Slower',
+        'veryslow' => 'Very slow',
+    ];
+}
+
+function ve_video_audio_bitrate_options(): array
+{
+    return [
+        '96k' => '96 kbps',
+        '128k' => '128 kbps',
+        '160k' => '160 kbps',
+        '192k' => '192 kbps',
+        '224k' => '224 kbps',
+        '256k' => '256 kbps',
+        '320k' => '320 kbps',
+    ];
+}
+
+function ve_video_processing_quality_mode_options(): array
+{
+    return [
+        'fast' => 'Fast encode',
+        'balanced' => 'Balanced quality',
+        'quality' => 'High quality',
+        'best' => 'Best quality',
+    ];
+}
+
+function ve_video_processing_resolution_options(int $serverMaxHeight = 0): array
+{
+    $serverMaxHeight = max(360, $serverMaxHeight > 0 ? $serverMaxHeight : 1080);
+    $options = [
+        '360' => '360p',
+        '480' => '480p',
+        '720' => '720p',
+        '1080' => '1080p',
+        '1440' => '1440p',
+        '2160' => '2160p',
+    ];
+
+    return array_filter(
+        $options,
+        static fn (string $label, string $height): bool => (int) $height <= $serverMaxHeight,
+        ARRAY_FILTER_USE_BOTH
+    );
+}
+
+function ve_video_processing_setting_key(string $planCode, string $field): string
+{
+    $normalizedPlan = preg_replace('/[^a-z0-9]+/', '_', strtolower(trim($planCode)));
+    $normalizedPlan = is_string($normalizedPlan) ? trim($normalizedPlan, '_') : '';
+
+    if ($normalizedPlan === '') {
+        $normalizedPlan = 'free';
+    }
+
+    return 'video_processing_' . $normalizedPlan . '_' . $field;
+}
+
+function ve_video_processing_plan_defaults(?string $planCode = null): array
+{
+    $serverMaxHeight = max(360, (int) (getenv('VE_VIDEO_MAX_HEIGHT') ?: 1080));
+
+    $defaults = [
+        'free' => [
+            'max_height' => (string) min(1080, $serverMaxHeight),
+            'quality_mode' => 'balanced',
+            'audio_bitrate' => '128k',
+        ],
+        'premium' => [
+            'max_height' => (string) min(1080, $serverMaxHeight),
+            'quality_mode' => 'quality',
+            'audio_bitrate' => '192k',
+        ],
+        'enterprise' => [
+            'max_height' => (string) min(1080, $serverMaxHeight),
+            'quality_mode' => 'best',
+            'audio_bitrate' => '224k',
+        ],
+        'lifetime' => [
+            'max_height' => (string) min(1080, $serverMaxHeight),
+            'quality_mode' => 'best',
+            'audio_bitrate' => '224k',
+        ],
+    ];
+
+    if ($planCode === null) {
+        return $defaults;
+    }
+
+    $normalizedPlan = ve_user_plan_code(['plan_code' => $planCode]);
+
+    return $defaults[$normalizedPlan] ?? $defaults['free'];
+}
+
 function ve_user_is_premium(array $user): bool
 {
     $planCode = ve_user_plan_code($user);

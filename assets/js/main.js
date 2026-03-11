@@ -413,6 +413,15 @@ $(document).ready(function() {
             html += '<div class="admin-form-grid">';
             block.fields.forEach(function(field) {
                 var optionsHtml = '';
+                if (field.type === 'heading') {
+                    html += '<div class="admin-form-heading" style="grid-column:1 / -1;">';
+                    html += '<h6>' + escapeHtml(field.label || '') + '</h6>';
+                    if (field.description) {
+                        html += '<p>' + escapeHtml(field.description) + '</p>';
+                    }
+                    html += '</div>';
+                    return;
+                }
                 html += '<div class="form-group"' + (field.type === 'textarea' ? ' style="grid-column:1 / -1;"' : '') + '>';
                 if (field.type !== 'hidden' && field.type !== 'checkbox') {
                     html += '<label>' + escapeHtml(field.label || '') + '</label>';
@@ -432,6 +441,9 @@ $(document).ready(function() {
                     html += '<input type="hidden" name="' + escapeHtml(field.name || '') + '" value="' + escapeHtml(field.value || '') + '">';
                 } else {
                     html += '<input type="text" name="' + escapeHtml(field.name || '') + '" value="' + escapeHtml(field.value || '') + '" class="form-control"' + (field.placeholder ? ' placeholder="' + escapeHtml(field.placeholder) + '"' : '') + '>';
+                }
+                if (field.help) {
+                    html += '<small class="admin-form-help">' + escapeHtml(field.help) + '</small>';
                 }
                 html += '</div>';
             });
