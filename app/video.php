@@ -321,7 +321,36 @@ function ve_video_upload_limit_bytes(): int
 
 function ve_video_library_directory(string $publicId): string
 {
-    $directory = ve_video_storage_path('library', $publicId);
+    $assignment = [
+        'root' => ve_video_storage_path('library'),
+        'relative_dir' => $publicId,
+    ];
+
+    if (function_exists('ve_admin_storage_box_assignment_for_video')) {
+        try {
+            $resolved = ve_admin_storage_box_assignment_for_video(null, $publicId);
+
+            if (is_array($resolved)) {
+                $assignment['root'] = trim((string) ($resolved['root'] ?? $assignment['root']));
+                $assignment['relative_dir'] = trim((string) ($resolved['relative_dir'] ?? $assignment['relative_dir']));
+            }
+        } catch (Throwable) {
+            // Fall back to the local library path when admin storage helpers are unavailable.
+        }
+    }
+
+    $root = trim((string) ($assignment['root'] ?? ''));
+    $relativeDir = trim((string) ($assignment['relative_dir'] ?? $publicId));
+
+    if ($root === '') {
+        $root = ve_video_storage_path('library');
+    }
+
+    if ($relativeDir === '') {
+        $relativeDir = $publicId;
+    }
+
+    $directory = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relativeDir);
     ve_ensure_directory($directory);
     ve_video_normalize_library_directory($directory);
 
@@ -1844,17 +1873,31 @@ function ve_video_insert_queued_record(int $userId, array $validated, string $ti
     $publicId = ve_video_generate_public_id();
     $now = ve_now();
     $folderId = ve_video_normalize_folder_id($userId, $folderId);
+    $storageVolumeId = 0;
+    $storageRelativeDir = $publicId;
+
+    if (function_exists('ve_admin_storage_box_pick_for_new_video')) {
+        try {
+            $storageVolume = ve_admin_storage_box_pick_for_new_video();
+
+            if (is_array($storageVolume) && (int) ($storageVolume['id'] ?? 0) > 0) {
+                $storageVolumeId = (int) ($storageVolume['id'] ?? 0);
+            }
+        } catch (Throwable) {
+            $storageVolumeId = 0;
+        }
+    }
 
     $stmt = ve_db()->prepare(
         'INSERT INTO videos (
             user_id, folder_id, public_id, title, original_filename, source_extension, is_public, status, status_message,
             duration_seconds, width, height, video_codec, audio_codec,
-            original_size_bytes, processed_size_bytes, compression_ratio,
+            original_size_bytes, processed_size_bytes, compression_ratio, storage_volume_id, storage_relative_dir,
             processing_error, created_at, updated_at, queued_at, processing_started_at, ready_at, deleted_at
         ) VALUES (
             :user_id, :folder_id, :public_id, :title, :original_filename, :source_extension, 1, :status, :status_message,
             NULL, NULL, NULL, "", "",
-            :original_size_bytes, 0, NULL,
+            :original_size_bytes, 0, NULL, :storage_volume_id, :storage_relative_dir,
             "", :created_at, :updated_at, :queued_at, NULL, NULL, NULL
         )'
     );
@@ -1868,6 +1911,8 @@ function ve_video_insert_queued_record(int $userId, array $validated, string $ti
         ':status' => VE_VIDEO_STATUS_QUEUED,
         ':status_message' => 'Queued for compression and secure stream packaging.',
         ':original_size_bytes' => (int) ($validated['size'] ?? 0),
+        ':storage_volume_id' => $storageVolumeId,
+        ':storage_relative_dir' => $storageRelativeDir,
         ':created_at' => $now,
         ':updated_at' => $now,
         ':queued_at' => $now,
@@ -3836,75 +3881,89 @@ function ve_video_process_job(int $videoId): void
     $keyInfoPath = ve_video_key_info_path($video);
 
     file_put_contents($keyPath, random_bytes(16));
-    file_put_contents($keyInfoPath, "__KEY_URI__\n" . str_replace('\\', '/', $keyPath) . "\n");
+    $processedRemotely = false;
+    $remoteFailure = '';
 
-    $args = [
-        (string) ve_video_config()['ffmpeg'],
-        '-y',
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-i',
-        $sourcePath,
-        '-map',
-        '0:v:0',
-        '-map',
-        '0:a:0?',
-        '-sn',
-        '-dn',
-        '-threads',
-        (string) ve_video_config()['encode_threads'],
-        '-vf',
-        $profile['vf'],
-        '-c:v',
-        'libx264',
-        '-preset',
-        (string) ($profile['preset'] ?? (string) ve_video_config()['encoder_preset']),
-        '-crf',
-        (string) $profile['crf'],
-        '-profile:v',
-        'high',
-        '-pix_fmt',
-        'yuv420p',
-        '-maxrate',
-        $profile['maxrate'],
-        '-bufsize',
-        $profile['bufsize'],
-        '-g',
-        '48',
-        '-keyint_min',
-        '48',
-        '-sc_threshold',
-        '0',
-        '-c:a',
-        'aac',
-        '-ac',
-        '2',
-        '-ar',
-        '48000',
-        '-b:a',
-        $profile['audio_bitrate'],
-        '-f',
-        'hls',
-        '-hls_time',
-        (string) ve_video_config()['segment_seconds'],
-        '-hls_list_size',
-        '0',
-        '-hls_playlist_type',
-        'vod',
-        '-hls_segment_filename',
-        ve_video_segment_pattern_path($video),
-        '-hls_key_info_file',
-        $keyInfoPath,
-        $playlistPath,
-    ];
+    if (function_exists('ve_admin_has_processing_node_capacity') && ve_admin_has_processing_node_capacity()) {
+        try {
+            $processedRemotely = ve_video_process_job_on_processing_node($video, $sourcePath, $profile, $keyPath);
+        } catch (Throwable $throwable) {
+            $remoteFailure = trim($throwable->getMessage());
+        }
+    }
 
-    [$exitCode, $output] = ve_video_run_command($args);
-    @unlink($keyInfoPath);
+    if (!$processedRemotely) {
+        file_put_contents($keyInfoPath, "__KEY_URI__\n" . str_replace('\\', '/', $keyPath) . "\n");
 
-    if ($exitCode !== 0 || !is_file($playlistPath)) {
-        ve_video_mark_failed((int) $video['id'], 'FFmpeg failed while compressing the video.', $output);
-        return;
+        $args = [
+            (string) ve_video_config()['ffmpeg'],
+            '-y',
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-i',
+            $sourcePath,
+            '-map',
+            '0:v:0',
+            '-map',
+            '0:a:0?',
+            '-sn',
+            '-dn',
+            '-threads',
+            (string) ve_video_config()['encode_threads'],
+            '-vf',
+            $profile['vf'],
+            '-c:v',
+            'libx264',
+            '-preset',
+            (string) ($profile['preset'] ?? (string) ve_video_config()['encoder_preset']),
+            '-crf',
+            (string) $profile['crf'],
+            '-profile:v',
+            'high',
+            '-pix_fmt',
+            'yuv420p',
+            '-maxrate',
+            $profile['maxrate'],
+            '-bufsize',
+            $profile['bufsize'],
+            '-g',
+            '48',
+            '-keyint_min',
+            '48',
+            '-sc_threshold',
+            '0',
+            '-c:a',
+            'aac',
+            '-ac',
+            '2',
+            '-ar',
+            '48000',
+            '-b:a',
+            $profile['audio_bitrate'],
+            '-f',
+            'hls',
+            '-hls_time',
+            (string) ve_video_config()['segment_seconds'],
+            '-hls_list_size',
+            '0',
+            '-hls_playlist_type',
+            'vod',
+            '-hls_segment_filename',
+            ve_video_segment_pattern_path($video),
+            '-hls_key_info_file',
+            $keyInfoPath,
+            $playlistPath,
+        ];
+
+        [$exitCode, $output] = ve_video_run_command($args);
+        @unlink($keyInfoPath);
+
+        if ($exitCode !== 0 || !is_file($playlistPath)) {
+            $errorPrefix = $remoteFailure !== '' ? ('Remote node failed first: ' . $remoteFailure . ' ') : '';
+            ve_video_mark_failed((int) $video['id'], $errorPrefix . 'FFmpeg failed while compressing the video.', $output);
+            return;
+        }
     }
 
     ve_video_generate_preview_assets($video, $sourcePath, $metadata);
@@ -3929,6 +3988,192 @@ function ve_video_process_job(int $videoId): void
     ]);
 
     ve_add_notification((int) $video['user_id'], 'Video ready', '"' . (string) $video['title'] . '" is ready for secure playback.');
+}
+
+function ve_video_extract_tar_archive(string $archivePath, string $destination): void
+{
+    if (!is_file($archivePath)) {
+        throw new RuntimeException('Remote artifact archive is missing.');
+    }
+
+    ve_ensure_directory($destination);
+
+    try {
+        $tarPath = $archivePath;
+
+        if (str_ends_with(strtolower($archivePath), '.gz')) {
+            $tarPath = preg_replace('/\.gz$/i', '', $archivePath) ?? ($archivePath . '.tar');
+
+            if (!is_file($tarPath)) {
+                $archive = new PharData($archivePath);
+                $archive->decompress();
+            }
+        }
+
+        $tar = new PharData($tarPath);
+        $tar->extractTo($destination, null, true);
+
+        if ($tarPath !== $archivePath && is_file($tarPath)) {
+            @unlink($tarPath);
+        }
+
+        return;
+    } catch (Throwable $throwable) {
+        if (is_string(ve_video_find_binary(['tar'])) && ve_video_find_binary(['tar']) !== null) {
+            [$exitCode, $output] = ve_video_run_command([
+                (string) ve_video_find_binary(['tar']),
+                '-xzf',
+                $archivePath,
+                '-C',
+                $destination,
+            ]);
+
+            if ($exitCode === 0) {
+                return;
+            }
+
+            throw new RuntimeException('Unable to extract remote artifact archive. ' . $output);
+        }
+
+        throw new RuntimeException('Unable to extract remote artifact archive. ' . $throwable->getMessage());
+    }
+}
+
+function ve_video_process_job_on_processing_node(array $video, string $sourcePath, array $profile, string $keyPath): bool
+{
+    if (!function_exists('ve_admin_pick_processing_node_for_work')) {
+        return false;
+    }
+
+    $node = ve_admin_pick_processing_node_for_work();
+
+    if (!is_array($node)) {
+        return false;
+    }
+
+    $jobId = function_exists('ve_admin_processing_node_job_create')
+        ? ve_admin_processing_node_job_create($node, $video)
+        : 0;
+    $publicId = (string) ($video['public_id'] ?? ve_random_token(8));
+    $sourceExtension = strtolower((string) ($video['source_extension'] ?? pathinfo($sourcePath, PATHINFO_EXTENSION) ?: 'mp4'));
+    $remoteWorkdir = rtrim((string) ($node['install_path'] ?? '/opt/video-engine-processing'), '/') . '/jobs/' . $publicId . '-' . gmdate('YmdHis');
+    $remoteSource = $remoteWorkdir . '/source.' . $sourceExtension;
+    $remoteKey = $remoteWorkdir . '/stream.key';
+    $remoteArchive = $remoteWorkdir . '/artifacts.tar.gz';
+    $localArchive = ve_video_storage_path('tmp', 'processing-' . $publicId . '-' . ve_random_token(6) . '.tar.gz');
+
+    try {
+        if ($jobId > 0 && function_exists('ve_admin_processing_node_job_update')) {
+            ve_admin_processing_node_job_update($jobId, [
+                'stage' => 'uploading',
+                'message' => 'Uploading source file and encryption key to the processing node.',
+                'remote_job_path' => $remoteWorkdir,
+            ]);
+        }
+
+        ve_admin_processing_node_run_remote($node, 'mkdir -p ' . escapeshellarg($remoteWorkdir));
+
+        [$sourceUploadExit, $sourceUploadOutput] = ve_admin_processing_node_upload_file($node, $sourcePath, $remoteSource, 3600);
+
+        if ($sourceUploadExit !== 0) {
+            throw new RuntimeException('Unable to upload the source video to the processing node. ' . trim($sourceUploadOutput));
+        }
+
+        [$keyUploadExit, $keyUploadOutput] = ve_admin_processing_node_upload_file($node, $keyPath, $remoteKey, 120);
+
+        if ($keyUploadExit !== 0) {
+            throw new RuntimeException('Unable to upload the stream key to the processing node. ' . trim($keyUploadOutput));
+        }
+
+        if ($jobId > 0 && function_exists('ve_admin_processing_node_job_update')) {
+            ve_admin_processing_node_job_update($jobId, [
+                'stage' => 'encoding',
+                'message' => 'Encoding the secure HLS stream on the processing node.',
+            ]);
+        }
+
+        $processCommand = implode(' ', [
+            ve_admin_processing_node_remote_script_path($node),
+            'process',
+            '--workdir', escapeshellarg($remoteWorkdir),
+            '--source', escapeshellarg($remoteSource),
+            '--key', escapeshellarg($remoteKey),
+            '--segment-seconds', escapeshellarg((string) ve_video_config()['segment_seconds']),
+            '--threads', escapeshellarg((string) ve_video_config()['encode_threads']),
+            '--vf', escapeshellarg((string) ($profile['vf'] ?? 'scale=1280:-2')),
+            '--preset', escapeshellarg((string) ($profile['preset'] ?? (string) ve_video_config()['encoder_preset'])),
+            '--crf', escapeshellarg((string) ($profile['crf'] ?? '24')),
+            '--maxrate', escapeshellarg((string) ($profile['maxrate'] ?? '2500k')),
+            '--bufsize', escapeshellarg((string) ($profile['bufsize'] ?? '5000k')),
+            '--audio-bitrate', escapeshellarg((string) ($profile['audio_bitrate'] ?? '128k')),
+        ]);
+        [$processExit, $processOutput] = ve_admin_processing_node_run_remote($node, $processCommand, 7200);
+
+        if ($processExit !== 0) {
+            throw new RuntimeException('The processing node failed while encoding the video. ' . trim($processOutput));
+        }
+
+        if ($jobId > 0 && function_exists('ve_admin_processing_node_job_update')) {
+            ve_admin_processing_node_job_update($jobId, [
+                'stage' => 'downloading',
+                'message' => 'Downloading encoded HLS artifacts back to the control plane.',
+            ]);
+        }
+
+        [$downloadExit, $downloadOutput] = ve_admin_processing_node_download_file($node, $remoteArchive, $localArchive, 1800);
+
+        if ($downloadExit !== 0 || !is_file($localArchive)) {
+            throw new RuntimeException('Unable to download encoded artifacts from the processing node. ' . trim($downloadOutput));
+        }
+
+        ve_video_extract_tar_archive($localArchive, ve_video_library_directory((string) ($video['public_id'] ?? '')));
+        @unlink($localArchive);
+        ve_admin_processing_node_run_remote($node, ve_admin_processing_node_remote_script_path($node) . ' cleanup --workdir ' . escapeshellarg($remoteWorkdir), 300);
+
+        if (!is_file(ve_video_playlist_path($video))) {
+            throw new RuntimeException('The processing node did not return a valid playlist.');
+        }
+
+        if ($jobId > 0 && function_exists('ve_admin_processing_node_job_update')) {
+            ve_admin_processing_node_job_update($jobId, [
+                'status' => 'complete',
+                'stage' => 'complete',
+                'message' => 'Remote processing finished successfully.',
+                'remote_job_path' => $remoteWorkdir,
+                'finished_at' => ve_now(),
+            ]);
+        }
+
+        if (function_exists('ve_admin_refresh_processing_node')) {
+            try {
+                ve_admin_refresh_processing_node((int) ($node['id'] ?? 0), 0, false);
+            } catch (Throwable $throwable) {
+                // Ignore telemetry refresh failures during processing.
+            }
+        }
+
+        return true;
+    } catch (Throwable $throwable) {
+        @unlink($localArchive);
+
+        if ($jobId > 0 && function_exists('ve_admin_processing_node_job_update')) {
+            ve_admin_processing_node_job_update($jobId, [
+                'status' => 'failed',
+                'stage' => 'failed',
+                'message' => mb_substr($throwable->getMessage(), 0, 1000),
+                'remote_job_path' => $remoteWorkdir,
+                'finished_at' => ve_now(),
+            ]);
+        }
+
+        try {
+            ve_admin_processing_node_run_remote($node, ve_admin_processing_node_remote_script_path($node) . ' cleanup --workdir ' . escapeshellarg($remoteWorkdir), 300);
+        } catch (Throwable $cleanupThrowable) {
+            // Ignore cleanup failures on the fallback path.
+        }
+
+        throw $throwable;
+    }
 }
 
 function ve_video_playback_signature(string $value): string
