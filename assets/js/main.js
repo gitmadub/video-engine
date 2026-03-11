@@ -189,7 +189,28 @@ $(document).ready(function() {
             return '';
         }
 
+        url.searchParams.delete('_veadmints');
+        url.searchParams.delete('_veadminreason');
         return (url.pathname || '').replace(/\/+$/, '') + url.search;
+    }
+
+    function buildAdminRequestUrl(nextUrl, reason) {
+        var url;
+
+        try {
+            url = new URL(nextUrl, window.location.origin);
+        } catch (err) {
+            return nextUrl;
+        }
+
+        url.searchParams.set('_veadmints', String(Date.now()));
+        if (reason) {
+            url.searchParams.set('_veadminreason', reason);
+        } else {
+            url.searchParams.delete('_veadminreason');
+        }
+
+        return url.toString();
     }
 
     function resolveAdminSidebarSubview(route) {
@@ -740,19 +761,23 @@ $(document).ready(function() {
 
     function prefetchAdminView(nextUrl) {
         var key = normalizeAdminUrl(nextUrl);
+        var requestUrl;
 
         if (!key || adminPayloadCache[key] || adminPrefetchQueue[key] || !isAdminNavigationHref(nextUrl)) {
             return;
         }
 
+        requestUrl = buildAdminRequestUrl(nextUrl, 'prefetch');
         adminPrefetchQueue[key] = $.ajax({
-            url: nextUrl,
+            url: requestUrl,
             method: 'GET',
             dataType: 'json',
             headers: {
                 'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest'
-            }
+                'X-Requested-With': 'XMLHttpRequest',
+                'Cache-Control': 'no-cache'
+            },
+            cache: false
         }).done(function(payload) {
             cacheAdminPayload(nextUrl, payload);
         }).always(function() {
@@ -880,6 +905,7 @@ $(document).ready(function() {
 
     function scheduleAdminLiveRefresh(payload, nextUrl) {
         var refreshSeconds = Number((payload && payload.view && payload.view.live_refresh_seconds) || 0);
+        var requestUrl;
 
         clearAdminLiveRefresh();
 
@@ -893,15 +919,17 @@ $(document).ready(function() {
                 return;
             }
 
+            requestUrl = buildAdminRequestUrl(nextUrl, 'live');
             $.ajax({
-                url: nextUrl,
+                url: requestUrl,
                 method: 'GET',
                 dataType: 'json',
                 headers: {
                     'Accept': 'application/json',
                     'X-Requested-With': 'XMLHttpRequest',
                     'Cache-Control': 'no-cache'
-                }
+                },
+                cache: false
             }).done(function(freshPayload) {
                 syncAdminShell(freshPayload, nextUrl, false);
             }).fail(function() {
@@ -933,6 +961,13 @@ $(document).ready(function() {
         cacheAdminPayload(nextUrl, payload);
         prefetchAdminSection(route.section, new URL(nextUrl, window.location.origin).search);
         scheduleAdminLiveRefresh(payload, nextUrl);
+        $('[data-admin-shell="1"]').attr('data-admin-last-refresh-at', String(Date.now()));
+        $('[data-admin-shell="1"]').attr('data-admin-last-refresh-url', normalizeAdminUrl(nextUrl));
+        window.__veAdminLastRefresh = {
+            at: Date.now(),
+            url: normalizeAdminUrl(nextUrl),
+            subview: route.subview || ''
+        };
         document.title = payload.title || document.title;
         $('#menu').removeClass('show');
 
@@ -947,6 +982,7 @@ $(document).ready(function() {
         var route = getAdminRoute(nextUrl);
         var panel;
         var cachedPayload;
+        var requestUrl;
 
         if (!hasAdminShell() || !isAdminNavigationHref(nextUrl) || !route) {
             window.location.href = nextUrl;
@@ -973,15 +1009,17 @@ $(document).ready(function() {
             adminRequest.abort();
         }
 
+        requestUrl = buildAdminRequestUrl(nextUrl, 'nav');
         setAdminLoadingState(true, panel);
         adminRequest = $.ajax({
-            url: nextUrl,
+            url: requestUrl,
             method: 'GET',
             dataType: 'json',
             headers: {
                 'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
-            }
+            },
+            cache: false
         }).done(function(payload) {
             syncAdminShell(payload, nextUrl, pushState);
         }).fail(function(xhr, status) {
