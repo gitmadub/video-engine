@@ -17,7 +17,7 @@ function ve_remote_host_catalog(): array
             'verified' => true,
             'default_enabled' => true,
             'show_in_supported_hosts' => true,
-            'note' => 'Verified through the current yt-dlp Android client flow.',
+            'note' => 'Verified through the current yt-dlp client flow, with optional server-side cookies for anti-bot challenges.',
         ],
         'google_drive' => [
             'label' => 'Google Drive',

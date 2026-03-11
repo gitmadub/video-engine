@@ -271,6 +271,8 @@ function ve_default_app_settings(): array
         'video_payable_min_watch_seconds' => (string) max(5, (int) (getenv('VE_VIDEO_PAYABLE_MIN_WATCH_SECONDS') ?: 30)),
         'video_payable_max_views_per_viewer_per_day' => (string) max(0, (int) (getenv('VE_VIDEO_PAYABLE_MAX_VIEWS_PER_VIEWER_PER_DAY') ?: 1)),
         'remote_default_quality' => '1080',
+        'remote_ytdlp_cookies_browser' => '',
+        'remote_ytdlp_cookies_file' => '',
     ];
 }
 

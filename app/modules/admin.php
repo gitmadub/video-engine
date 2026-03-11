@@ -90,6 +90,8 @@ function ve_admin_default_settings(): array
         'admin_recent_audit_limit' => '12',
         'remote_max_queue_per_user' => '25',
         'remote_default_quality' => '1080',
+        'remote_ytdlp_cookies_browser' => '',
+        'remote_ytdlp_cookies_file' => '',
     ];
 
     foreach (ve_membership_plan_catalog() as $planCode => $meta) {
@@ -2451,6 +2453,8 @@ function ve_admin_normalize_app_setting_value(string $key, string $value): strin
         'admin_recent_audit_limit' => (string) max(1, min(100, (int) $value)),
         'remote_max_queue_per_user' => (string) max(1, min(500, (int) $value)),
         'remote_default_quality' => in_array((int) $value, ve_remote_quality_options(), true) ? (string) (int) $value : '1080',
+        'remote_ytdlp_cookies_browser' => mb_substr(trim($value), 0, 255),
+        'remote_ytdlp_cookies_file' => mb_substr(trim($value), 0, 500),
         default => trim($value),
     };
 }
@@ -7690,6 +7694,14 @@ function ve_admin_render_app_section_deep(): string
                 <label>Remote default quality</label>
                 <select name="remote_default_quality" class="form-control">{$qualityOptionsHtml}</select>
             </div>
+            <div class="form-group">
+                <label>Remote yt-dlp cookies browser</label>
+                <input type="text" name="remote_ytdlp_cookies_browser" value="{$settings['remote_ytdlp_cookies_browser']}" class="form-control" placeholder="firefox or chrome:Profile Name">
+            </div>
+            <div class="form-group">
+                <label>Remote yt-dlp cookies file</label>
+                <input type="text" name="remote_ytdlp_cookies_file" value="{$settings['remote_ytdlp_cookies_file']}" class="form-control" placeholder="/path/to/cookies.txt">
+            </div>
         </div>
         <div class="admin-actions">
             <button type="submit" class="btn btn-primary">Save app settings</button>
@@ -9726,6 +9738,8 @@ function ve_admin_backend_app_view_payload(string $activeSubview): array
         ['type' => 'heading', 'label' => 'Remote upload defaults', 'description' => 'These defaults control the first step of a remote upload before the membership processing profile is applied.'],
         ve_admin_form_field('text', 'remote_max_queue_per_user', 'Remote queue max per user', $settings['remote_max_queue_per_user'] ?? ''),
         ve_admin_form_field('select', 'remote_default_quality', 'Remote default quality', $settings['remote_default_quality'] ?? '1080', ['options' => $qualityOptions]),
+        ve_admin_form_field('text', 'remote_ytdlp_cookies_browser', 'Remote yt-dlp cookies browser', $settings['remote_ytdlp_cookies_browser'] ?? ''),
+        ve_admin_form_field('text', 'remote_ytdlp_cookies_file', 'Remote yt-dlp cookies file', $settings['remote_ytdlp_cookies_file'] ?? ''),
     ];
 
     if ($activeSubview === 'app-roles') {

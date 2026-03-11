@@ -45,10 +45,42 @@ ve_admin_save_app_settings($allSettings, $actorUserId);
 
 remote_features_assert(ve_remote_default_quality_height() === 720, 'Remote default quality should be loaded from app settings.');
 remote_features_assert((int) (ve_remote_config()['max_queue_per_user'] ?? 0) === 33, 'Remote queue cap should honor the app setting.');
+remote_features_assert(ve_remote_ytdlp_cookies_browser() === '', 'Remote yt-dlp cookies browser should default to empty.');
+remote_features_assert(ve_remote_ytdlp_cookies_file() === '', 'Remote yt-dlp cookies file should default to empty.');
+
+$cookieFixturePath = ve_storage_path('private', 'remote_uploads', 'qa-cookies.txt');
+file_put_contents($cookieFixturePath, "# Netscape HTTP Cookie File\n");
+ve_set_app_setting('remote_ytdlp_cookies_file', $cookieFixturePath);
+ve_set_app_setting('remote_ytdlp_cookies_browser', '');
+remote_features_assert(ve_remote_yt_dlp_cookie_args() === ['--cookies', $cookieFixturePath], 'Remote yt-dlp cookie args should prefer the configured cookies file.');
+
+ve_set_app_setting('remote_ytdlp_cookies_file', '');
+ve_set_app_setting('remote_ytdlp_cookies_browser', 'firefox:default-release');
+remote_features_assert(ve_remote_yt_dlp_cookie_args() === ['--cookies-from-browser', 'firefox:default-release'], 'Remote yt-dlp cookie args should support browser cookies.');
+
+ve_set_app_setting('remote_ytdlp_cookies_browser', '');
+ve_set_app_setting('remote_ytdlp_cookies_file', $cookieFixturePath . '.missing');
+
+try {
+    ve_remote_yt_dlp_cookie_args();
+    remote_features_assert(false, 'A missing remote yt-dlp cookies file should raise an exception.');
+} catch (RuntimeException $exception) {
+    remote_features_assert(str_contains($exception->getMessage(), 'cookies file could not be found'), 'Missing cookie files should surface a clear validation error.');
+}
+
+ve_set_app_setting('remote_ytdlp_cookies_file', '');
+$missingCookiesMessage = ve_remote_yt_dlp_failure_message('inspect', 'ERROR: [youtube] demo: Sign in to confirm you are not a bot. Use --cookies-from-browser or --cookies for the authentication.');
+remote_features_assert(str_contains($missingCookiesMessage, 'YouTube now requires authenticated yt-dlp cookies on this server.'), 'YouTube anti-bot failures should explain that authenticated cookies are required.');
+remote_features_assert(str_contains($missingCookiesMessage, 'Remote yt-dlp cookies browser'), 'YouTube anti-bot failures should point operators to the new yt-dlp cookie settings.');
+
+ve_set_app_setting('remote_ytdlp_cookies_browser', 'firefox');
+$rejectedCookiesMessage = ve_remote_yt_dlp_failure_message('inspect', 'ERROR: [youtube] demo: Sign in to confirm you are not a bot. Use --cookies-from-browser or --cookies for the authentication.');
+remote_features_assert(str_contains($rejectedCookiesMessage, 'configured yt-dlp cookies were rejected by YouTube'), 'Configured cookies should change the YouTube anti-bot guidance so operators know the cookies themselves failed.');
+ve_set_app_setting('remote_ytdlp_cookies_browser', '');
 
 $parentFolder = ve_video_folder_create($userId, 0, 'Parent Folder');
 $childFolder = ve_video_folder_create($userId, (int) ($parentFolder['id'] ?? 0), 'Child Folder');
-$folderOptions = ve_video_folder_options_for_user($userId);
+$folderOptions = ve_remote_folder_options_for_user($userId);
 $folderLabels = array_map(static fn (array $folder): string => (string) ($folder['fld_name'] ?? ''), $folderOptions);
 
 remote_features_assert(in_array('Parent Folder', $folderLabels, true), 'Folder options should include root folders.');

@@ -35,18 +35,29 @@ function ve_remote_config(): array
     ve_ensure_directory(ve_remote_storage_path());
     ve_ensure_directory(ve_remote_storage_path('jobs'));
 
+    $windowsYtDlpCandidates = [];
+    $windowsPythonCandidates = [];
+
+    if (ve_video_is_windows()) {
+        foreach (['313', '312', '311', '310', '39'] as $version) {
+            $windowsYtDlpCandidates[] = 'C:\\Users\\User\\AppData\\Roaming\\Python\\Python' . $version . '\\Scripts\\yt-dlp.exe';
+            $windowsPythonCandidates[] = 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python' . $version . '\\python.exe';
+        }
+
+        $windowsPythonCandidates[] = 'C:\\Users\\User\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe';
+        $windowsPythonCandidates[] = 'C:\\Windows\\py.exe';
+    }
+
     $ytDlpBinary = ve_video_find_binary(array_filter([
         getenv('VE_YT_DLP_PATH') ?: null,
         ve_root_path('tools', 'yt-dlp', ve_video_is_windows() ? 'yt-dlp.exe' : 'yt-dlp'),
-        ve_video_is_windows() ? 'C:\\Users\\User\\AppData\\Roaming\\Python\\Python39\\Scripts\\yt-dlp.exe' : null,
+        ...$windowsYtDlpCandidates,
         'yt-dlp',
     ]));
 
     $pythonBinary = ve_video_find_binary(array_filter([
         getenv('VE_PYTHON_BINARY') ?: null,
-        ve_video_is_windows() ? 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python39\\python.exe' : null,
-        ve_video_is_windows() ? 'C:\\Users\\User\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe' : null,
-        ve_video_is_windows() ? 'C:\\Windows\\py.exe' : null,
+        ...$windowsPythonCandidates,
         'py',
         'python3',
         'python',
@@ -73,6 +84,37 @@ function ve_remote_config(): array
     ];
 
     return $config;
+}
+
+function ve_remote_folder_options_for_user(int $userId, array $excludedFolderIds = []): array
+{
+    $options = [];
+    $appendOptions = static function (array $folders, array $pathParts = []) use (&$appendOptions, &$options): void {
+        foreach ($folders as $folder) {
+            if (!is_array($folder)) {
+                continue;
+            }
+
+            $folderId = (int) ($folder['id'] ?? 0);
+            $folderName = trim((string) ($folder['name'] ?? ''));
+
+            if ($folderId <= 0 || $folderName === '') {
+                continue;
+            }
+
+            $currentPath = array_merge($pathParts, [$folderName]);
+            $options[] = [
+                'fld_id' => $folderId,
+                'fld_name' => implode(' / ', $currentPath),
+            ];
+
+            $appendOptions((array) ($folder['sub_folders'] ?? []), $currentPath);
+        }
+    };
+
+    $appendOptions(ve_video_folder_tree_for_user($userId, $excludedFolderIds));
+
+    return $options;
 }
 
 function ve_remote_quality_options(): array
@@ -113,6 +155,74 @@ function ve_remote_yt_dlp_mp4_format(bool $preferSeparateStreams = false): strin
         . '/best' . $limit
         . '/best[ext=mp4]'
         . '/best';
+}
+
+function ve_remote_ytdlp_cookies_browser(): string
+{
+    $value = ve_get_app_setting(
+        'remote_ytdlp_cookies_browser',
+        (string) (getenv('VE_REMOTE_YTDLP_COOKIES_FROM_BROWSER') ?: '')
+    );
+
+    return trim((string) $value);
+}
+
+function ve_remote_ytdlp_cookies_file(): string
+{
+    $value = ve_get_app_setting(
+        'remote_ytdlp_cookies_file',
+        (string) (getenv('VE_REMOTE_YTDLP_COOKIES_PATH') ?: '')
+    );
+
+    return trim((string) $value);
+}
+
+function ve_remote_yt_dlp_cookie_args(): array
+{
+    $cookieFile = ve_remote_ytdlp_cookies_file();
+
+    if ($cookieFile !== '') {
+        if (!is_file($cookieFile)) {
+            throw new RuntimeException('The configured remote yt-dlp cookies file could not be found: ' . $cookieFile);
+        }
+
+        return ['--cookies', $cookieFile];
+    }
+
+    $cookieBrowser = ve_remote_ytdlp_cookies_browser();
+
+    if ($cookieBrowser !== '') {
+        return ['--cookies-from-browser', $cookieBrowser];
+    }
+
+    return [];
+}
+
+function ve_remote_yt_dlp_failure_message(string $action, string $output): string
+{
+    $trimmedOutput = trim($output);
+    $normalizedOutput = strtolower($trimmedOutput);
+
+    $needsCookies = $normalizedOutput !== ''
+        && (
+            str_contains($normalizedOutput, 'sign in to confirm you')
+            || str_contains($normalizedOutput, '--cookies-from-browser')
+            || str_contains($normalizedOutput, '--cookies for the authentication')
+            || str_contains($normalizedOutput, 'use --cookies')
+        );
+
+    if ($needsCookies) {
+        $configuredSource = ve_remote_ytdlp_cookies_file() !== '' || ve_remote_ytdlp_cookies_browser() !== '';
+        $message = $configuredSource
+            ? 'yt-dlp could not ' . $action . ' the remote URL. The configured yt-dlp cookies were rejected by YouTube.'
+            : 'yt-dlp could not ' . $action . ' the remote URL. YouTube now requires authenticated yt-dlp cookies on this server.';
+
+        $message .= ' Configure "Remote yt-dlp cookies browser" or "Remote yt-dlp cookies file" in App Settings.';
+
+        return $trimmedOutput !== '' ? $message . ' ' . $trimmedOutput : $message;
+    }
+
+    return 'yt-dlp could not ' . $action . ' the remote URL. ' . $trimmedOutput;
 }
 
 function ve_remote_yt_dlp_command(): array
@@ -227,6 +337,7 @@ function ve_remote_yt_dlp_extract_info(string $url, array $options = []): array
         '--user-agent',
         (string) ve_remote_config()['user_agent'],
     ]);
+    $args = array_merge($args, ve_remote_yt_dlp_cookie_args());
 
     $format = trim((string) ($options['format'] ?? ''));
 
@@ -252,7 +363,7 @@ function ve_remote_yt_dlp_extract_info(string $url, array $options = []): array
     $info = ve_remote_command_output_last_json($output);
 
     if ($exitCode !== 0 || !is_array($info)) {
-        throw new RuntimeException('yt-dlp could not inspect the remote URL. ' . trim($output));
+        throw new RuntimeException(ve_remote_yt_dlp_failure_message('inspect', $output));
     }
 
     return $info;
@@ -1136,6 +1247,7 @@ function ve_remote_download_via_ytdlp(int $jobId, array $source): array
         '-o',
         $outputTemplate,
     ]);
+    $args = array_merge($args, ve_remote_yt_dlp_cookie_args());
 
     $format = trim((string) ($source['yt_dlp_format'] ?? ''));
 
@@ -1168,7 +1280,7 @@ function ve_remote_download_via_ytdlp(int $jobId, array $source): array
     $path = ve_remote_find_downloaded_file($directory);
 
     if ($exitCode !== 0 || !is_string($path) || $path === '' || !is_file($path)) {
-        throw new RuntimeException('yt-dlp could not download the remote video. ' . trim($output));
+        throw new RuntimeException(ve_remote_yt_dlp_failure_message('download', $output));
     }
 
     $finalized = ve_remote_finalize_downloaded_file($source, $path, 'yt-dlp-download.mp4');
@@ -1909,7 +2021,7 @@ function ve_remote_list_payload(int $userId): array
     return [
         'list' => $list,
         'bli' => $broken,
-        'folders_tree' => ve_video_folder_options_for_user($userId),
+        'folders_tree' => ve_remote_folder_options_for_user($userId),
         'slo' => ve_remote_remaining_slots($userId),
         'max' => (int) ve_remote_config()['max_queue_per_user'],
     ];
