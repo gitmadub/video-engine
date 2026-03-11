@@ -3323,10 +3323,14 @@ function ve_admin_storage_box_df_stats(array $volume): array
     }
 
     if (DIRECTORY_SEPARATOR !== '\\' && trim((string) ($tooling['driver'] ?? '')) === 'sshpass' && trim((string) ($tooling['sftp'] ?? '')) !== '') {
-        $command = 'printf ' . escapeshellarg("df .\nbye\n")
+        $passwordBase64 = base64_encode($password);
+        $command = 'PW=$(python3 - <<' . "'PY'\n"
+            . 'import base64' . "\n"
+            . 'print(base64.b64decode(' . var_export($passwordBase64, true) . ').decode(' . var_export('utf-8', true) . '), end=' . var_export('', true) . ')' . "\n"
+            . "PY\n"
+            . '); printf ' . escapeshellarg("df .\nbye\n")
             . ' | ' . escapeshellarg((string) $tooling['sshpass'])
-            . ' -p ' . escapeshellarg($password)
-            . ' ' . escapeshellarg((string) $tooling['sftp'])
+            . ' -p "$PW" ' . escapeshellarg((string) $tooling['sftp'])
             . ' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '
             . escapeshellarg($username . '@' . $host);
         [$exitCode, $output] = ve_video_run_command(['bash', '-lc', $command]);
