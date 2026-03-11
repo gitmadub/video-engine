@@ -11270,8 +11270,36 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
         $currentCpu = ve_admin_percent_label($current['cpu_percent'] ?? null, 'No sample');
         $currentMemory = ve_admin_percent_label($current['memory_percent'] ?? null, 'No sample');
         $currentDisk = ve_admin_percent_label($current['disk_percent'] ?? null, 'No sample');
+        $currentDiskBytes = ve_human_bytes((int) ($current['disk_used_bytes'] ?? 0)) . ' / ' . ve_human_bytes((int) ($current['disk_total_bytes'] ?? 0));
         $currentBandwidth = ve_human_bytes((int) ($current['network_total_rate_bytes'] ?? 0)) . '/s';
+        $attachedStorageRows = [];
+        $attachedStorageCount = 0;
         $jobRows = [];
+
+        foreach ($volumes as $volume) {
+            if (!is_array($volume)) {
+                continue;
+            }
+
+            $isAttachedStorageBox = (string) ($volume['backend_type'] ?? '') === 'webdav_box'
+                && (
+                    strtolower(trim((string) ($volume['delivery_domain'] ?? ''))) === strtolower(trim((string) ($node['domain'] ?? '')))
+                    || trim((string) ($volume['delivery_ip_address'] ?? '')) === trim((string) ($node['ip_address'] ?? ''))
+                );
+
+            if (!$isAttachedStorageBox) {
+                continue;
+            }
+
+            $attachedStorageCount++;
+            $attachedStorageRows[] = ['cells' => [
+                ve_admin_text_cell((string) ($volume['code'] ?? '')),
+                ve_admin_text_cell((string) ($volume['remote_host'] ?? ''), (string) ($volume['mount_path'] ?? '')),
+                ve_admin_status_cell((string) ($volume['health_status'] ?? 'healthy')),
+                ve_admin_text_cell(ve_human_bytes((int) ($volume['used_bytes'] ?? 0)) . ' / ' . ve_human_bytes((int) ($volume['capacity_bytes'] ?? 0))),
+                ve_admin_text_cell(ve_format_datetime_label((string) ($volume['last_checked_at'] ?? ''), 'Never')),
+            ]];
+        }
 
         foreach ($jobs as $row) {
             if (!is_array($row)) {
@@ -11288,7 +11316,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
             ]];
         }
 
-        return ve_admin_view_base_payload(
+        $payload = ve_admin_view_base_payload(
             'Processing node profile',
             'Provisioning state, live telemetry, and recent encode activity for ' . (string) ($node['domain'] ?? ('Node #' . $selectedNodeId)) . '.',
             [
@@ -11297,6 +11325,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                 ve_admin_metric_payload('Health', ucfirst((string) ($node['health_status'] ?? 'offline'))),
                 ve_admin_metric_payload('CPU now', $currentCpu),
                 ve_admin_metric_payload('RAM now', $currentMemory),
+                ve_admin_metric_payload('Storage now', $currentDiskBytes, $currentDisk),
                 ve_admin_metric_payload('Active jobs', (string) ($current['processing_jobs'] ?? 0)),
                 ve_admin_metric_payload('Bandwidth now', $currentBandwidth),
             ],
@@ -11340,9 +11369,11 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                     ['title' => 'Live capacity', 'items' => [
                         ['label' => 'CPU', 'value' => $currentCpu],
                         ['label' => 'RAM', 'value' => $currentMemory],
-                        ['label' => 'Disk', 'value' => $currentDisk],
+                        ['label' => 'Disk load', 'value' => $currentDisk],
+                        ['label' => 'Disk usage', 'value' => $currentDiskBytes],
                         ['label' => 'Network', 'value' => $currentBandwidth],
                         ['label' => 'Active jobs', 'value' => (string) ($current['processing_jobs'] ?? 0)],
+                        ['label' => 'Attached storage boxes', 'value' => (string) $attachedStorageCount],
                     ]],
                     ['title' => 'Update connection', 'form' => [
                         'action' => ve_admin_subsection_url('infra-processing-profile', $selectedNodeId, [], false),
@@ -11374,7 +11405,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                         ['key' => 'disk_percent', 'stroke' => '#d6d6d6', 'fill' => 'rgba(214,214,214,0.06)', 'label' => 'Disk', 'format' => 'percent'],
                         ['key' => 'network_total_rate_bytes', 'stroke' => '#ff9900', 'label' => 'Bandwidth', 'format' => 'bytes'],
                     ]), 'legend' => [
-                        ['label' => 'Disk now', 'value' => $currentDisk, 'color' => '#d6d6d6'],
+                        ['label' => 'Disk now', 'value' => $currentDiskBytes, 'color' => '#d6d6d6'],
                         ['label' => 'Bandwidth now', 'value' => $currentBandwidth, 'color' => '#ff9900'],
                     ]],
                     ['title' => 'Encode pressure', 'subtitle' => 'Concurrent encode jobs and host load across the latest samples.', 'chart' => ve_admin_chart_payload($historyPoints, [
@@ -11385,16 +11416,29 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                         ['label' => 'Load 1m', 'value' => ve_admin_number_label((float) ($current['load_1m'] ?? 0), 2), 'color' => '#8ad0ff'],
                     ]],
                 ]],
-                ['type' => 'cards', 'layout' => 'stack', 'cards' => [[
-                    'title' => 'Recent processing jobs',
-                    'table' => [
-                        'columns' => ['Video', 'Owner', 'Status', 'Stage', 'Message', 'Updated'],
-                        'rows' => $jobRows,
-                        'empty' => 'No remote encode jobs have been routed to this node yet.',
+                ['type' => 'cards', 'layout' => 'grid', 'cards' => [
+                    [
+                        'title' => 'Attached storage boxes',
+                        'table' => [
+                            'columns' => ['Code', 'Storage host', 'Health', 'Usage', 'Last check'],
+                            'rows' => $attachedStorageRows,
+                            'empty' => 'No delivery-mounted storage boxes are attached to this processing node.',
+                        ],
                     ],
-                ]]],
+                    [
+                        'title' => 'Recent processing jobs',
+                        'table' => [
+                            'columns' => ['Video', 'Owner', 'Status', 'Stage', 'Message', 'Updated'],
+                            'rows' => $jobRows,
+                            'empty' => 'No remote encode jobs have been routed to this node yet.',
+                        ],
+                    ],
+                ]],
             ]
         );
+        $payload['live_refresh_seconds'] = 10;
+
+        return $payload;
     }
 
     if ($activeSubview === 'infra-processing') {
@@ -11408,6 +11452,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
 
             $telemetry = json_decode((string) ($row['last_telemetry_json'] ?? '{}'), true);
             $telemetry = is_array($telemetry) ? $telemetry : [];
+            $storageLabel = ve_human_bytes((int) ($telemetry['disk_used_bytes'] ?? 0)) . ' / ' . ve_human_bytes((int) ($telemetry['disk_total_bytes'] ?? 0));
             $detailUrl = ve_admin_subsection_url('infra-processing-profile', (int) ($row['id'] ?? 0), [], true);
             $rows[] = ['cells' => [
                 ve_admin_link_cell((string) ($row['code'] ?? ''), $detailUrl, 'Open processing node profile'),
@@ -11416,6 +11461,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                 ve_admin_status_cell((string) ($row['health_status'] ?? 'offline')),
                 ve_admin_text_cell(ve_admin_percent_label($telemetry['cpu_percent'] ?? null, 'No sample')),
                 ve_admin_text_cell(ve_admin_percent_label($telemetry['memory_percent'] ?? null, 'No sample')),
+                ve_admin_text_cell($storageLabel, ve_admin_percent_label($telemetry['disk_percent'] ?? null, 'No sample')),
                 ve_admin_text_cell((string) ($telemetry['processing_jobs'] ?? 0)),
                 ve_admin_text_cell(ve_format_datetime_label((string) ($row['last_telemetry_at'] ?? ''), 'Never')),
             ]];
@@ -11475,7 +11521,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                     'empty' => 'No processing jobs have been offloaded yet.',
                 ]],
             ]],
-            ['type' => 'table', 'columns' => ['Code', 'Node', 'Provisioning', 'Health', 'CPU', 'RAM', 'Jobs', 'Last sample'], 'rows' => $rows, 'empty' => 'No processing nodes registered yet.'],
+            ['type' => 'table', 'columns' => ['Code', 'Node', 'Provisioning', 'Health', 'CPU', 'RAM', 'Storage', 'Jobs', 'Last sample'], 'rows' => $rows, 'empty' => 'No processing nodes registered yet.'],
         ]);
     }
 
@@ -11757,7 +11803,7 @@ function ve_admin_backend_infrastructure_view_payload(string $activeSubview): ar
                 ]],
             ]
         );
-        $payload['live_refresh_seconds'] = 20;
+        $payload['live_refresh_seconds'] = 10;
 
         return $payload;
     }

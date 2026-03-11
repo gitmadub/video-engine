@@ -132,32 +132,40 @@ processing_node_assert((string) ($node['provision_status'] ?? '') === 'ready', '
 processing_node_assert((string) ($node['health_status'] ?? '') === 'healthy', 'Provisioned processing node should be healthy after snapshot sync.');
 
 $fixturePath = ve_video_storage_path('tmp', 'processing-node-source.mp4');
-[$fixtureExitCode, $fixtureOutput] = ve_video_run_command([
-    (string) ve_video_config()['ffmpeg'],
-    '-y',
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-f',
-    'lavfi',
-    '-i',
-    'testsrc=size=1280x720:rate=24',
-    '-f',
-    'lavfi',
-    '-i',
-    'sine=frequency=1000:sample_rate=48000',
-    '-t',
-    '2',
-    '-c:v',
-    'libx264',
-    '-pix_fmt',
-    'yuv420p',
-    '-c:a',
-    'aac',
-    '-shortest',
-    $fixturePath,
-]);
-processing_node_assert($fixtureExitCode === 0 && is_file($fixturePath), 'Expected ffmpeg to create the processing source fixture. ' . $fixtureOutput);
+$sampleFixture = $root . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'public-api-upload.mp4';
+
+if (is_file($sampleFixture)) {
+    copy($sampleFixture, $fixturePath);
+}
+
+if (!is_file($fixturePath)) {
+    [$fixtureExitCode, $fixtureOutput] = ve_video_run_command([
+        (string) ve_video_config()['ffmpeg'],
+        '-y',
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc=size=1280x720:rate=24',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=1000:sample_rate=48000',
+        '-t',
+        '2',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        '-shortest',
+        $fixturePath,
+    ]);
+    processing_node_assert($fixtureExitCode === 0 && is_file($fixturePath), 'Expected ffmpeg to create the processing source fixture. ' . $fixtureOutput);
+}
 
 $now = ve_now();
 ve_db()->prepare(

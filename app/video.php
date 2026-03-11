@@ -319,12 +319,34 @@ function ve_video_upload_limit_bytes(): int
     return min($limits);
 }
 
+function ve_video_default_storage_relative_dir(string $publicId): string
+{
+    $publicId = trim($publicId);
+
+    if ($publicId === '') {
+        return '';
+    }
+
+    $normalized = strtolower($publicId);
+    $levelOne = substr($normalized, 0, 2);
+    $levelTwo = substr($normalized, 2, 2);
+    $segments = array_values(array_filter([$levelOne, $levelTwo, $publicId], static fn ($segment): bool => $segment !== ''));
+
+    return implode('/', $segments);
+}
+
+function ve_video_local_library_directory(string $publicId): string
+{
+    return ve_video_storage_path('library', $publicId);
+}
+
 function ve_video_library_directory(string $publicId): string
 {
     $assignment = [
         'root' => ve_video_storage_path('library'),
-        'relative_dir' => $publicId,
+        'relative_dir' => ve_video_default_storage_relative_dir($publicId),
     ];
+    $legacyDirectory = ve_video_local_library_directory($publicId);
 
     if (function_exists('ve_admin_storage_box_assignment_for_video')) {
         try {
@@ -347,10 +369,16 @@ function ve_video_library_directory(string $publicId): string
     }
 
     if ($relativeDir === '') {
-        $relativeDir = $publicId;
+        $relativeDir = ve_video_default_storage_relative_dir($publicId);
     }
 
     $directory = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relativeDir);
+    $parentDirectory = dirname($directory);
+
+    if (is_dir($legacyDirectory) && !is_dir($parentDirectory)) {
+        return $legacyDirectory;
+    }
+
     ve_ensure_directory($directory);
     ve_video_normalize_library_directory($directory);
 
@@ -1874,7 +1902,7 @@ function ve_video_insert_queued_record(int $userId, array $validated, string $ti
     $now = ve_now();
     $folderId = ve_video_normalize_folder_id($userId, $folderId);
     $storageVolumeId = 0;
-    $storageRelativeDir = $publicId;
+    $storageRelativeDir = ve_video_default_storage_relative_dir($publicId);
 
     if (function_exists('ve_admin_storage_box_pick_for_new_video')) {
         try {
@@ -3040,7 +3068,7 @@ HTML;
     <div class="player-wrap container">
         <div style="--aspect-ratio: 16/9;" class="ve-folder-stage">
             <div class="ve-folder-stage-copy">
-                <img src="{$logoUrl}" alt="DoodStream">
+                <img src="{$logoUrl}" alt="FileHost.net">
                 <h1>{$safeFolderName}</h1>
                 <p>Shared from the secure video dashboard with the same watch links and embedded playback flow.</p>
             </div>
@@ -9253,7 +9281,7 @@ function ve_render_secure_watch_page(string $publicId): void
     $sizeLabel = $displayBytes > 0 ? ve_video_format_bytes($displayBytes) : 'Protected stream';
     $uploadDateLabel = ve_video_legacy_date_label((string) ($video['created_at'] ?? ''));
     $statusCopy = ve_video_public_status_message($video);
-    $pageTitle = ve_h($title . ' - DoodStream');
+    $pageTitle = ve_h($title . ' - FileHost.net');
     $safeTitle = ve_h($title);
     $safeLength = ve_h($lengthLabel);
     $safeSize = ve_h($sizeLabel);
@@ -9385,7 +9413,7 @@ HTML;
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>{$pageTitle}</title>
     <meta name="og:title" content="{$safeTitle}">
-    <meta name="og:sitename" content="DoodStream.com">
+    <meta name="og:sitename" content="FileHost.net">
     <meta name="og:image" content="{$posterMeta}">
     <meta name="twitter:image" content="{$posterMeta}">
     <meta name="robots" content="nofollow, noindex">
@@ -12183,7 +12211,7 @@ function ve_render_videos_dashboard_page(): void
     $safeUploaderType = ve_h($uploaderType);
 
     $html = (string) file_get_contents(ve_root_path('dashboard', 'index.html'));
-    $html = str_replace('<title>Dashboard - DoodStream</title>', '<title>My Videos - DoodStream</title>', $html);
+    $html = str_replace('<title>Dashboard - FileHost.net</title>', '<title>My Videos - FileHost.net</title>', $html);
     $html = str_replace('href="/dashboard/videos"', 'href="/videos"', $html);
 
     $headAssets = <<<'HTML'

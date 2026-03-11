@@ -94,6 +94,10 @@ $video = ve_video_insert_queued_record($adminId, [
 storage_box_assert(is_array($video), 'Expected queued video fixture to be created.');
 storage_box_assert((int) ($video['storage_volume_id'] ?? 0) === $volumeId, 'Expected new videos to use the active storage box.');
 storage_box_assert(trim((string) ($video['storage_relative_dir'] ?? '')) !== '', 'Expected a storage relative directory to be stored.');
+storage_box_assert(
+    (string) ($video['storage_relative_dir'] ?? '') === ve_video_default_storage_relative_dir((string) ($video['public_id'] ?? '')),
+    'Expected new videos to use the hierarchical storage-box directory layout.'
+);
 
 $assignment = ve_admin_storage_box_assignment_for_video($video);
 storage_box_assert((int) ($assignment['storage_volume_id'] ?? 0) === $volumeId, 'Expected storage assignment helper to resolve the storage box.');
