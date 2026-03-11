@@ -2329,11 +2329,8 @@
             var existingFolderIds = normalizeIdList(this.folder_ids);
 
             syncSelectionFromDom(this);
-
-            if (!this.file_ids.length && !this.folder_ids.length) {
-                this.file_ids = existingFileIds;
-                this.folder_ids = existingFolderIds;
-            }
+            this.file_ids = normalizeIdList(existingFileIds.concat(this.file_ids || []));
+            this.folder_ids = normalizeIdList(existingFolderIds.concat(this.folder_ids || []));
 
             submitVisibilityChange(this, {
                 fileIds: normalizeIdList(this.file_ids),
@@ -2346,11 +2343,8 @@
             var existingFolderIds = normalizeIdList(this.folder_ids);
 
             syncSelectionFromDom(this);
-
-            if (!this.file_ids.length && !this.folder_ids.length) {
-                this.file_ids = existingFileIds;
-                this.folder_ids = existingFolderIds;
-            }
+            this.file_ids = normalizeIdList(existingFileIds.concat(this.file_ids || []));
+            this.folder_ids = normalizeIdList(existingFolderIds.concat(this.folder_ids || []));
 
             submitVisibilityChange(this, {
                 fileIds: normalizeIdList(this.file_ids),

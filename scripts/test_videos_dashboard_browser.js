@@ -437,7 +437,7 @@ function findVideoManagerInstance(node) {
       throw new Error(`Clicking outside file rows should clear the selection. Received: ${JSON.stringify(selectionResetState)}`);
     }
 
-    await page.evaluate(() => {
+    await page.evaluate((folderId) => {
       const rows = Array.from(document.querySelectorAll('.file_list .video.item')).slice(0, 2);
       const app = document.getElementById('app');
       const root = app && app.__vue__;
@@ -572,7 +572,7 @@ function findVideoManagerInstance(node) {
       throw new Error(`Current folder share link was not rendered correctly. Received: ${currentFolderShareLink || '(empty)'}`);
     }
 
-    await page.evaluate(() => {
+    await page.evaluate((folderId) => {
       const toggle = document.querySelector('#sharing [data-share-folder-toggle]');
 
       if (!toggle) {
@@ -614,7 +614,13 @@ function findVideoManagerInstance(node) {
       throw new Error(`Breadcrumb navigation should issue at most one /videos/actions request. Seen: ${JSON.stringify(rootFolderRequests)}`);
     }
 
-    await page.evaluate(() => {
+    const toggledFolderId = await page.locator('.file_list .folder.item').first().getAttribute('data-folder');
+
+    if (!toggledFolderId) {
+      throw new Error('Unable to resolve the target folder id for the visibility regression.');
+    }
+
+    await page.evaluate((folderId) => {
       function findVideoManagerInstance(node) {
         const queue = node && node.$children ? node.$children.slice() : [];
 
@@ -651,7 +657,7 @@ function findVideoManagerInstance(node) {
       const videoPublic = document.querySelector('.file_list .video.item .public');
       return Boolean(videoPublic && (videoPublic.textContent || '').replace(/\s+/g, ' ').includes('No'));
     });
-    await page.evaluate(() => {
+    await page.evaluate((folderId) => {
       function findVideoManagerInstance(node) {
         const queue = node && node.$children ? node.$children.slice() : [];
 
@@ -688,7 +694,7 @@ function findVideoManagerInstance(node) {
       return Boolean(videoPublic && (videoPublic.textContent || '').replace(/\s+/g, ' ').includes('Yes'));
     });
 
-    await page.evaluate(() => {
+    await page.evaluate((folderId) => {
       function findVideoManagerInstance(node) {
         const queue = node && node.$children ? node.$children.slice() : [];
 
@@ -710,21 +716,56 @@ function findVideoManagerInstance(node) {
       const app = document.getElementById('app');
       const root = app && app.__vue__;
       const vm = findVideoManagerInstance(root);
-      const firstFolder = vm && vm.data && Array.isArray(vm.data.folders) ? vm.data.folders[0] : null;
 
-      if (!vm || !firstFolder) {
+      if (!vm || !folderId) {
         throw new Error('Unable to prepare the folder visibility regression.');
       }
 
       vm.file_ids = [];
-      vm.folder_ids = [String(firstFolder.fld_id)];
+      vm.folder_ids = [String(folderId || '')];
       vm.set_private();
-    });
-    await page.waitForFunction(() => {
-      const folderPublic = document.querySelector('.file_list .folder.item .public');
-      return Boolean(folderPublic && (folderPublic.textContent || '').replace(/\s+/g, ' ').includes('No'));
-    });
-    await page.evaluate(() => {
+    }, toggledFolderId);
+    try {
+      await page.waitForFunction((folderId) => {
+        const folderRow = document.querySelector(`.file_list .folder.item[data-folder="${String(folderId || '')}"]`);
+        const folderPublic = folderRow ? folderRow.querySelector('.public') : null;
+        return Boolean(folderPublic && (folderPublic.textContent || '').replace(/\s+/g, ' ').includes('No'));
+      }, toggledFolderId, { timeout: 10000 });
+    } catch (error) {
+      const folderPrivateState = await page.evaluate((folderId) => {
+        const app = document.getElementById('app');
+        const root = app && app.__vue__;
+        function findVideoManagerInstance(node) {
+          const queue = node && node.$children ? node.$children.slice() : [];
+          while (queue.length > 0) {
+            const child = queue.shift();
+            if (child && child.$options && (child.$options._componentTag === 'video-manager' || child.$options.name === 'video-manager')) {
+              return child;
+            }
+            if (child && child.$children) {
+              queue.push(...child.$children);
+            }
+          }
+          return null;
+        }
+        const vm = findVideoManagerInstance(root);
+        const folderRow = document.querySelector(`.file_list .folder.item[data-folder="${String(folderId || '')}"]`);
+        const folderPublic = folderRow ? folderRow.querySelector('.public') : null;
+
+        return {
+          folderId: String(folderId || ''),
+          exists: !!folderRow,
+          currentFolder: vm ? String(vm.current_folder || '') : '',
+          visibleFolderIds: Array.from(document.querySelectorAll('.file_list .folder.item')).map((node) => String(node.getAttribute('data-folder') || '')),
+          publicText: folderPublic ? (folderPublic.textContent || '').replace(/\s+/g, ' ').trim() : '',
+          rowText: folderRow ? (folderRow.textContent || '').replace(/\s+/g, ' ').trim() : '',
+        };
+      }, toggledFolderId);
+
+      throw new Error(`Folder visibility did not switch to private. State=${JSON.stringify(folderPrivateState)}`);
+    }
+
+    await page.evaluate((folderId) => {
       function findVideoManagerInstance(node) {
         const queue = node && node.$children ? node.$children.slice() : [];
 
@@ -746,20 +787,34 @@ function findVideoManagerInstance(node) {
       const app = document.getElementById('app');
       const root = app && app.__vue__;
       const vm = findVideoManagerInstance(root);
-      const firstFolder = vm && vm.data && Array.isArray(vm.data.folders) ? vm.data.folders[0] : null;
-
-      if (!vm || !firstFolder) {
+      if (!vm || !folderId) {
         throw new Error('Unable to restore folder visibility in the regression.');
       }
 
       vm.file_ids = [];
-      vm.folder_ids = [String(firstFolder.fld_id)];
+      vm.folder_ids = [String(folderId || '')];
       vm.set_public();
-    });
-    await page.waitForFunction(() => {
-      const folderPublic = document.querySelector('.file_list .folder.item .public');
-      return Boolean(folderPublic && (folderPublic.textContent || '').replace(/\s+/g, ' ').includes('Yes'));
-    });
+    }, toggledFolderId);
+    try {
+      await page.waitForFunction((folderId) => {
+        const folderRow = document.querySelector(`.file_list .folder.item[data-folder="${String(folderId || '')}"]`);
+        const folderPublic = folderRow ? folderRow.querySelector('.public') : null;
+        return Boolean(folderPublic && (folderPublic.textContent || '').replace(/\s+/g, ' ').includes('Yes'));
+      }, toggledFolderId, { timeout: 10000 });
+    } catch (error) {
+      const folderPublicState = await page.evaluate((folderId) => {
+        const folderRow = document.querySelector(`.file_list .folder.item[data-folder="${String(folderId || '')}"]`);
+        const folderPublic = folderRow ? folderRow.querySelector('.public') : null;
+
+        return {
+          exists: !!folderRow,
+          publicText: folderPublic ? (folderPublic.textContent || '').replace(/\s+/g, ' ').trim() : '',
+          rowText: folderRow ? (folderRow.textContent || '').replace(/\s+/g, ' ').trim() : '',
+        };
+      }, toggledFolderId);
+
+      throw new Error(`Folder visibility did not switch back to public. State=${JSON.stringify(folderPublicState)}`);
+    }
 
     await page.evaluate(() => {
       const app = document.getElementById('app');
