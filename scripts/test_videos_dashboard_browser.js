@@ -370,8 +370,10 @@ function findVideoManagerInstance(node) {
       payload.append('to_folder', String(folderId || ''));
       payload.append('token', String(vm.token || ''));
       fileIds.forEach((id) => payload.append('file_id[]', id));
+      const basePath = window.VE_BASE_PATH || '';
+      const actionsUrl = `${basePath}/videos/actions`;
 
-      const response = await fetch('/videos/actions', {
+      const response = await fetch(actionsUrl, {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
