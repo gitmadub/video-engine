@@ -2309,11 +2309,17 @@ function ve_admin_processing_node_tooling(): array
         '/usr/bin/scp',
         '/usr/local/bin/scp',
     ]) : null;
+    $sftp = function_exists('ve_video_find_binary') ? ve_video_find_binary([
+        'sftp',
+        '/usr/bin/sftp',
+        '/usr/local/bin/sftp',
+    ]) : null;
 
     $tooling = [
         'driver' => ($sshpass !== null && $ssh !== null && $scp !== null) ? 'sshpass' : '',
         'ssh' => $ssh,
         'scp' => $scp,
+        'sftp' => $sftp,
         'sshpass' => $sshpass,
     ];
 
@@ -3301,42 +3307,66 @@ function ve_admin_storage_box_run_remote(array $volume, string $command, int $ti
 
 function ve_admin_storage_box_df_stats(array $volume): array
 {
-    [$exitCode, $output] = ve_admin_storage_box_run_remote(
-        $volume,
-        'target="${HOME:-.}"; if command -v df >/dev/null 2>&1; then df -Pk "$target" 2>/dev/null || df -Pk . 2>/dev/null; else exit 12; fi',
-        45
-    );
+    $tooling = ve_admin_processing_node_tooling();
+    $host = trim((string) ($volume['remote_host'] ?? ''));
+    $username = trim((string) ($volume['remote_username'] ?? ''));
+    $password = '';
+
+    try {
+        $password = ve_decrypt_string((string) ($volume['remote_password_encrypted'] ?? ''));
+    } catch (Throwable) {
+        $password = '';
+    }
+
+    if ($host === '' || $username === '' || $password === '') {
+        throw new RuntimeException('Storage Box SSH credentials are incomplete.');
+    }
+
+    if (DIRECTORY_SEPARATOR !== '\\' && trim((string) ($tooling['driver'] ?? '')) === 'sshpass' && trim((string) ($tooling['sftp'] ?? '')) !== '') {
+        $command = 'printf ' . escapeshellarg("df .\nbye\n")
+            . ' | ' . escapeshellarg((string) $tooling['sshpass'])
+            . ' -p ' . escapeshellarg($password)
+            . ' ' . escapeshellarg((string) $tooling['sftp'])
+            . ' -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '
+            . escapeshellarg($username . '@' . $host);
+        [$exitCode, $output] = ve_video_run_command(['bash', '-lc', $command]);
+    } else {
+        [$exitCode, $output] = ve_admin_storage_box_run_remote(
+            $volume,
+            'target="${HOME:-.}"; if command -v df >/dev/null 2>&1; then df -Pk "$target" 2>/dev/null || df -Pk . 2>/dev/null; else exit 12; fi',
+            45
+        );
+    }
 
     if ($exitCode !== 0) {
         throw new RuntimeException('Unable to read Storage Box disk usage over SSH. ' . trim($output));
     }
 
     $lines = preg_split('/\r\n|\r|\n/', trim($output)) ?: [];
-    $dataLine = '';
+    $blockCount = 0;
+    $usedBlocks = 0;
+    $availableBlocks = 0;
+    $percentRaw = '0%';
 
-    foreach (array_reverse($lines) as $line) {
+    foreach ($lines as $line) {
         $line = trim((string) $line);
-        if ($line !== '' && !str_starts_with(strtolower($line), 'filesystem')) {
-            $dataLine = $line;
+
+        if ($line === '' || str_contains($line, 'Size') && str_contains($line, 'Used')) {
+            continue;
+        }
+
+        if (preg_match('/^\s*([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)%\s*$/', $line, $matches)) {
+            $blockCount = max(0, (int) ($matches[1] ?? 0));
+            $usedBlocks = max(0, (int) ($matches[2] ?? 0));
+            $availableBlocks = max(0, (int) ($matches[3] ?? 0));
+            $percentRaw = (string) ($matches[5] ?? '0');
             break;
         }
     }
 
-    if ($dataLine === '') {
-        throw new RuntimeException('Storage Box disk usage output was empty.');
-    }
-
-    $parts = preg_split('/\s+/', $dataLine);
-
-    if (!is_array($parts) || count($parts) < 6) {
+    if ($blockCount <= 0 && $usedBlocks <= 0 && $availableBlocks <= 0) {
         throw new RuntimeException('Storage Box disk usage output could not be parsed.');
     }
-
-    $parts = array_values($parts);
-    $blockCount = max(0, (int) ($parts[count($parts) - 5] ?? 0));
-    $usedBlocks = max(0, (int) ($parts[count($parts) - 4] ?? 0));
-    $availableBlocks = max(0, (int) ($parts[count($parts) - 3] ?? 0));
-    $percentRaw = (string) ($parts[count($parts) - 2] ?? '0%');
 
     return [
         'capacity_bytes' => $blockCount * 1024,
