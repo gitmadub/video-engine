@@ -108,8 +108,31 @@ function videos_actions_wait_for_server(string $baseUrl, int $attempts = 80): vo
     throw new RuntimeException('Built-in server did not start in time.');
 }
 
+function videos_actions_is_windows(): bool
+{
+    return DIRECTORY_SEPARATOR === '\\';
+}
+
 function videos_actions_find_listening_pid(int $port): ?int
 {
+    if (!videos_actions_is_windows()) {
+        $output = shell_exec('lsof -ti tcp:' . (int) $port . ' -sTCP:LISTEN 2>/dev/null');
+
+        if (!is_string($output) || trim($output) === '') {
+            return null;
+        }
+
+        foreach (preg_split('/\R/', trim($output)) as $line) {
+            $line = trim((string) $line);
+
+            if (ctype_digit($line) && (int) $line > 0) {
+                return (int) $line;
+            }
+        }
+
+        return null;
+    }
+
     $output = shell_exec('netstat -ano -p tcp | findstr :' . $port);
 
     if (!is_string($output) || trim($output) === '') {
@@ -145,6 +168,56 @@ function videos_actions_find_listening_pid(int $port): ?int
     }
 
     return null;
+}
+
+function videos_actions_start_server(string $php, string $root, int $port, array $env): ?int
+{
+    if (videos_actions_is_windows()) {
+        $envPrefix = '';
+
+        foreach ($env as $key => $value) {
+            $envPrefix .= 'set "' . $key . '=' . str_replace('"', '""', $value) . '" && ';
+        }
+
+        $command = 'cmd /c "' . $envPrefix . 'cd /d "' . $root . '" && start "" /b cmd /c ""' . $php . '" -S 127.0.0.1:' . $port . ' router.php >NUL 2>&1"""';
+        pclose(popen($command, 'r'));
+
+        return null;
+    }
+
+    $envPrefix = [];
+
+    foreach ($env as $key => $value) {
+        if (!preg_match('/^[A-Z0-9_]+$/i', (string) $key)) {
+            continue;
+        }
+
+        $envPrefix[] = $key . '=' . escapeshellarg((string) $value);
+    }
+
+    $command = 'cd ' . escapeshellarg($root)
+        . ' && ' . implode(' ', $envPrefix)
+        . ' ' . escapeshellarg($php)
+        . ' -S 127.0.0.1:' . $port
+        . ' router.php >/dev/null 2>&1 & echo $!';
+    $output = shell_exec($command);
+    $pid = trim((string) $output);
+
+    return ctype_digit($pid) && (int) $pid > 0 ? (int) $pid : null;
+}
+
+function videos_actions_stop_server(?int $serverPid): void
+{
+    if (!is_int($serverPid) || $serverPid <= 0) {
+        return;
+    }
+
+    if (videos_actions_is_windows()) {
+        shell_exec('taskkill /PID ' . $serverPid . ' /T /F >NUL 2>NUL');
+        return;
+    }
+
+    shell_exec('kill ' . $serverPid . ' >/dev/null 2>&1');
 }
 
 function videos_actions_pick_port(): int
@@ -251,16 +324,9 @@ $bulkVideoId = videos_actions_insert_ready_video($pdo, $userId, 'bulkvideo02', '
 $serverPid = null;
 
 try {
-    $envPrefix = '';
-
-    foreach ($env as $key => $value) {
-        $envPrefix .= 'set "' . $key . '=' . str_replace('"', '""', $value) . '" && ';
-    }
-
-    $command = 'cmd /c "' . $envPrefix . 'cd /d "' . $root . '" && start "" /b cmd /c ""' . $php . '" -S 127.0.0.1:' . $port . ' router.php >NUL 2>&1"""';
-    pclose(popen($command, 'r'));
+    $serverPid = videos_actions_start_server($php, $root, $port, $env);
     videos_actions_wait_for_server($baseUrl);
-    $serverPid = videos_actions_find_listening_pid($port);
+    $serverPid = $serverPid ?? videos_actions_find_listening_pid($port);
     videos_actions_assert(is_int($serverPid) && $serverPid > 0, 'Videos actions test server PID could not be resolved.');
     echo "videos actions server ready\n";
 
@@ -628,7 +694,5 @@ try {
 
     echo "videos dashboard actions ok\n";
 } finally {
-    if (is_int($serverPid) && $serverPid > 0) {
-        shell_exec('taskkill /PID ' . $serverPid . ' /T /F >NUL 2>NUL');
-    }
+    videos_actions_stop_server($serverPid);
 }
