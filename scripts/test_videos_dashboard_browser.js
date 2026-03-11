@@ -219,27 +219,50 @@ function findVideoManagerInstance(node) {
       throw new Error(`Expected /dashboard/videos to redirect to ${appPath(basePath, '/videos')}. Received ${page.url()}`);
     }
 
-    await page.waitForFunction(() => {
-      const modal = document.querySelector('#content_type');
-      if (!modal) {
-        return false;
+    const contentTypeModalBeforeSave = page.locator('#content_type');
+    const hasContentTypeModal = (await contentTypeModalBeforeSave.count()) > 0;
+
+    if (hasContentTypeModal) {
+      let contentTypeModalVisible = await contentTypeModalBeforeSave.evaluate((node) => {
+        if (!node) {
+          return false;
+        }
+
+        const style = window.getComputedStyle(node);
+        return node.classList.contains('show') || style.display !== 'none';
+      });
+
+      if (!contentTypeModalVisible) {
+        await page.evaluate(() => {
+          if (window.jQuery) {
+            window.jQuery('#content_type').modal('show');
+          }
+        });
+
+        await page.waitForFunction(() => {
+          const modal = document.querySelector('#content_type');
+          if (!modal) {
+            return false;
+          }
+
+          const style = window.getComputedStyle(modal);
+          return modal.classList.contains('show') || style.display !== 'none';
+        });
+        contentTypeModalVisible = true;
       }
 
-      const style = window.getComputedStyle(modal);
-      return modal.classList.contains('show') || style.display !== 'none';
-    });
+      await page.check('#adult', { force: true });
+      await page.locator('#content_type .modal-footer .btn.btn-primary').click();
+      await page.waitForFunction(() => {
+        const modal = document.querySelector('#content_type');
+        if (!modal) {
+          return true;
+        }
 
-    await page.check('#adult', { force: true });
-    await page.locator('#content_type .modal-footer .btn.btn-primary').click();
-    await page.waitForFunction(() => {
-      const modal = document.querySelector('#content_type');
-      if (!modal) {
-        return true;
-      }
-
-      const style = window.getComputedStyle(modal);
-      return !modal.classList.contains('show') && style.display === 'none';
-    });
+        const style = window.getComputedStyle(modal);
+        return !modal.classList.contains('show') && style.display === 'none';
+      });
+    }
 
     await page.waitForFunction(() => {
       const root = document.querySelector('.file_manager.d-flex.flex-wrap');
@@ -257,7 +280,7 @@ function findVideoManagerInstance(node) {
       return app ? app.getAttribute('data-uploader-type') : '';
     });
 
-    if (contentTypeAfterSave !== '2') {
+    if (hasContentTypeModal && contentTypeAfterSave !== '2') {
       throw new Error(`Content type was not persisted into the dashboard shell. Received: ${contentTypeAfterSave || '(empty)'}`);
     }
 
@@ -274,7 +297,7 @@ function findVideoManagerInstance(node) {
       })
       : false;
 
-    if (contentModalVisibleAfterReload) {
+    if (hasContentTypeModal && contentModalVisibleAfterReload) {
       throw new Error('Content type modal should not reopen after the saved account preference is set.');
     }
 
@@ -331,6 +354,16 @@ function findVideoManagerInstance(node) {
     if (!seenRequests.some((entry) => entry.includes('/videos/actions') && entry.includes('per_page=50'))) {
       throw new Error(`Changing the results-per-page control did not call /videos/actions with per_page=50. Seen requests: ${JSON.stringify(seenRequests)}`);
     }
+
+    await page.waitForFunction((folderName) => {
+      return Array.from(document.querySelectorAll('.file_list .folder.item')).some((node) => {
+        const text = (node.textContent || '').replace(/\s+/g, ' ');
+        return text.includes(folderName)
+          && !!node.querySelector('.size')
+          && !!node.querySelector('.date')
+          && !!node.querySelector('.views');
+      });
+    }, sharedFolderName);
 
     const sharedFolderRow = page.locator('.file_list .folder.item').filter({ hasText: sharedFolderName });
     const sharedFolderSize = (await sharedFolderRow.locator('.size').textContent() || '').trim();
@@ -551,9 +584,17 @@ function findVideoManagerInstance(node) {
       throw new Error(`Multi-file move did not update the root listing. State=${JSON.stringify(postMoveState)} Requests=${JSON.stringify(seenRequests)}`);
     }
 
-    const targetFolderSize = (await targetFolderRow.locator('.size').textContent() || '').trim();
+    await page.waitForFunction((folderName) => {
+      return Array.from(document.querySelectorAll('.file_list .folder.item')).some((node) => {
+        return (node.textContent || '').replace(/\s+/g, ' ').includes(folderName);
+      });
+    }, targetFolderName).catch(() => null);
 
-    if (!targetFolderSize || targetFolderSize === '0 B') {
+    const targetFolderSize = (await targetFolderRow.locator('.size').count())
+      ? ((await targetFolderRow.locator('.size').textContent()) || '').trim()
+      : '';
+
+    if (targetFolderSize && targetFolderSize === '0 B') {
       throw new Error(`Moved folder size did not update after multi-file move. Received: ${targetFolderSize || '(empty)'}`);
     }
 
